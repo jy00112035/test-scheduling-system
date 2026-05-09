@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.vscode/
+.idea/
+*.log
+.DS_Store
+backend/target/
+backend/.idea/
+backend/*.iml
+*.class
+*.jar
+*.war
+*.iml
