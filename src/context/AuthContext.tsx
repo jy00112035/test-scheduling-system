@@ -5,6 +5,7 @@ interface User {
   username: string;
   role: string;
   displayName: string;
+  testType?: string;
 }
 
 interface AuthContextType {
@@ -41,6 +42,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       username: data.username,
       role: data.role,
       displayName: data.displayName,
+      testType: data.testType,
     };
     setUser(userData);
     localStorage.setItem('user', JSON.stringify(userData));

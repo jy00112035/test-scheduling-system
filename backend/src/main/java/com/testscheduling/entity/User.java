@@ -28,6 +28,8 @@ public class User {
 
     private String displayName;
 
+    private String testType;
+
     private Boolean enabled = true;
 
     private LocalDateTime createdAt;

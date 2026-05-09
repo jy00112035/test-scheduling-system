@@ -1,7 +1,7 @@
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import { useAuth } from './AuthContext';
 
-export type UserRole = 'testManager' | 'resourceManager' | 'projectManager' | 'testExecutor' | 'fieldAdmin';
+export type UserRole = 'testManager' | 'resourceManager' | 'projectManager' | 'testExecutor' | 'fieldAdmin' | 'testLead';
 
 interface UserRoleContextType {
   role: UserRole;
@@ -99,6 +99,18 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
       'adjustTestCycle',
       'manageBaseFields',
       'viewBaseConfig',
+      'personalCenter',
+    ],
+    testLead: [
+      'viewDashboard',
+      'viewTaskKanban',
+      'submitTestDemand',
+      'editTestDemand',
+      'deleteTestDemand',
+      'closeTestDemand',
+      'viewTestDemands',
+      'viewReports',
+      'manageDailyAvailability',
       'personalCenter',
     ],
   };

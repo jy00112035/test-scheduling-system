@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Tag, Space, Alert, Modal, message, InputNumber, Descriptions, Divider, Popconfirm, DatePicker } from 'antd';
+import { Card, Button, Tag, Space, Alert, Modal, message, InputNumber, Descriptions, Divider, Popconfirm, DatePicker, Popover, Select, Checkbox } from 'antd';
 import {
   RobotOutlined,
   CheckCircleOutlined,
@@ -9,9 +9,11 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '../services/api';
+import { useUserRole } from '../context/UserRoleContext';
+import { useAuth } from '../context/AuthContext';
+import { DailyAvailabilityStatus, DailyStatusLabels, DailyStatusColors } from '../types';
 
 const { confirm } = Modal;
-const { RangePicker } = DatePicker;
 
 interface ScheduleItem {
   id: number;
@@ -22,6 +24,7 @@ interface ScheduleItem {
   versionType: string;
   demandId?: number;
   testManager?: string;
+  published?: boolean;
 }
 
 const ScheduleWorkbench: React.FC = () => {
@@ -31,7 +34,6 @@ const ScheduleWorkbench: React.FC = () => {
   const [selectedDemand, setSelectedDemand] = useState<any>(null);
   const [hasConflicts, setHasConflicts] = useState(false);
   const [conflictDetails, setConflictDetails] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
   const [weekViewDate, setWeekViewDate] = useState<dayjs.Dayjs>(dayjs());
 
   // 分配弹窗相关状态
@@ -47,12 +49,31 @@ const ScheduleWorkbench: React.FC = () => {
   const [editPercentage, setEditPercentage] = useState(100);
   const [editLoading, setEditLoading] = useState(false);
 
+  // 调度卡片拖拽转移状态
+  const [draggedSchedule, setDraggedSchedule] = useState<ScheduleItem | null>(null);
+
+  // 每日可用状态
+  const [dailyStatuses, setDailyStatuses] = useState<Map<string, string>>(new Map());
+  const [statusPopoverOpen, setStatusPopoverOpen] = useState<string | null>(null);
+  const [filterTestTypes, setFilterTestTypes] = useState<string[]>([]);
+  const [filterCoeffMin, setFilterCoeffMin] = useState<number | null>(null);
+  const [filterCoeffMax, setFilterCoeffMax] = useState<number | null>(null);
+
+  // AI 推荐排班状态
+  const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [includeWeekends, setIncludeWeekends] = useState(false);
+  const [selectedDemandIds, setSelectedDemandIds] = useState<Set<number>>(new Set());
+  const [unfulfilledDemands, setUnfulfilledDemands] = useState<Set<number>>(new Set());
+  const [unfulfilledDetails, setUnfulfilledDetails] = useState<Array<{ product: string; shortage: number }>>([]);
+
+  const { hasPermission } = useUserRole();
+  const { user } = useAuth();
+
   useEffect(() => {
     fetchData();
   }, []);
 
   const fetchData = async () => {
-    setLoading(true);
     try {
       const [demandsData, schedulesData, staffData] = await Promise.all([
         api.getPendingDemands(),
@@ -72,10 +93,20 @@ const ScheduleWorkbench: React.FC = () => {
         testManager: s.testManager,
       })));
       setStaffs(staffData);
+
+      // 加载每日可用状态
+      try {
+        const startStr = weekDates[0].format('YYYY-MM-DD');
+        const endStr = weekDates[weekDates.length - 1].format('YYYY-MM-DD');
+        const statuses = await api.getDailyStatuses(startStr, endStr);
+        const map = new Map<string, string>();
+        statuses.forEach((s: any) => map.set(`${s.staffId}-${s.date}`, s.status));
+        setDailyStatuses(map);
+      } catch {
+        // 非关键，网格仍可正常工作
+      }
     } catch (error: any) {
       message.error(error.message || '获取数据失败');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -102,11 +133,282 @@ const ScheduleWorkbench: React.FC = () => {
     return getSchedulesForStaffAndDate(staffId, date).reduce((sum: number, s: any) => sum + s.percentage, 0);
   };
 
+  // 计算每个需求按测试类型的分配情况
+  const computeAllocationByTestType = (demand: any) => {
+    const result: Record<string, { demand: number; allocated: number }> = {};
+    // 从 manpowerDetails 初始化需求人天
+    if (demand.manpowerDetails && demand.manpowerDetails.length > 0) {
+      demand.manpowerDetails.forEach((d: any) => {
+        result[d.testType] = { demand: Number(d.manpowerDemand), allocated: 0 };
+      });
+    }
+    // 按 schedules 统计已分配人天（通过 staff.testType 归类）
+    const demandSchedules = schedules.filter(s => s.demandId === demand.id);
+    demandSchedules.forEach(s => {
+      const staff = staffs.find(st => st.id === s.staffId);
+      const tt = staff?.testType;
+      if (tt && result[tt]) {
+        result[tt].allocated += s.percentage / 100;
+      } else if (tt) {
+        result[tt] = { demand: 0, allocated: s.percentage / 100 };
+      }
+    });
+    return result;
+  };
+
+  const getDailyStatus = (staffId: number, date: string): DailyAvailabilityStatus | null => {
+    return dailyStatuses.get(`${staffId}-${date}`) as DailyAvailabilityStatus || null;
+  };
+
+  const isAvailableForAssignment = (staffId: number, date: string): boolean => {
+    const status = getDailyStatus(staffId, date);
+    return status === null || status === 'AVAILABLE';
+  };
+
+  const handleStatusChange = async (staff: any, date: string, newStatus: string) => {
+    try {
+      await api.setDailyStatus(staff.id, date, newStatus);
+      const key = `${staff.id}-${date}`;
+      const newMap = new Map(dailyStatuses);
+      if (newStatus === 'AVAILABLE') {
+        newMap.delete(key);
+      } else {
+        newMap.set(key, newStatus);
+      }
+      setDailyStatuses(newMap);
+      setStatusPopoverOpen(null);
+      message.success(`已将 ${staff.name} ${date} 状态设为「${DailyStatusLabels[newStatus as DailyAvailabilityStatus]}」`);
+    } catch (error: any) {
+      message.error(error.message || '状态更新失败');
+    }
+  };
+
   const handleAIRecommend = () => {
-    message.loading({ content: 'AI 正在生成推荐方案...', key: 'ai-recommend' });
-    setTimeout(() => {
-      message.success({ content: 'AI 推荐方案已生成！', key: 'ai-recommend' });
-    }, 2000);
+    // 自动勾选所有未发布的需求
+    const eligibleIds = demands
+      .filter(d => {
+        const demandSchedules = schedules.filter(s => s.demandId === d.id);
+        const published = demandSchedules.length > 0 && demandSchedules.every(s => s.published);
+        return !published && (d.status === 'pending' || d.status === 'scheduled');
+      })
+      .map(d => d.id);
+    setSelectedDemandIds(new Set(eligibleIds));
+    setAiModalOpen(true);
+  };
+
+  // 获取需求完整周期的所有日期（AI推荐排班使用，不受视图限制）
+  const getDemandDates = (demandStart: dayjs.Dayjs, demandEnd: dayjs.Dayjs): dayjs.Dayjs[] => {
+    const dates: dayjs.Dayjs[] = [];
+    let current = demandStart;
+    while (current.isBefore(demandEnd) || current.isSame(demandEnd, 'day')) {
+      dates.push(current);
+      current = current.add(1, 'day');
+    }
+    return dates;
+  };
+
+  // 获取当天可用人员，按剩余容量降序排列
+  const getAvailableStaffForDate = (dateStr: string, loadMap: Map<string, number>, activeStaffs: any[]) => {
+    return activeStaffs
+      .filter(s => isAvailableForAssignment(s.id, dateStr))
+      .map(s => {
+        const key = `${s.id}-${dateStr}`;
+        const used = loadMap.get(key) || 0;
+        const capacity = Math.floor((s.currentCoefficient || 1) * 100) - used;
+        return { ...s, capacity };
+      })
+      .filter(s => s.capacity >= 10)
+      .sort((a, b) => b.capacity - a.capacity);
+  };
+
+  const runRecommendation = async () => {
+    setAiModalOpen(false);
+    const loadingMsg = message.loading({ content: 'AI 正在生成推荐方案...', key: 'ai-recommend', duration: 0 });
+
+    // 只处理用户在弹窗中勾选的需求
+    const pendingDemands = demands.filter(d =>
+      selectedDemandIds.has(d.id)
+    );
+
+    if (pendingDemands.length === 0) {
+      loadingMsg();
+      message.warning('没有待排期的需求');
+      return;
+    }
+
+    const activeStaffs = staffs.filter(s => s.status === 'active');
+    if (activeStaffs.length === 0) {
+      loadingMsg();
+      message.warning('没有可用的测试人员');
+      return;
+    }
+
+    // 按需求人天降序排列（大需求优先）
+    const sortedDemands = [...pendingDemands].sort(
+      (a, b) => Number(b.manpowerDemand) - Number(a.manpowerDemand)
+    );
+
+    const newSchedules: any[] = [];
+    const loadMap = new Map<string, number>(); // key: "staffId-date", value: total%
+    const unfulfilledSet = new Set<number>();
+    const unfulfilledList: Array<{ product: string; shortage: number }> = [];
+
+    // 预填充已有排班负载（排除本次要重新排班的需求），避免新排班与已发布排班冲突
+    const existingSchedules = schedules.filter(s => !selectedDemandIds.has(s.demandId || 0));
+    existingSchedules.forEach(s => {
+      const key = `${s.staffId}-${s.date}`;
+      loadMap.set(key, (loadMap.get(key) || 0) + s.percentage);
+    });
+
+    // 构建按测试类型的剩余需求映射：key = "demandId-testType"
+    const remainingByType = new Map<string, number>();
+    for (const demand of sortedDemands) {
+      if (demand.manpowerDetails && demand.manpowerDetails.length > 0) {
+        demand.manpowerDetails.forEach((d: any) => {
+          remainingByType.set(`${demand.id}-${d.testType}`, Number(d.manpowerDemand));
+        });
+      } else {
+        // 旧数据兼容：无 manpowerDetails，使用总人天
+        remainingByType.set(`${demand.id}-__ALL__`, Number(demand.manpowerDemand));
+      }
+    }
+
+    for (const demand of sortedDemands) {
+      const demandStart = dayjs(demand.startDate);
+      const demandEnd = dayjs(demand.endDate);
+
+      // 获取需求完整周期的可用日期
+      let dates = getDemandDates(demandStart, demandEnd);
+
+      // 过滤周末（若不勾选节假日）
+      if (!includeWeekends) {
+        dates = dates.filter(d => ![0, 6].includes(d.day()));
+      }
+
+      // 按日期先后排序
+      dates.sort((a, b) => a.unix() - b.unix());
+
+      // 获取该需求需要的测试类型（仍有剩余人天的）
+      const neededTypes = (demand.manpowerDetails || []).length > 0
+        ? demand.manpowerDetails.map((d: any) => d.testType)
+        : ['__ALL__'];
+
+      for (const date of dates) {
+        const dateStr = date.format('YYYY-MM-DD');
+
+        const allAvailable = getAvailableStaffForDate(dateStr, loadMap, activeStaffs);
+
+        for (const staff of allAvailable) {
+          if (staff.capacity < 10) continue;
+
+          // 按 testType 匹配：只分配同类型员工
+          const staffTestType = staff.testType;
+          const matched = neededTypes.find((tt: string) => {
+            if (tt === '__ALL__') return true;
+            return tt === staffTestType;
+          });
+          if (!matched) continue;
+
+          const typeKey = `${demand.id}-${matched}`;
+          const typeRemaining = remainingByType.get(typeKey) || 0;
+          if (typeRemaining <= 0.01) continue;
+
+          // 分配 min(typeRemaining*100, 剩余容量)，不超过100
+          const maxAlloc = Math.min(staff.capacity, 100);
+          const alloc = Math.min(Math.round(typeRemaining * 100), maxAlloc);
+          if (alloc < 10) continue;
+
+          newSchedules.push({
+            staffId: staff.id,
+            demandId: demand.id,
+            date: dateStr,
+            percentage: alloc,
+            product: demand.product,
+            testManager: demand.submittedBy || 'AI推荐',
+            versionType: demand.versionType,
+          });
+
+          const key = `${staff.id}-${dateStr}`;
+          loadMap.set(key, (loadMap.get(key) || 0) + alloc);
+          remainingByType.set(typeKey, typeRemaining - alloc / 100);
+        }
+
+        // 检查是否所有类型都已满足
+        const allDone = neededTypes.every((tt: string) => (remainingByType.get(`${demand.id}-${tt}`) || 0) <= 0.01);
+        if (allDone) break;
+      }
+
+      // 检查未满足情况
+      const totalRemaining = neededTypes.reduce((sum: number, tt: string) =>
+        sum + Math.max(0, remainingByType.get(`${demand.id}-${tt}`) || 0), 0
+      );
+      if (totalRemaining > 0.01) {
+        unfulfilledSet.add(demand.id);
+        unfulfilledList.push({
+          product: demand.product,
+          shortage: Math.round(totalRemaining * 10) / 10,
+        });
+      }
+    }
+
+    // 先清除旧排班，再批量保存新排班
+    try {
+      for (const demand of sortedDemands) {
+        await api.deleteSchedulesByDemand(demand.id);
+      }
+      const savedSchedules = newSchedules.length > 0
+        ? await api.createSchedulesBatch(newSchedules)
+        : [];
+      // 合并：其他需求已有排班 + 本次新生成的排班
+      setSchedules([...existingSchedules, ...savedSchedules]);
+    } catch (err: any) {
+      loadingMsg();
+      message.error(err.message || '保存排班失败');
+      return;
+    }
+
+    setUnfulfilledDemands(unfulfilledSet);
+    setUnfulfilledDetails(unfulfilledList);
+
+    loadingMsg();
+
+    // 自动冲突检测
+    const conflicts: string[] = [];
+    const staffDateMap = new Map<string, { staffId: number; date: string; total: number; name: string }>();
+    newSchedules.forEach((schedule: any) => {
+      const key = `${schedule.staffId}-${schedule.date}`;
+      const existing = staffDateMap.get(key);
+      if (existing) {
+        existing.total += schedule.percentage;
+      } else {
+        const staff = activeStaffs.find(st => st.id === schedule.staffId);
+        staffDateMap.set(key, {
+          staffId: schedule.staffId,
+          date: schedule.date,
+          total: schedule.percentage,
+          name: staff?.name || '未知',
+        });
+      }
+    });
+    staffDateMap.forEach(item => {
+      const maxCapacity = (activeStaffs.find(st => st.id === item.staffId)?.currentCoefficient || 1) * 100;
+      if (item.total > maxCapacity) {
+        conflicts.push(`${item.name} ${item.date} 分配 ${item.total}%（超过系数 ${maxCapacity}%）`);
+      }
+    });
+    setConflictDetails(conflicts);
+    setHasConflicts(conflicts.length > 0);
+
+    // 结果提示
+    if (unfulfilledList.length > 0) {
+      const products = unfulfilledList.map(u => `${u.product}(缺口${u.shortage}人/天)`).join('、');
+      message.warning({
+        content: `AI推荐完成：${newSchedules.length} 条排班，${unfulfilledList.length} 个需求未满足 — ${products}`,
+        duration: 6,
+      });
+    } else {
+      message.success(`AI推荐完成：共生成 ${newSchedules.length} 条排班记录，全部需求已满足`);
+    }
   };
 
   const handleConflictCheck = () => {
@@ -164,11 +466,98 @@ const ScheduleWorkbench: React.FC = () => {
     e.dataTransfer.effectAllowed = 'copy';
   };
 
+  // 调度卡片拖拽：开始
+  const handleScheduleDragStart = (e: React.DragEvent, schedule: ScheduleItem) => {
+    e.stopPropagation();
+    e.dataTransfer.effectAllowed = 'move';
+    setDraggedSchedule(schedule);
+    setSelectedDemand(null);
+  };
+
+  // 调度卡片拖拽：结束
+  const handleScheduleDragEnd = () => {
+    setDraggedSchedule(null);
+  };
+
+  // 调度卡片拖拽：转移到其他测试员
+  const handleScheduleTransfer = async (schedule: ScheduleItem, targetStaff: any, targetDate: string) => {
+    if (schedule.staffId === targetStaff.id && schedule.date === targetDate) {
+      setDraggedSchedule(null);
+      return;
+    }
+
+    // 检查目标日可用状态
+    if (!isAvailableForAssignment(targetStaff.id, targetDate)) {
+      const statusLabel = DailyStatusLabels[getDailyStatus(targetStaff.id, targetDate) as DailyAvailabilityStatus];
+      message.warning(`${targetStaff.name}今日「${statusLabel}」，不参与测试`);
+      setDraggedSchedule(null);
+      return;
+    }
+
+    // 按目标员工系数限制投入比例
+    const coeff = targetStaff.currentCoefficient || 1;
+    const maxPercentage = Math.round(coeff * 100);
+    const transferPercentage = Math.min(schedule.percentage, maxPercentage);
+
+    try {
+      // 删除旧排班
+      await api.deleteSchedule(schedule.id);
+      // 创建新排班（分配到目标员工）
+      const newScheduleData = {
+        staffId: targetStaff.id,
+        demandId: schedule.demandId,
+        date: targetDate,
+        percentage: transferPercentage,
+        product: schedule.product,
+        testManager: schedule.testManager || '测试经理',
+        versionType: schedule.versionType,
+      };
+      const created = await api.createSchedule(newScheduleData);
+
+      // 更新本地状态：用后端返回的真实记录替换旧记录
+      setSchedules(prev => [
+        ...prev.filter(s => s.id !== schedule.id),
+        {
+          id: created.id,
+          staffId: created.staffId,
+          demandId: created.demandId,
+          date: created.date,
+          percentage: created.percentage,
+          product: created.product,
+          testManager: created.testManager,
+          versionType: created.versionType,
+          published: created.published,
+        },
+      ]);
+
+      if (transferPercentage < schedule.percentage) {
+        message.success(`已转移至 ${targetStaff.name}，投入比例由 ${schedule.percentage}% 调整为 ${transferPercentage}%（受系数 ${coeff.toFixed(1)} 限制）`);
+      } else {
+        message.success(`已转移至 ${targetStaff.name}`);
+      }
+    } catch (err: any) {
+      message.error(err.message || '转移失败');
+    } finally {
+      setDraggedSchedule(null);
+    }
+  };
+
   const handleDrop = (staff: any, date: string) => {
     if (selectedDemand) {
-      const startDate = dayjs(date);
-      const endDate = dayjs(selectedDemand.endDate);
-      const maxDays = Math.min(endDate.diff(startDate, 'day') + 1, 30);
+      // 检查当日可用状态
+      if (!isAvailableForAssignment(staff.id, date)) {
+        const statusLabel = DailyStatusLabels[getDailyStatus(staff.id, date) as DailyAvailabilityStatus];
+        message.warning(`${staff.name}今日「${statusLabel}」，不参与测试`);
+        return;
+      }
+
+      // 检查该需求人力是否已满足
+      const demandSchedules = schedules.filter(s => s.demandId === selectedDemand.id);
+      const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
+      if (allocatedDays >= selectedDemand.manpowerDemand) {
+        message.warning('测试人力需求已满足，无需继续分配');
+        return;
+      }
 
       setAssignTarget({ staff, date });
       setAssignDays(1);
@@ -179,6 +568,16 @@ const ScheduleWorkbench: React.FC = () => {
 
   const handleAssignConfirm = async () => {
     if (!assignTarget || !selectedDemand) return;
+
+    // 检查本次分配是否超出剩余需求
+    const demandSchedules = schedules.filter(s => s.demandId === selectedDemand.id);
+    const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
+    const remaining = selectedDemand.manpowerDemand - allocatedDays;
+    const thisAllocation = (assignDays * assignPercentage) / 100;
+    if (thisAllocation > remaining) {
+      message.warning(`测试人力需求已满足，剩余可分配 ${remaining.toFixed(1)} 人/天，本次分配 ${thisAllocation.toFixed(1)} 人/天超出需求`);
+      return;
+    }
 
     setAssignLoading(true);
     try {
@@ -243,7 +642,7 @@ const ScheduleWorkbench: React.FC = () => {
     try {
       await api.deleteSchedule(editingSchedule.id);
 
-      const newSchedule = {
+      const newScheduleData = {
         staffId: editingSchedule.staffId,
         demandId: editingSchedule.demandId,
         date: editingSchedule.date,
@@ -253,13 +652,22 @@ const ScheduleWorkbench: React.FC = () => {
         versionType: editingSchedule.versionType,
       };
 
-      await api.createSchedule(newSchedule);
+      const created = await api.createSchedule(newScheduleData);
 
-      setSchedules(schedules.map(s =>
-        s.id === editingSchedule.id
-          ? { ...s, percentage: editPercentage }
-          : s
-      ));
+      setSchedules(prev => [
+        ...prev.filter(s => s.id !== editingSchedule.id),
+        {
+          id: created.id,
+          staffId: created.staffId,
+          demandId: created.demandId,
+          date: created.date,
+          percentage: created.percentage,
+          product: created.product,
+          testManager: created.testManager,
+          versionType: created.versionType,
+          published: created.published,
+        },
+      ]);
 
       message.success('排班已更新');
       setEditModalVisible(false);
@@ -330,11 +738,32 @@ const ScheduleWorkbench: React.FC = () => {
         />
       )}
 
+      {unfulfilledDetails.length > 0 && (
+        <Alert
+          message="AI推荐 — 需求未满足"
+          description={
+            <div>
+              <div style={{ marginBottom: 4 }}>以下 {unfulfilledDetails.length} 个需求的人力无法完全满足：</div>
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {unfulfilledDetails.map((u, i) => (
+                  <li key={i}>{u.product} — 人力缺口 <strong style={{ color: '#ff4d4f' }}>{u.shortage} 人/天</strong></li>
+                ))}
+              </ul>
+            </div>
+          }
+          type="error"
+          showIcon
+          style={{ marginBottom: 16 }}
+          closable
+          onClose={() => setUnfulfilledDetails([])}
+        />
+      )}
+
       <div style={{ display: 'flex', gap: 16 }}>
         {/* 左侧：待排期需求列表 */}
         <Card
           title="待排期需求"
-          style={{ width: 300, flexShrink: 0 }}
+          style={{ width: 380, flexShrink: 0 }}
           bodyStyle={{ padding: 12, maxHeight: 600, overflowY: 'auto' }}
         >
           {demands.length === 0 ? (
@@ -350,10 +779,14 @@ const ScheduleWorkbench: React.FC = () => {
               const isPublished = demandSchedules.length > 0 && demandSchedules.every(s => s.published);
               const daysToEnd = dayjs(demand.endDate).diff(dayjs(), 'day');
               const isUrgent = daysToEnd <= 3 && remainingDays > 0;
+              const isUnfulfilled = unfulfilledDemands.has(demand.id);
 
               let borderColor = '#b7eb8f';
               let bgColor = '#f6ffed';
-              if (remainingDays > 0) {
+              if (isUnfulfilled) {
+                borderColor = '#ff4d4f';
+                bgColor = '#fff1f0';
+              } else if (remainingDays > 0) {
                 borderColor = isUrgent ? '#ff4d4f' : '#ff9c6e';
                 bgColor = isUrgent ? '#fff1f0' : '#fff7e6';
               }
@@ -400,17 +833,72 @@ const ScheduleWorkbench: React.FC = () => {
                       {demand.manpowerDemand} 人/天
                     </span>
                   </div>
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    fontSize: 12,
-                    marginTop: 6,
-                  }}>
-                    <span style={{ color: '#52c41a' }}>已分配：{allocatedDays.toFixed(1)} 人/天</span>
-                    <span style={{ color: remainingDays > 0 ? '#faad14' : '#999' }}>
-                      待分配：{remainingDays.toFixed(1)} 人/天
-                    </span>
-                  </div>
+                  {(() => {
+                    const allocations = computeAllocationByTestType(demand);
+                    const typeEntries = Object.entries(allocations);
+                    if (typeEntries.length > 0) {
+                      return (
+                        <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse', marginTop: 6 }}>
+                          <thead>
+                            <tr style={{ background: '#fafafa' }}>
+                              <th style={{ padding: '2px 4px', textAlign: 'left', borderBottom: '1px solid #f0f0f0' }}>类型</th>
+                              <th style={{ padding: '2px 4px', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>需求</th>
+                              <th style={{ padding: '2px 4px', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>已分配</th>
+                              <th style={{ padding: '2px 4px', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>待分配</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {typeEntries.map(([tt, info]: [string, any]) => {
+                              const rem = Math.max(0, info.demand - info.allocated);
+                              const isShort = rem > 0;
+                              return (
+                                <tr key={tt} style={{ borderBottom: '1px solid #fafafa' }}>
+                                  <td style={{ padding: '2px 4px', color: '#1890ff', fontSize: 10 }}>{tt}</td>
+                                  <td style={{ padding: '2px 4px', textAlign: 'right' }}>{info.demand.toFixed(1)}</td>
+                                  <td style={{ padding: '2px 4px', textAlign: 'right', color: '#52c41a' }}>
+                                    {info.allocated.toFixed(1)}
+                                  </td>
+                                  <td style={{ padding: '2px 4px', textAlign: 'right', color: isShort ? '#faad14' : '#999', fontWeight: isShort ? 500 : 400 }}>
+                                    {rem.toFixed(1)}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot>
+                            <tr style={{ fontWeight: 500, fontSize: 11 }}>
+                              <td style={{ padding: '3px 4px', borderTop: '1px solid #f0f0f0' }}>合计</td>
+                              <td style={{ padding: '3px 4px', textAlign: 'right', borderTop: '1px solid #f0f0f0' }}>
+                                {Number(demand.manpowerDemand || 0).toFixed(1)}
+                              </td>
+                              <td style={{ padding: '3px 4px', textAlign: 'right', borderTop: '1px solid #f0f0f0', color: '#52c41a' }}>
+                                {allocatedDays.toFixed(1)}
+                              </td>
+                              <td style={{ padding: '3px 4px', textAlign: 'right', borderTop: '1px solid #f0f0f0', color: remainingDays > 0 ? '#faad14' : '#999' }}>
+                                {Math.max(0, remainingDays).toFixed(1)}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      );
+                    }
+                    // 旧数据兼容：无 manpowerDetails
+                    return (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginTop: 6 }}>
+                          <span style={{ color: '#52c41a' }}>已分配：{allocatedDays.toFixed(1)} 人/天</span>
+                          <span style={{ color: remainingDays > 0 ? '#faad14' : '#999' }}>
+                            待分配：{remainingDays.toFixed(1)} 人/天
+                          </span>
+                        </div>
+                        {isUnfulfilled && (
+                          <div style={{ marginTop: 4, textAlign: 'right' }}>
+                            <Tag color="red">人力缺口：{remainingDays.toFixed(1)} 人/天</Tag>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                   <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
                       <Tag
@@ -497,6 +985,43 @@ const ScheduleWorkbench: React.FC = () => {
           style={{ flex: 1 }}
           bodyStyle={{ padding: 0, overflow: 'auto' }}
         >
+          {/* 筛选控件 */}
+          <div style={{ padding: '8px 12px', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', borderBottom: '1px solid #f0f0f0' }}>
+            <span style={{ fontSize: 13, color: '#666' }}>筛选:</span>
+            <Select
+              mode="multiple"
+              placeholder="测试类型"
+              style={{ minWidth: 180 }}
+              value={filterTestTypes}
+              onChange={setFilterTestTypes}
+              allowClear
+              maxTagCount={2}
+              options={[...new Set(staffs.filter(s => s.status === 'active').map(s => s.testType).filter(Boolean))].map(t => ({ label: t, value: t }))}
+            />
+            <span style={{ fontSize: 13, color: '#666' }}>系数:</span>
+            <InputNumber
+              min={0}
+              max={2}
+              step={0.1}
+              placeholder="最小"
+              value={filterCoeffMin}
+              onChange={v => setFilterCoeffMin(v)}
+              style={{ width: 80 }}
+              size="small"
+            />
+            <span style={{ fontSize: 13, color: '#666' }}>~</span>
+            <InputNumber
+              min={0}
+              max={2}
+              step={0.1}
+              placeholder="最大"
+              value={filterCoeffMax}
+              onChange={v => setFilterCoeffMax(v)}
+              style={{ width: 80 }}
+              size="small"
+            />
+          </div>
+
           <table className="kanban-table" style={{ minWidth: 1200 }}>
             <thead>
               <tr>
@@ -519,7 +1044,16 @@ const ScheduleWorkbench: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {staffs.filter(s => s.status === 'active').map(staff => (
+              {staffs.filter(s => {
+                if (s.status !== 'active') return false;
+                // 测试组长只看本组
+                if (user?.role === 'testLead' && user?.testType && s.testType !== user.testType) return false;
+                // 筛选控件
+                if (filterTestTypes.length > 0 && s.testType && !filterTestTypes.includes(s.testType)) return false;
+                if (filterCoeffMin !== null && s.currentCoefficient < filterCoeffMin) return false;
+                if (filterCoeffMax !== null && s.currentCoefficient > filterCoeffMax) return false;
+                return true;
+              }).map(staff => (
                 <tr key={staff.id}>
                   <td style={{
                     position: 'sticky',
@@ -560,82 +1094,161 @@ const ScheduleWorkbench: React.FC = () => {
                     const maxCapacity = (staff.currentCoefficient || 1) * 100;
                     const hasConflict = totalPercent > maxCapacity;
                     const isWeekend = [5, 6].includes(dayIndex);
+                    const dailyStatus = getDailyStatus(staff.id, dateStr);
+                    const canAssign = isAvailableForAssignment(staff.id, dateStr);
+                    const isTestLead = hasPermission('manageDailyAvailability');
+                    const canManageStatus = isTestLead && daySchedules.length === 0;
+
+                    const statusBgColor = dailyStatus && dailyStatus !== 'AVAILABLE'
+                      ? `${DailyStatusColors[dailyStatus]}18`
+                      : undefined;
+
+                    const cellBackground = hasConflict ? '#fff1f0'
+                      : statusBgColor || (isWeekend ? '#fff7e6' : '#fff');
+
+                    let cellCursor = 'default';
+                    if (selectedDemand) {
+                      cellCursor = canAssign ? 'copy' : 'not-allowed';
+                    } else if (canManageStatus) {
+                      cellCursor = 'pointer';
+                    }
+
+                    const cellContent = daySchedules.length === 0 ? (
+                      dailyStatus && dailyStatus !== 'AVAILABLE' ? (
+                        <div style={{
+                          color: DailyStatusColors[dailyStatus],
+                          fontSize: 10,
+                          padding: '8px 2px',
+                          fontWeight: 500,
+                          textAlign: 'center',
+                        }}>
+                          {DailyStatusLabels[dailyStatus]}
+                        </div>
+                      ) : (
+                        <div style={{ color: '#ccc', fontSize: 10, padding: '8px 0' }}>
+                          空闲
+                        </div>
+                      )
+                    ) : (
+                      <div>
+                        {daySchedules.map(schedule => (
+                          <div
+                            key={schedule.id}
+                            className="schedule-item"
+                            draggable
+                            style={{
+                              background: `${getVersionTypeColor(schedule.versionType)}20`,
+                              borderLeft: `3px solid ${getVersionTypeColor(schedule.versionType)}`,
+                              marginBottom: 2,
+                              padding: '2px 4px',
+                              position: 'relative',
+                              cursor: 'grab',
+                              fontSize: 11,
+                            }}
+                            onClick={() => handleEditSchedule(schedule)}
+                            onDragStart={(e) => handleScheduleDragStart(e, schedule)}
+                            onDragEnd={handleScheduleDragEnd}
+                          >
+                            <div
+                              className="product-name"
+                              style={{ color: getVersionTypeColor(schedule.versionType), fontWeight: 500 }}
+                            >
+                              {schedule.product}
+                            </div>
+                            <div style={{ fontSize: 10, color: '#666' }}>
+                              {renderPercentage(schedule.percentage)}
+                            </div>
+                            <div style={{
+                              position: 'absolute',
+                              top: 0,
+                              right: 0,
+                            }}>
+                              <Popconfirm
+                                title="确定删除？"
+                                onConfirm={(e) => {
+                                  e?.stopPropagation();
+                                  handleDeleteSchedule(schedule);
+                                }}
+                                okText="确定"
+                                cancelText="取消"
+                              >
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  danger
+                                  icon={<DeleteOutlined />}
+                                  style={{ fontSize: 9, padding: '0 1px', height: 14, width: 14 }}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </Popconfirm>
+                            </div>
+                          </div>
+                        ))}
+                        <div style={{
+                          marginTop: 4,
+                          fontSize: 10,
+                          color: hasConflict ? '#ff4d4f' : '#666',
+                          fontWeight: hasConflict ? 600 : 400,
+                        }}>
+                          {totalPercent}%
+                        </div>
+                      </div>
+                    );
+
+                    const isStatusPopoverOpen = statusPopoverOpen === `${staff.id}-${dateStr}`;
 
                     return (
                       <td
                         key={dateStr}
                         style={{
-                          background: hasConflict ? '#fff1f0' : isWeekend ? '#fff7e6' : '#fff',
-                          cursor: selectedDemand ? 'copy' : 'default',
+                          background: cellBackground,
+                          cursor: cellCursor,
                         }}
-                        onDrop={() => handleDrop(staff, dateStr)}
-                        onDragOver={(e) => selectedDemand && e.preventDefault()}
+                        onDrop={() => {
+                          if (draggedSchedule) {
+                            handleScheduleTransfer(draggedSchedule, staff, dateStr);
+                          } else {
+                            handleDrop(staff, dateStr);
+                          }
+                        }}
+                        onDragOver={(e) => {
+                          if (selectedDemand || draggedSchedule) {
+                            e.preventDefault();
+                          }
+                        }}
+                        onClick={() => {
+                          if (canManageStatus) {
+                            setStatusPopoverOpen(isStatusPopoverOpen ? null : `${staff.id}-${dateStr}`);
+                          }
+                        }}
                       >
-                        {daySchedules.length === 0 ? (
-                          <div style={{ color: '#ccc', fontSize: 10, padding: '8px 0' }}>
-                            空闲
-                          </div>
-                        ) : (
-                          <div>
-                            {daySchedules.map(schedule => (
-                              <div
-                                key={schedule.id}
-                                className="schedule-item"
-                                style={{
-                                  background: `${getVersionTypeColor(schedule.versionType)}20`,
-                                  borderLeft: `3px solid ${getVersionTypeColor(schedule.versionType)}`,
-                                  marginBottom: 2,
-                                  padding: '2px 4px',
-                                  position: 'relative',
-                                  cursor: 'pointer',
-                                  fontSize: 11,
-                                }}
-                                onClick={() => handleEditSchedule(schedule)}
-                              >
-                                <div
-                                  className="product-name"
-                                  style={{ color: getVersionTypeColor(schedule.versionType), fontWeight: 500 }}
-                                >
-                                  {schedule.product}
-                                </div>
-                                <div style={{ fontSize: 10, color: '#666' }}>
-                                  {renderPercentage(schedule.percentage)}
-                                </div>
-                                <div style={{
-                                  position: 'absolute',
-                                  top: 0,
-                                  right: 0,
-                                }}>
-                                  <Popconfirm
-                                    title="确定删除？"
-                                    onConfirm={(e) => {
-                                      e?.stopPropagation();
-                                      handleDeleteSchedule(schedule);
-                                    }}
-                                    okText="确定"
-                                    cancelText="取消"
+                        {canManageStatus ? (
+                          <Popover
+                            content={
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                {(['AVAILABLE', 'OTHER_TASKS', 'SECONDED', 'ON_LEAVE'] as DailyAvailabilityStatus[]).map(s => (
+                                  <Button
+                                    key={s}
+                                    size="small"
+                                    type={dailyStatus === s ? 'primary' : 'text'}
+                                    style={{ color: DailyStatusColors[s], textAlign: 'left' }}
+                                    onClick={() => handleStatusChange(staff, dateStr, s)}
                                   >
-                                    <Button
-                                      type="text"
-                                      size="small"
-                                      danger
-                                      icon={<DeleteOutlined />}
-                                      style={{ fontSize: 9, padding: '0 1px', height: 14, width: 14 }}
-                                      onClick={(e) => e.stopPropagation()}
-                                    />
-                                  </Popconfirm>
-                                </div>
+                                    {DailyStatusLabels[s]}
+                                  </Button>
+                                ))}
                               </div>
-                            ))}
-                            <div style={{
-                              marginTop: 4,
-                              fontSize: 10,
-                              color: hasConflict ? '#ff4d4f' : '#666',
-                              fontWeight: hasConflict ? 600 : 400,
-                            }}>
-                              {totalPercent}%
-                            </div>
-                          </div>
+                            }
+                            title={`${staff.name} - ${dateStr}`}
+                            trigger="click"
+                            open={isStatusPopoverOpen}
+                            onOpenChange={(open) => { if (!open) setStatusPopoverOpen(null); }}
+                            placement="bottom"
+                          >
+                            <div style={{ minHeight: 20 }}>{cellContent}</div>
+                          </Popover>
+                        ) : (
+                          cellContent
                         )}
                       </td>
                     );
@@ -670,7 +1283,14 @@ const ScheduleWorkbench: React.FC = () => {
           </Button>
         ]}
       >
-        {assignTarget && selectedDemand && (
+        {assignTarget && selectedDemand && (() => {
+          const currentDemandSchedules = schedules.filter(s => s.demandId === selectedDemand.id);
+          const alreadyAllocated = currentDemandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
+          const remaining = selectedDemand.manpowerDemand - alreadyAllocated;
+          const thisAllocation = (assignDays * assignPercentage) / 100;
+          const exceeds = thisAllocation > remaining;
+
+          return (
           <div>
             <Descriptions column={1} bordered size="small">
               <Descriptions.Item label="测试人员">
@@ -689,6 +1309,19 @@ const ScheduleWorkbench: React.FC = () => {
               </Descriptions.Item>
               <Descriptions.Item label="需求周期">
                 {dayjs(selectedDemand.startDate).format('YYYY-MM-DD')} ~ {dayjs(selectedDemand.endDate).format('YYYY-MM-DD')}
+              </Descriptions.Item>
+              <Descriptions.Item label="需求人力">
+                {selectedDemand.manpowerDemand} 人/天
+              </Descriptions.Item>
+              <Descriptions.Item label="已分配">
+                <span style={{ color: alreadyAllocated >= selectedDemand.manpowerDemand ? '#52c41a' : '#1890ff' }}>
+                  {alreadyAllocated.toFixed(1)} 人/天
+                </span>
+              </Descriptions.Item>
+              <Descriptions.Item label="剩余可分配">
+                <span style={{ color: remaining <= 0 ? '#ff4d4f' : '#faad14', fontWeight: 600 }}>
+                  {remaining <= 0 ? '已满足' : `${remaining.toFixed(1)} 人/天`}
+                </span>
               </Descriptions.Item>
             </Descriptions>
 
@@ -729,20 +1362,24 @@ const ScheduleWorkbench: React.FC = () => {
               <div style={{
                 marginTop: 16,
                 padding: 12,
-                background: '#f6ffed',
-                border: '1px solid #b7eb8f',
+                background: exceeds ? '#fff1f0' : '#f6ffed',
+                border: exceeds ? '1px solid #ff4d4f' : '1px solid #b7eb8f',
                 borderRadius: 8,
               }}>
-                分配说明：
-                <ul style={{ margin: '8px 0 0 20px', textAlign: 'left', color: '#666' }}>
-                  <li>每天投入 {assignPercentage}% 人力</li>
-                  <li>连续分配将跨越 {assignDays} 天（包括起始日）</li>
-                  <li>100% = 1 人/天，50% = 0.5 人/天</li>
+                {exceeds ? '⚠️ 分配超出需求：' : '分配说明：'}
+                <ul style={{ margin: '8px 0 0 20px', textAlign: 'left', color: exceeds ? '#ff4d4f' : '#666' }}>
+                  <li>本次分配：{assignPercentage}% × {assignDays} 天 = <strong>{thisAllocation.toFixed(1)} 人/天</strong></li>
+                  <li>需求总量：{selectedDemand.manpowerDemand} 人/天</li>
+                  <li>已分配：{alreadyAllocated.toFixed(1)} 人/天</li>
+                  <li>剩余可分配：{remaining.toFixed(1)} 人/天</li>
+                  {exceeds && <li style={{ fontWeight: 600 }}>超出 <span style={{ color: '#ff4d4f' }}>{(thisAllocation - remaining).toFixed(1)}</span> 人/天，无法分配</li>}
                 </ul>
               </div>
             </div>
           </div>
-        )}
+          );
+          })()
+        }
       </Modal>
 
       {/* 编辑弹窗 */}
@@ -814,6 +1451,119 @@ const ScheduleWorkbench: React.FC = () => {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* AI 推荐排班设置 Modal */}
+      <Modal
+        title="AI 推荐排班设置"
+        open={aiModalOpen}
+        onOk={runRecommendation}
+        onCancel={() => {
+          setAiModalOpen(false);
+          setIncludeWeekends(false);
+          setSelectedDemandIds(new Set());
+        }}
+        okText="开始推荐"
+        cancelText="取消"
+        okButtonProps={{ disabled: selectedDemandIds.size === 0 }}
+        width={420}
+      >
+        <Checkbox
+          checked={includeWeekends}
+          onChange={(e) => setIncludeWeekends(e.target.checked)}
+        >
+          节假日排班（周六、周日正常排班）
+        </Checkbox>
+
+        <Divider style={{ margin: '12px 0' }} />
+
+        <div style={{ fontWeight: 500, marginBottom: 8 }}>
+          选择待排期需求（{selectedDemandIds.size} 个已选）
+        </div>
+        {(() => {
+          const eligibleDemands = demands.filter(d => {
+            const demandSchedules = schedules.filter(s => s.demandId === d.id);
+            const published = demandSchedules.length > 0 && demandSchedules.every(s => s.published);
+            return !published && (d.status === 'pending' || d.status === 'scheduled');
+          });
+          const allEligibleIds = eligibleDemands.map(d => d.id);
+          const allSelected = allEligibleIds.length > 0 && allEligibleIds.every(id => selectedDemandIds.has(id));
+
+          return (
+            <>
+              <Checkbox
+                checked={allSelected}
+                indeterminate={selectedDemandIds.size > 0 && !allSelected}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedDemandIds(new Set(allEligibleIds));
+                  } else {
+                    setSelectedDemandIds(new Set());
+                  }
+                }}
+                style={{ marginBottom: 8 }}
+              >
+                <span style={{ fontSize: 13, color: '#888' }}>全选 / 取消全选</span>
+              </Checkbox>
+
+              <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 6, padding: 4 }}>
+                {eligibleDemands.length === 0 ? (
+                  <div style={{ textAlign: 'center', color: '#999', padding: 16, fontSize: 13 }}>
+                    没有可排期的需求
+                  </div>
+                ) : (
+                  eligibleDemands.map(d => {
+                    const demandSchedules = schedules.filter(s => s.demandId === d.id);
+                    const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
+                    const remaining = Number(d.manpowerDemand) - allocatedDays;
+                    return (
+                      <div
+                        key={d.id}
+                        style={{ padding: '6px 8px', borderBottom: '1px solid #fafafa', display: 'flex', alignItems: 'center' }}
+                      >
+                        <Checkbox
+                          checked={selectedDemandIds.has(d.id)}
+                          onChange={(e) => {
+                            const next = new Set(selectedDemandIds);
+                            if (e.target.checked) {
+                              next.add(d.id);
+                            } else {
+                              next.delete(d.id);
+                            }
+                            setSelectedDemandIds(next);
+                          }}
+                        />
+                        <div style={{ marginLeft: 8, flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>{d.product}</div>
+                          <div style={{ fontSize: 11, color: '#888' }}>
+                            {d.versionType}
+                            {' | '}{dayjs(d.startDate).format('MM/DD')}~{dayjs(d.endDate).format('MM/DD')}
+                          </div>
+                          {d.manpowerDetails && d.manpowerDetails.length > 0 && (
+                            <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>
+                              {d.manpowerDetails.map((md: any) =>
+                                `${md.testType}:${md.manpowerDemand}`
+                              ).join(' | ')} 人/天
+                            </div>
+                          )}
+                          <div style={{ fontSize: 10, color: '#888' }}>
+                            合计 {Number(d.manpowerDemand).toFixed(1)} 人/天
+                            {allocatedDays > 0 ? ` | 已排 ${allocatedDays.toFixed(1)}` : ''}
+                            {remaining > 0 ? ` | 剩余 ${remaining.toFixed(1)}` : ' | 已完成'}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </>
+          );
+        })()}
+
+        <div style={{ marginTop: 16, color: '#666', fontSize: 13 }}>
+          将清空所选需求的已有排班并生成推荐方案。算法按需求人力降序分配，优先安排工作日和容量大的测试人员。
+        </div>
       </Modal>
     </div>
   );

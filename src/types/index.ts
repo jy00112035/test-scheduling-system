@@ -22,6 +22,14 @@ export interface TestDemand {
   status: 'submitted' | 'pending' | 'scheduled' | 'completed' | 'rejected';
   submittedBy: string;
   createdAt: string;
+  manpowerDetails?: DemandManpowerDetail[];
+}
+
+export interface DemandManpowerDetail {
+  id?: number;
+  demandId?: number;
+  testType: string;
+  manpowerDemand: number;
 }
 
 export interface Schedule {
@@ -78,6 +86,29 @@ export interface ReportData {
 }
 
 export interface UserRole {
-  role: 'testManager' | 'resourceManager' | 'projectManager' | 'testExecutor' | 'fieldAdmin';
+  role: 'testManager' | 'resourceManager' | 'projectManager' | 'testExecutor' | 'fieldAdmin' | 'testLead';
   name: string;
 }
+
+export type DailyAvailabilityStatus = 'AVAILABLE' | 'OTHER_TASKS' | 'SECONDED' | 'ON_LEAVE';
+
+export interface StaffDailyStatus {
+  id?: number;
+  staffId: number;
+  date: string;
+  status: DailyAvailabilityStatus;
+}
+
+export const DailyStatusLabels: Record<DailyAvailabilityStatus, string> = {
+  AVAILABLE: '空闲',
+  OTHER_TASKS: '完成其他任务',
+  SECONDED: '借调其他项目组',
+  ON_LEAVE: '请假',
+};
+
+export const DailyStatusColors: Record<DailyAvailabilityStatus, string> = {
+  AVAILABLE: '#ccc',
+  OTHER_TASKS: '#1890ff',
+  SECONDED: '#fa8c16',
+  ON_LEAVE: '#ff4d4f',
+};

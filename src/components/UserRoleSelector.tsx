@@ -22,6 +22,7 @@ const UserRoleSelector: React.FC<UserRoleSelectorProps> = ({
 
   const roles: { value: UserRole; label: string; color: string }[] = [
     { value: 'testManager', label: '测试经理', color: 'blue' },
+    { value: 'testLead', label: '测试组长', color: 'cyan' },
     { value: 'resourceManager', label: '资源主管', color: 'orange' },
     { value: 'projectManager', label: '项目经理', color: 'green' },
     { value: 'testExecutor', label: '测试执行人员', color: 'purple' },

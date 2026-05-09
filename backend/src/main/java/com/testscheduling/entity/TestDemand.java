@@ -7,6 +7,7 @@ import lombok.AllArgsConstructor;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Table(name = "test_demand")
@@ -43,6 +44,9 @@ public class TestDemand {
     private DemandStatus status = DemandStatus.submitted;
 
     private String submittedBy;
+
+    @Transient
+    private List<DemandManpowerDetail> manpowerDetails;
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

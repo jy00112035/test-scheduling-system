@@ -60,6 +60,7 @@ class ApiService {
       username: string;
       role: string;
       displayName: string;
+      testType?: string;
     }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
@@ -273,6 +274,18 @@ class ApiService {
     return this.request<void>('/staff/batch', {
       method: 'DELETE',
       body: JSON.stringify(ids),
+    });
+  }
+
+  // Daily Availability Statuses
+  async getDailyStatuses(startDate: string, endDate: string) {
+    return this.request<any[]>(`/daily-statuses?startDate=${startDate}&endDate=${endDate}`);
+  }
+
+  async setDailyStatus(staffId: number, date: string, status: string) {
+    return this.request<void>('/daily-statuses', {
+      method: 'PUT',
+      body: JSON.stringify({ staffId, date, status }),
     });
   }
 

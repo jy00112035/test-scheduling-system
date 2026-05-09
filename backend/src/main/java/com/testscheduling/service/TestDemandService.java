@@ -1,11 +1,14 @@
 package com.testscheduling.service;
 
+import com.testscheduling.entity.DemandManpowerDetail;
 import com.testscheduling.entity.TestDemand;
+import com.testscheduling.repository.DemandManpowerDetailRepository;
 import com.testscheduling.repository.TestDemandRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Service
@@ -14,28 +17,50 @@ public class TestDemandService {
     @Autowired
     private TestDemandRepository testDemandRepository;
 
+    @Autowired
+    private DemandManpowerDetailRepository detailRepository;
+
     public List<TestDemand> findAll() {
-        return testDemandRepository.findAll();
+        List<TestDemand> demands = testDemandRepository.findAll();
+        demands.forEach(this::enrichWithDetails);
+        return demands;
     }
 
     public TestDemand findById(Long id) {
-        return testDemandRepository.findById(id)
+        TestDemand demand = testDemandRepository.findById(id)
             .orElseThrow(() -> new RuntimeException("测试需求不存在"));
+        return enrichWithDetails(demand);
     }
 
     public List<TestDemand> findByStatus(TestDemand.DemandStatus status) {
-        return testDemandRepository.findByStatus(status);
+        List<TestDemand> demands = testDemandRepository.findByStatus(status);
+        demands.forEach(this::enrichWithDetails);
+        return demands;
     }
 
     public List<TestDemand> findPendingAndScheduled() {
-        return testDemandRepository.findByStatusIn(
+        List<TestDemand> demands = testDemandRepository.findByStatusIn(
             List.of(TestDemand.DemandStatus.pending, TestDemand.DemandStatus.scheduled)
         );
+        demands.forEach(this::enrichWithDetails);
+        return demands;
     }
 
     @Transactional
     public TestDemand create(TestDemand demand) {
-        return testDemandRepository.save(demand);
+        // 先计算总人天
+        BigDecimal total = computeTotalManpower(demand.getManpowerDetails());
+        demand.setManpowerDemand(total);
+        TestDemand saved = testDemandRepository.save(demand);
+
+        // 保存明细
+        if (demand.getManpowerDetails() != null) {
+            for (DemandManpowerDetail detail : demand.getManpowerDetails()) {
+                detail.setDemandId(saved.getId());
+                detailRepository.save(detail);
+            }
+        }
+        return enrichWithDetails(saved);
     }
 
     @Transactional
@@ -45,12 +70,23 @@ public class TestDemandService {
         existing.setVersion(demand.getVersion());
         existing.setStartDate(demand.getStartDate());
         existing.setEndDate(demand.getEndDate());
-        existing.setManpowerDemand(demand.getManpowerDemand());
         existing.setVersionType(demand.getVersionType());
         existing.setVersionPhase(demand.getVersionPhase());
         existing.setDescription(demand.getDescription());
         existing.setStatus(demand.getStatus());
-        return testDemandRepository.save(existing);
+
+        // 更新明细
+        detailRepository.deleteByDemandId(id);
+        if (demand.getManpowerDetails() != null) {
+            for (DemandManpowerDetail detail : demand.getManpowerDetails()) {
+                detail.setDemandId(id);
+                detailRepository.save(detail);
+            }
+        }
+        BigDecimal total = computeTotalManpower(demand.getManpowerDetails());
+        existing.setManpowerDemand(total);
+
+        return enrichWithDetails(testDemandRepository.save(existing));
     }
 
     @Transactional
@@ -101,5 +137,22 @@ public class TestDemandService {
         for (Long id : ids) {
             rejectDemand(id);
         }
+    }
+
+    private BigDecimal computeTotalManpower(List<DemandManpowerDetail> details) {
+        if (details == null || details.isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+        return details.stream()
+            .map(d -> d.getManpowerDemand() != null ? d.getManpowerDemand() : BigDecimal.ZERO)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private TestDemand enrichWithDetails(TestDemand demand) {
+        if (demand != null) {
+            List<DemandManpowerDetail> details = detailRepository.findByDemandId(demand.getId());
+            demand.setManpowerDetails(details);
+        }
+        return demand;
     }
 }

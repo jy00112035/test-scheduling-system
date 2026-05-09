@@ -73,6 +73,15 @@ public class DataInitializer implements CommandLineRunner {
             testExecutor.setDisplayName("测试执行人员");
             testExecutor.setEnabled(true);
             userRepository.save(testExecutor);
+
+            User testLead = new User();
+            testLead.setUsername("testlead");
+            testLead.setPassword(passwordEncoder.encode("test123"));
+            testLead.setRole("testLead");
+            testLead.setDisplayName("测试组长");
+            testLead.setTestType("功能测试");
+            testLead.setEnabled(true);
+            userRepository.save(testLead);
         }
     }
 
@@ -83,6 +92,7 @@ public class DataInitializer implements CommandLineRunner {
             s1.setEmpNo("TS001");
             s1.setJoinDate(LocalDate.now().minusMonths(8));
             s1.setGroupName("功能测试组");
+            s1.setTestType("功能测试");
             s1.setInitialCoefficient(new BigDecimal("0.30"));
             s1.setCurrentCoefficient(new BigDecimal("1.00"));
             s1.setStatus(TestStaff.StaffStatus.active);
@@ -93,6 +103,7 @@ public class DataInitializer implements CommandLineRunner {
             s2.setEmpNo("TS002");
             s2.setJoinDate(LocalDate.now().minusMonths(6));
             s2.setGroupName("功能测试组");
+            s2.setTestType("功能测试");
             s2.setInitialCoefficient(new BigDecimal("0.30"));
             s2.setCurrentCoefficient(new BigDecimal("1.00"));
             s2.setStatus(TestStaff.StaffStatus.active);
@@ -103,6 +114,7 @@ public class DataInitializer implements CommandLineRunner {
             s3.setEmpNo("TS003");
             s3.setJoinDate(LocalDate.now().minusMonths(3));
             s3.setGroupName("自动化测试组");
+            s3.setTestType("自动化测试");
             s3.setInitialCoefficient(new BigDecimal("0.30"));
             s3.setCurrentCoefficient(new BigDecimal("0.70"));
             s3.setStatus(TestStaff.StaffStatus.active);
@@ -113,6 +125,7 @@ public class DataInitializer implements CommandLineRunner {
             s4.setEmpNo("TS004");
             s4.setJoinDate(LocalDate.now().minusWeeks(1));
             s4.setGroupName("功能测试组");
+            s4.setTestType("功能测试");
             s4.setInitialCoefficient(new BigDecimal("0.30"));
             s4.setCurrentCoefficient(new BigDecimal("0.30"));
             s4.setStatus(TestStaff.StaffStatus.active);
@@ -123,6 +136,7 @@ public class DataInitializer implements CommandLineRunner {
             s5.setEmpNo("TS005");
             s5.setJoinDate(LocalDate.now().minusWeeks(2));
             s5.setGroupName("性能测试组");
+            s5.setTestType("性能测试");
             s5.setInitialCoefficient(new BigDecimal("0.30"));
             s5.setCurrentCoefficient(new BigDecimal("0.50"));
             s5.setStatus(TestStaff.StaffStatus.active);
@@ -162,7 +176,7 @@ public class DataInitializer implements CommandLineRunner {
             FieldConfig f4 = new FieldConfig();
             f4.setFieldName("testType");
             f4.setFieldType("select");
-            f4.setOptions("功能测试,性能测试,安全测试,兼容性测试");
+            f4.setOptions("功能测试,自动化测试,性能测试,安全测试,兼容性测试");
             f4.setDescription("测试类型");
             f4.setRequired(false);
             f4.setSortOrder(4);

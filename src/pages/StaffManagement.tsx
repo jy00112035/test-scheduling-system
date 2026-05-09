@@ -70,6 +70,7 @@ const roleMapping: Record<string, string> = {
   '项目经理': 'projectManager',
   '测试执行人员': 'testExecutor',
   '字段管理员': 'fieldAdmin',
+  '测试组长': 'testLead',
 };
 
 const roleLabels: Record<string, string> = {
@@ -78,6 +79,7 @@ const roleLabels: Record<string, string> = {
   projectManager: '项目经理',
   testExecutor: '测试执行人员',
   fieldAdmin: '字段管理员',
+  testLead: '测试组长',
 };
 
 const StaffManagement: React.FC = () => {
@@ -761,6 +763,7 @@ const StaffManagement: React.FC = () => {
           >
             <Select placeholder="请选择角色">
               <Option value="testManager">测试经理</Option>
+              <Option value="testLead">测试组长</Option>
               <Option value="resourceManager">资源主管</Option>
               <Option value="projectManager">项目经理</Option>
               <Option value="testExecutor">测试执行人员</Option>

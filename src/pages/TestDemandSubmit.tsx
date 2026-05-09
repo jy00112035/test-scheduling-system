@@ -9,11 +9,13 @@ import {
   Button,
   Space,
   message,
+  Tag,
+  Divider,
 } from 'antd';
 import { SaveOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
-import { TestDemand } from '../types';
+import { TestDemand, DemandManpowerDetail } from '../types';
 import { api } from '../services/api';
 import { useUserRole } from '../context/UserRoleContext';
 
@@ -47,6 +49,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
   const { userName } = useUserRole();
   const [loading, setLoading] = useState(false);
   const [fieldConfigs, setFieldConfigs] = useState<FieldConfig[]>([]);
+  const [manpowerInputs, setManpowerInputs] = useState<Record<string, number>>({});
 
   useEffect(() => {
     fetchFieldConfigs();
@@ -82,6 +85,14 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
           dayjs(initialValues.endDate),
         ],
       });
+      // 回填各测试类型人力
+      if (initialValues.manpowerDetails) {
+        const map: Record<string, number> = {};
+        initialValues.manpowerDetails.forEach((d: DemandManpowerDetail) => {
+          map[d.testType] = d.manpowerDemand;
+        });
+        setManpowerInputs(map);
+      }
     }
   }, [initialValues, form]);
 
@@ -90,14 +101,28 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
   };
 
   const handleSubmit = async (values: any) => {
+    // 构建按测试类型分组的人力需求明细
+    const testTypes = getSelectOptions('testType');
+    const manpowerDetails: DemandManpowerDetail[] = testTypes
+      .filter(tt => (manpowerInputs[tt] || 0) > 0)
+      .map(tt => ({
+        testType: tt,
+        manpowerDemand: manpowerInputs[tt],
+      }));
+
+    if (manpowerDetails.length === 0) {
+      message.warning('请至少为一个测试类型填写人力需求');
+      return;
+    }
+
     setLoading(true);
     try {
-      const demandData: Partial<TestDemand> = {
+      const demandData: any = {
         product: values.product,
         version: values.version || '',
         startDate: values.dateRange[0].format('YYYY-MM-DD'),
         endDate: values.dateRange[1].format('YYYY-MM-DD'),
-        manpowerDemand: values.manpowerDemand,
+        manpowerDetails,
         versionType: values.versionType,
         versionPhase: values.versionPhase,
         description: values.description || '',
@@ -106,7 +131,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
       };
 
       if (isEdit && initialValues) {
-        await api.updateDemand(initialValues.id, demandData);
+        await api.updateDemand(Number(initialValues.id), demandData);
         message.success('测试需求已更新并重新提交，请等待项目经理审批！');
       } else {
         await api.createDemand(demandData);
@@ -177,19 +202,50 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
             />
           </Form.Item>
 
-          <Form.Item
-            name="manpowerDemand"
-            label="人力需求"
-            rules={[{ required: true, message: '请输入人力需求' }]}
-          >
-            <InputNumber
-              min={0.1}
-              step={0.1}
-              precision={1}
-              style={{ width: '100%' }}
-              placeholder="请输入人力需求（人/天），支持小数如 3.8"
-              addonAfter="人/天"
-            />
+          <Form.Item label="人力需求（按测试类型）" required>
+            <div style={{ background: '#fafafa', padding: 16, borderRadius: 8 }}>
+              <div style={{ marginBottom: 8, color: '#666', fontSize: 12 }}>
+                针对每个测试小组填写所需人力（人/天），不需要的小组填 0
+              </div>
+              {getSelectOptions('testType').map(testType => (
+                <div key={testType} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  marginBottom: 10,
+                  padding: '8px 12px',
+                  background: '#fff',
+                  borderRadius: 6,
+                  border: '1px solid #f0f0f0',
+                }}>
+                  <Tag color="blue" style={{ minWidth: 80, textAlign: 'center' }}>
+                    {testType}
+                  </Tag>
+                  <InputNumber
+                    min={0}
+                    step={0.1}
+                    precision={1}
+                    style={{ width: 120, marginLeft: 12 }}
+                    placeholder="0"
+                    addonAfter="人/天"
+                    value={manpowerInputs[testType] ?? 0}
+                    onChange={(val) => setManpowerInputs(prev => ({
+                      ...prev,
+                      [testType]: val ?? 0,
+                    }))}
+                  />
+                </div>
+              ))}
+              <Divider style={{ margin: '8px 0' }} />
+              <div style={{ textAlign: 'right', fontSize: 14, fontWeight: 500 }}>
+                总计：
+                <span style={{ color: '#1890ff', fontSize: 16 }}>
+                  {(() => {
+                    const total = Object.values(manpowerInputs).reduce((sum, v) => sum + (v || 0), 0);
+                    return total.toFixed(1);
+                  })()}
+                </span> 人/天
+              </div>
+            </div>
           </Form.Item>
 
           <Form.Item

@@ -102,7 +102,7 @@ const AppContent: React.FC = () => {
       key: 'schedule',
       icon: <ScheduleOutlined />,
       label: '人力排布工作台',
-      permissions: ['scheduleManpower', 'aiRecommendSchedule'],
+      permissions: ['scheduleManpower', 'aiRecommendSchedule', 'manageDailyAvailability'],
     },
     {
       key: 'staff',
