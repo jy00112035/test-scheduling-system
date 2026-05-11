@@ -95,6 +95,20 @@ body {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
+.status-card {
+  border-radius: 0 2px 2px 0;
+  margin-bottom: 2px;
+  padding: 3px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.status-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
 .schedule-item .product-name {
   font-weight: 500;
   margin-bottom: 2px;

@@ -29,6 +29,9 @@ public class StaffDailyStatus {
     @Column(nullable = false)
     private DailyAvailabilityStatus status;
 
+    @Column(nullable = false)
+    private Double percentage = 100.0;
+
     public enum DailyAvailabilityStatus {
         AVAILABLE,
         OTHER_TASKS,

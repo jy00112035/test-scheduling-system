@@ -11,10 +11,11 @@ const roleLabels: Record<string, string> = {
   projectManager: '项目经理',
   testExecutor: '测试执行人员',
   fieldAdmin: '字段管理员',
+  testLead: '测试组长',
 };
 
 const RegistrationApproval: React.FC = () => {
-  const { role } = useUserRole();
+  const { roles } = useUserRole();
   const [pendingUsers, setPendingUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -79,8 +80,14 @@ const RegistrationApproval: React.FC = () => {
     }
   };
 
-  const isResourceManager = role === 'resourceManager';
-  const title = isResourceManager ? '注册审批 — 测试执行人员' : '注册审批 — 其他角色';
+  const isResourceManager = roles.includes('resourceManager' as any);
+  const isProjectManager = roles.includes('projectManager' as any);
+  let title = '注册审批';
+  if (isResourceManager && !isProjectManager) {
+    title = '注册审批 — 测试执行人员';
+  } else if (isProjectManager && !isResourceManager) {
+    title = '注册审批 — 其他角色';
+  }
 
   const columns = [
     { title: '用户名', dataIndex: 'username', key: 'username', width: 140 },

@@ -30,7 +30,10 @@ public class StaffDailyStatusController {
         Long staffId = Long.valueOf(body.get("staffId").toString());
         LocalDate date = LocalDate.parse(body.get("date").toString());
         DailyAvailabilityStatus status = DailyAvailabilityStatus.valueOf(body.get("status").toString());
-        service.setStatus(staffId, date, status);
+        Double percentage = body.containsKey("percentage") && body.get("percentage") != null
+                ? Double.valueOf(body.get("percentage").toString())
+                : 100.0;
+        service.setStatus(staffId, date, status, percentage);
         return ApiResponse.success("设置成功", null);
     }
 }

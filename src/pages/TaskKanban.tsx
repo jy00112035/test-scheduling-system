@@ -10,6 +10,7 @@ const dayLabels = ['周日', '周一', '周二', '周三', '周四', '周五', '
 const TaskKanban: React.FC = () => {
   const [viewDate, setViewDate] = useState<Dayjs>(dayjs());
   const [groupFilter, setGroupFilter] = useState<string>('all');
+  const [filterProducts, setFilterProducts] = useState<string[]>([]);
   const [staffs, setStaffs] = useState<any[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -46,9 +47,21 @@ const TaskKanban: React.FC = () => {
     return colorMap[type] || '#1890ff';
   };
 
-  const filteredStaffs = groupFilter === 'all'
-    ? staffs
-    : staffs.filter((s: any) => s.testType === groupFilter);
+  const filteredStaffs = (() => {
+    let result = groupFilter === 'all'
+      ? staffs
+      : staffs.filter((s: any) => s.testType === groupFilter);
+
+    if (filterProducts.length > 0) {
+      const weekDateStrs = weekDates.map(d => d.format('YYYY-MM-DD'));
+      result = result.filter((s: any) =>
+        schedules.some(
+          sch => sch.staffId === s.id && weekDateStrs.includes(sch.date) && filterProducts.includes(sch.product)
+        )
+      );
+    }
+    return result;
+  })();
 
   const getSchedulesForStaffAndDate = (staffId: number, date: string) => {
     return schedules.filter((s: any) => s.staffId === staffId && s.date === date);
@@ -82,6 +95,16 @@ const TaskKanban: React.FC = () => {
                 <Option key={t} value={t}>{t}</Option>
               ))}
             </Select>
+            <Select
+              mode="multiple"
+              placeholder="产品筛选"
+              style={{ minWidth: 200 }}
+              value={filterProducts}
+              onChange={setFilterProducts}
+              allowClear
+              maxTagCount={2}
+              options={[...new Set(schedules.map(s => s.product).filter(Boolean))].map(p => ({ label: p, value: p }))}
+            />
           </div>
           <div>
             <span style={{ color: '#666' }}>

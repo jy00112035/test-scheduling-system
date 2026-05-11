@@ -60,14 +60,15 @@ public class AuthController {
         }
     }
 
+    @SuppressWarnings("unchecked")
     @GetMapping("/pending-approvals")
     public ApiResponse<List<User>> getPendingApprovals(HttpServletRequest httpRequest) {
         try {
-            String role = (String) httpRequest.getAttribute("role");
-            if (role == null) {
+            List<String> roles = (List<String>) httpRequest.getAttribute("roles");
+            if (roles == null || roles.isEmpty()) {
                 return ApiResponse.error(401, "未登录或登录已过期");
             }
-            List<User> pending = authService.getPendingApprovals(role);
+            List<User> pending = authService.getPendingApprovals(roles);
             return ApiResponse.success(pending);
         } catch (Exception e) {
             return ApiResponse.error(e.getMessage());

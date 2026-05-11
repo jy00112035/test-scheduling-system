@@ -11,6 +11,7 @@ import {
   message,
   Tag,
   Divider,
+  Switch,
 } from 'antd';
 import { SaveOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -126,6 +127,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         versionType: values.versionType,
         versionPhase: values.versionPhase,
         description: values.description || '',
+        confidential: values.confidential || false,
         status: 'submitted',
         submittedBy: userName || '测试经理',
       };
@@ -169,11 +171,19 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
       </Card>
 
       <Card>
+        <style>{`
+          .demand-form .ant-form-item {
+            margin-bottom: 12px;
+          }
+        `}</style>
         <Form
           form={form}
-          layout="vertical"
+          layout="horizontal"
+          labelCol={{ span: 6 }}
+          wrapperCol={{ span: 18 }}
           onFinish={handleSubmit}
           style={{ maxWidth: 800, margin: '0 auto' }}
+          className="demand-form"
         >
           <Form.Item
             name="product"
@@ -275,6 +285,15 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
                 <Option key={index} value={option}>{option}</Option>
               ))}
             </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="confidential"
+            label="是否为保密项目"
+            valuePropName="checked"
+            rules={[{ required: true, message: '请选择是否为保密项目' }]}
+          >
+            <Switch checkedChildren="是" unCheckedChildren="否" />
           </Form.Item>
 
           <Form.Item name="description" label="备注说明">

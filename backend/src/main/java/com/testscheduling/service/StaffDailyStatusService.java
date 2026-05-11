@@ -26,7 +26,7 @@ public class StaffDailyStatusService {
     }
 
     @Transactional
-    public void setStatus(Long staffId, LocalDate date, DailyAvailabilityStatus status) {
+    public void setStatus(Long staffId, LocalDate date, DailyAvailabilityStatus status, Double percentage) {
         if (status == DailyAvailabilityStatus.AVAILABLE) {
             repository.deleteByStaffIdAndDate(staffId, date);
         } else {
@@ -35,6 +35,7 @@ public class StaffDailyStatusService {
             record.setStaffId(staffId);
             record.setDate(date);
             record.setStatus(status);
+            record.setPercentage(percentage != null ? percentage : 100.0);
             repository.save(record);
         }
     }

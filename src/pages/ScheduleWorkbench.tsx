@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Tag, Space, Alert, Modal, message, InputNumber, Descriptions, Divider, Popconfirm, DatePicker, Popover, Select, Checkbox } from 'antd';
+import { Card, Button, Tag, Space, Alert, Modal, message, InputNumber, Descriptions, Divider, Popconfirm, DatePicker, Popover, Select, Checkbox, Tooltip, Badge } from 'antd';
 import {
   RobotOutlined,
   CheckCircleOutlined,
@@ -52,12 +52,22 @@ const ScheduleWorkbench: React.FC = () => {
   // 调度卡片拖拽转移状态
   const [draggedSchedule, setDraggedSchedule] = useState<ScheduleItem | null>(null);
 
+  // 拖拽悬停目标（用于显示动画）
+  const [dragOverCell, setDragOverCell] = useState<string | null>(null);
+  const [dragOverTrash, setDragOverTrash] = useState(false);
+
+  // 已发布排班的本地待提交变更（拖拽转移、删除、清除），点击发布时统一提交
+  const [pendingChangeDemandIds, setPendingChangeDemandIds] = useState<Set<number>>(new Set());
+
   // 每日可用状态
-  const [dailyStatuses, setDailyStatuses] = useState<Map<string, string>>(new Map());
+  const [dailyStatuses, setDailyStatuses] = useState<Map<string, { status: string; percentage: number }>>(new Map());
   const [statusPopoverOpen, setStatusPopoverOpen] = useState<string | null>(null);
+  const [statusPctDraft, setStatusPctDraft] = useState(100);
+  const [statusDraft, setStatusDraft] = useState<DailyAvailabilityStatus>('AVAILABLE');
   const [filterTestTypes, setFilterTestTypes] = useState<string[]>([]);
   const [filterCoeffMin, setFilterCoeffMin] = useState<number | null>(null);
   const [filterCoeffMax, setFilterCoeffMax] = useState<number | null>(null);
+  const [filterProducts, setFilterProducts] = useState<string[]>([]);
 
   // AI 推荐排班状态
   const [aiModalOpen, setAiModalOpen] = useState(false);
@@ -99,8 +109,8 @@ const ScheduleWorkbench: React.FC = () => {
         const startStr = weekDates[0].format('YYYY-MM-DD');
         const endStr = weekDates[weekDates.length - 1].format('YYYY-MM-DD');
         const statuses = await api.getDailyStatuses(startStr, endStr);
-        const map = new Map<string, string>();
-        statuses.forEach((s: any) => map.set(`${s.staffId}-${s.date}`, s.status));
+        const map = new Map<string, { status: string; percentage: number }>();
+        statuses.forEach((s: any) => map.set(`${s.staffId}-${s.date}`, { status: s.status, percentage: s.percentage ?? 100 }));
         setDailyStatuses(map);
       } catch {
         // 非关键，网格仍可正常工作
@@ -157,27 +167,35 @@ const ScheduleWorkbench: React.FC = () => {
   };
 
   const getDailyStatus = (staffId: number, date: string): DailyAvailabilityStatus | null => {
-    return dailyStatuses.get(`${staffId}-${date}`) as DailyAvailabilityStatus || null;
+    return dailyStatuses.get(`${staffId}-${date}`)?.status as DailyAvailabilityStatus || null;
+  };
+
+  const getDailyStatusPercentage = (staffId: number, date: string): number => {
+    return dailyStatuses.get(`${staffId}-${date}`)?.percentage ?? 100;
   };
 
   const isAvailableForAssignment = (staffId: number, date: string): boolean => {
     const status = getDailyStatus(staffId, date);
-    return status === null || status === 'AVAILABLE';
+    if (status === null || status === 'AVAILABLE') return true;
+    return getDailyStatusPercentage(staffId, date) < 100;
   };
 
-  const handleStatusChange = async (staff: any, date: string, newStatus: string) => {
+  const handleStatusChange = async (staff: any, date: string, newStatus: string, percentage?: number) => {
     try {
-      await api.setDailyStatus(staff.id, date, newStatus);
+      const pct = percentage ?? 100;
+      await api.setDailyStatus(staff.id, date, newStatus, pct);
       const key = `${staff.id}-${date}`;
       const newMap = new Map(dailyStatuses);
       if (newStatus === 'AVAILABLE') {
         newMap.delete(key);
       } else {
-        newMap.set(key, newStatus);
+        newMap.set(key, { status: newStatus, percentage: pct });
       }
       setDailyStatuses(newMap);
       setStatusPopoverOpen(null);
-      message.success(`已将 ${staff.name} ${date} 状态设为「${DailyStatusLabels[newStatus as DailyAvailabilityStatus]}」`);
+      const label = DailyStatusLabels[newStatus as DailyAvailabilityStatus];
+      const pctSuffix = newStatus !== 'AVAILABLE' && pct < 100 ? `（${pct}%）` : '';
+      message.success(`已将 ${staff.name} ${date} 状态设为「${label}${pctSuffix}」`);
     } catch (error: any) {
       message.error(error.message || '状态更新失败');
     }
@@ -207,18 +225,30 @@ const ScheduleWorkbench: React.FC = () => {
     return dates;
   };
 
-  // 获取当天可用人员，按剩余容量降序排列
-  const getAvailableStaffForDate = (dateStr: string, loadMap: Map<string, number>, activeStaffs: any[]) => {
+  // 获取当天可用人员，按剩余容量降序排列；保密项目优先推荐有保密权限的员工
+  const getAvailableStaffForDate = (dateStr: string, loadMap: Map<string, number>, activeStaffs: any[], isConfidential = false) => {
     return activeStaffs
       .filter(s => isAvailableForAssignment(s.id, dateStr))
       .map(s => {
         const key = `${s.id}-${dateStr}`;
         const used = loadMap.get(key) || 0;
-        const capacity = Math.floor((s.currentCoefficient || 1) * 100) - used;
+        const maxCap = Math.floor((s.currentCoefficient || 1) * 100);
+        // 非空闲状态按百分比扣减可用人力
+        const status = getDailyStatus(s.id, dateStr);
+        const statusPct = getDailyStatusPercentage(s.id, dateStr);
+        const availableCap = status && status !== 'AVAILABLE' ? maxCap * (1 - statusPct / 100) : maxCap;
+        const capacity = Math.floor(availableCap) - used;
         return { ...s, capacity };
       })
       .filter(s => s.capacity >= 10)
-      .sort((a, b) => b.capacity - a.capacity);
+      .sort((a, b) => {
+        // 保密项目：有保密权限的员工优先
+        if (isConfidential) {
+          if (a.confidentialClearance && !b.confidentialClearance) return -1;
+          if (!a.confidentialClearance && b.confidentialClearance) return 1;
+        }
+        return b.capacity - a.capacity;
+      });
   };
 
   const runRecommendation = async () => {
@@ -296,7 +326,7 @@ const ScheduleWorkbench: React.FC = () => {
       for (const date of dates) {
         const dateStr = date.format('YYYY-MM-DD');
 
-        const allAvailable = getAvailableStaffForDate(dateStr, loadMap, activeStaffs);
+        const allAvailable = getAvailableStaffForDate(dateStr, loadMap, activeStaffs, demand.confidential);
 
         for (const staff of allAvailable) {
           if (staff.capacity < 10) continue;
@@ -451,12 +481,39 @@ const ScheduleWorkbench: React.FC = () => {
   };
 
   const handlePublish = () => {
+    const pendingCount = pendingChangeDemandIds.size;
     confirm({
       title: '确认发布排期',
       icon: <CheckCircleOutlined />,
-      content: '排期发布后将通知所有相关人员，确定要发布吗？',
-      onOk() {
-        message.success('排期已成功发布！相关人员已收到通知。');
+      content: pendingCount > 0
+        ? `有 ${pendingCount} 个需求存在未提交的修改，发布时将一并提交。确定要发布吗？`
+        : '排期发布后将通知所有相关人员，确定要发布吗？',
+      onOk: async () => {
+        try {
+          // 提交所有本地待处理变更
+          for (const demandId of pendingChangeDemandIds) {
+            await api.deleteSchedulesByDemand(demandId);
+            const currentSchedules = schedules.filter(s => s.demandId === demandId);
+            if (currentSchedules.length > 0) {
+              const batchData = currentSchedules.map(s => ({
+                staffId: s.staffId,
+                demandId: s.demandId,
+                date: s.date,
+                percentage: s.percentage,
+                product: s.product,
+                testManager: s.testManager || '测试经理',
+                versionType: s.versionType,
+              }));
+              await api.createSchedulesBatch(batchData);
+            }
+            await api.publishSchedules(demandId);
+          }
+          setPendingChangeDemandIds(new Set());
+          message.success('排期已成功发布！相关人员已收到通知。');
+          fetchData();
+        } catch (err: any) {
+          message.error(err.message || '发布失败');
+        }
       },
     });
   };
@@ -464,6 +521,36 @@ const ScheduleWorkbench: React.FC = () => {
   const handleDragStart = (e: React.DragEvent, demand: any) => {
     setSelectedDemand(demand);
     e.dataTransfer.effectAllowed = 'copy';
+
+    // 创建紧凑拖拽预览：只显示产品名、待分配总量、保密标识
+    const demandSchedules = schedules.filter(s => s.demandId === demand.id);
+    const allocatedDays = demandSchedules.reduce((sum: number, s) => sum + s.percentage / 100, 0);
+    const remaining = Math.max(0, demand.manpowerDemand - allocatedDays);
+
+    const dragPreview = document.createElement('div');
+    dragPreview.style.cssText = `
+      padding: 8px 14px;
+      background: #fff;
+      border: 2px solid ${demand.confidential ? '#ff4d4f' : '#1890ff'};
+      border-radius: 8px;
+      font-size: 13px;
+      white-space: nowrap;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      position: absolute;
+      top: -1000px;
+      left: -1000px;
+    `;
+    dragPreview.innerHTML = `
+      <strong>${demand.product}</strong>
+      <span style="color:#1890ff;font-weight:500">${remaining.toFixed(1)}人/天</span>
+      ${demand.confidential ? '<span style="color:#ff4d4f;font-size:11px;border:1px solid #ff4d4f;border-radius:3px;padding:0 4px">保密</span>' : ''}
+    `;
+    document.body.appendChild(dragPreview);
+    e.dataTransfer.setDragImage(dragPreview, 0, 0);
+    setTimeout(() => document.body.removeChild(dragPreview), 0);
   };
 
   // 调度卡片拖拽：开始
@@ -477,6 +564,8 @@ const ScheduleWorkbench: React.FC = () => {
   // 调度卡片拖拽：结束
   const handleScheduleDragEnd = () => {
     setDraggedSchedule(null);
+    setDragOverCell(null);
+    setDragOverTrash(false);
   };
 
   // 调度卡片拖拽：转移到其他测试员
@@ -494,15 +583,45 @@ const ScheduleWorkbench: React.FC = () => {
       return;
     }
 
-    // 按目标员工系数限制投入比例
+    // 按目标员工系数及当日状态限制投入比例
     const coeff = targetStaff.currentCoefficient || 1;
-    const maxPercentage = Math.round(coeff * 100);
+    const statusPct = getDailyStatusPercentage(targetStaff.id, targetDate);
+    const status = getDailyStatus(targetStaff.id, targetDate);
+    const statusFactor = status && status !== 'AVAILABLE' ? (1 - statusPct / 100) : 1;
+    const maxPercentage = Math.round(coeff * 100 * statusFactor);
     const transferPercentage = Math.min(schedule.percentage, maxPercentage);
 
+    if (schedule.published) {
+      // 已发布排班：仅更新本地状态，点击发布时统一提交到后端
+      const tempId = -(Date.now() + Math.random());
+      const newSchedule: ScheduleItem = {
+        id: tempId,
+        staffId: targetStaff.id,
+        demandId: schedule.demandId,
+        date: targetDate,
+        percentage: transferPercentage,
+        product: schedule.product,
+        testManager: schedule.testManager || '测试经理',
+        versionType: schedule.versionType,
+        published: false,
+      };
+      setSchedules(prev => [
+        ...prev.filter(s => s.id !== schedule.id),
+        newSchedule,
+      ]);
+      setPendingChangeDemandIds(prev => new Set(prev).add(schedule.demandId!));
+      if (transferPercentage < schedule.percentage) {
+        message.success(`已转移至 ${targetStaff.name}（草稿），比例调整为 ${transferPercentage}%，请点击发布生效`);
+      } else {
+        message.success(`已转移至 ${targetStaff.name}（草稿），请点击发布生效`);
+      }
+      setDraggedSchedule(null);
+      return;
+    }
+
     try {
-      // 删除旧排班
+      // 未发布排班：直接调API
       await api.deleteSchedule(schedule.id);
-      // 创建新排班（分配到目标员工）
       const newScheduleData = {
         staffId: targetStaff.id,
         demandId: schedule.demandId,
@@ -514,7 +633,6 @@ const ScheduleWorkbench: React.FC = () => {
       };
       const created = await api.createSchedule(newScheduleData);
 
-      // 更新本地状态：用后端返回的真实记录替换旧记录
       setSchedules(prev => [
         ...prev.filter(s => s.id !== schedule.id),
         {
@@ -559,9 +677,13 @@ const ScheduleWorkbench: React.FC = () => {
         return;
       }
 
+      const coeff = staff.currentCoefficient || 1;
+      const sPct = getDailyStatusPercentage(staff.id, date);
+      const s = getDailyStatus(staff.id, date);
+      const sFactor = s && s !== 'AVAILABLE' ? (1 - sPct / 100) : 1;
       setAssignTarget({ staff, date });
       setAssignDays(1);
-      setAssignPercentage(Math.round((staff.currentCoefficient || 1) * 100));
+      setAssignPercentage(Math.round(coeff * 100 * sFactor));
       setAssignModalVisible(true);
     }
   };
@@ -618,9 +740,16 @@ const ScheduleWorkbench: React.FC = () => {
 
   // 删除排班
   const handleDeleteSchedule = async (schedule: ScheduleItem) => {
+    if (schedule.published) {
+      // 已发布排班：仅本地删除，点击发布时统一提交
+      setSchedules(prev => prev.filter(s => s.id !== schedule.id));
+      setPendingChangeDemandIds(prev => new Set(prev).add(schedule.demandId!));
+      message.success('已移除排班（草稿），请点击发布生效');
+      return;
+    }
     try {
       await api.deleteSchedule(schedule.id);
-      setSchedules(schedules.filter(s => s.id !== schedule.id));
+      setSchedules(prev => prev.filter(s => s.id !== schedule.id));
       message.success('已删除排班');
     } catch (error: any) {
       message.error(error.message || '删除失败');
@@ -639,6 +768,32 @@ const ScheduleWorkbench: React.FC = () => {
     if (!editingSchedule) return;
 
     setEditLoading(true);
+
+    if (editingSchedule.published) {
+      // 已发布排班：仅更新本地状态，点击发布时统一提交
+      const tempId = -(Date.now() + Math.random());
+      setSchedules(prev => [
+        ...prev.filter(s => s.id !== editingSchedule.id),
+        {
+          id: tempId,
+          staffId: editingSchedule.staffId,
+          demandId: editingSchedule.demandId,
+          date: editingSchedule.date,
+          percentage: editPercentage,
+          product: editingSchedule.product,
+          testManager: editingSchedule.testManager || '测试经理',
+          versionType: editingSchedule.versionType,
+          published: false,
+        },
+      ]);
+      setPendingChangeDemandIds(prev => new Set(prev).add(editingSchedule.demandId!));
+      setEditLoading(false);
+      message.success('排班已更新（草稿），请点击发布生效');
+      setEditModalVisible(false);
+      setEditingSchedule(null);
+      return;
+    }
+
     try {
       await api.deleteSchedule(editingSchedule.id);
 
@@ -707,13 +862,15 @@ const ScheduleWorkbench: React.FC = () => {
               冲突检测
             </Button>
           </Space>
-          <Button
-            type="primary"
-            icon={<SendOutlined />}
-            onClick={handlePublish}
-          >
-            发布排期
-          </Button>
+          <Badge count={pendingChangeDemandIds.size} size="small" offset={[-4, 4]}>
+            <Button
+              type="primary"
+              icon={<SendOutlined />}
+              onClick={handlePublish}
+            >
+              发布排期
+            </Button>
+          </Badge>
         </div>
       </Card>
 
@@ -796,6 +953,7 @@ const ScheduleWorkbench: React.FC = () => {
                   key={demand.id}
                   draggable
                   onDragStart={(e) => handleDragStart(e, demand)}
+                  onDragEnd={() => setDragOverCell(null)}
                   style={{
                     padding: 12,
                     border: `1px solid ${borderColor}`,
@@ -812,12 +970,20 @@ const ScheduleWorkbench: React.FC = () => {
                     marginBottom: 8,
                   }}>
                     <strong style={{ fontSize: 14 }}>{demand.product}</strong>
-                    <Tag
-                      color={demand.status === 'pending' ? 'orange' : 'green'}
-                      style={{ margin: 0 }}
-                    >
-                      {demand.status === 'pending' ? '待排期' : '已排期'}
-                    </Tag>
+                    <Space size={4}>
+                      {demand.confidential && (
+                        <Tag color="red" style={{ margin: 0 }}>保密</Tag>
+                      )}
+                      {pendingChangeDemandIds.has(demand.id) && (
+                        <Tag color="processing" style={{ margin: 0 }}>待提交</Tag>
+                      )}
+                      <Tag
+                        color={demand.status === 'pending' ? 'orange' : 'green'}
+                        style={{ margin: 0 }}
+                      >
+                        {demand.status === 'pending' ? '待排期' : '已排期'}
+                      </Tag>
+                    </Space>
                   </div>
                   <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>
                     版本号：{demand.version || '无版本号'}
@@ -916,15 +1082,24 @@ const ScheduleWorkbench: React.FC = () => {
                     <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                       {demandSchedules.length > 0 && (
                         <Popconfirm
-                          title="确定清除该需求的所有排班安排？"
+                          title={isPublished
+                            ? '该需求存在已发布排班，清除后需点击发布按钮生效，确定清除？'
+                            : '确定清除该需求的所有排班安排？'}
                           onConfirm={async (e) => {
                             e?.stopPropagation();
-                            try {
-                              await api.deleteSchedulesByDemand(demand.id);
-                              message.success('已清除排班');
-                              fetchData();
-                            } catch (err: any) {
-                              message.error(err.message || '清除失败');
+                            if (isPublished) {
+                              // 已发布排班：仅本地清除，点击发布时统一提交
+                              setSchedules(prev => prev.filter(s => s.demandId !== demand.id));
+                              setPendingChangeDemandIds(prev => new Set(prev).add(demand.id));
+                              message.success('已清除排班（草稿），请点击发布生效');
+                            } else {
+                              try {
+                                await api.deleteSchedulesByDemand(demand.id);
+                                message.success('已清除排班');
+                                fetchData();
+                              } catch (err: any) {
+                                message.error(err.message || '清除失败');
+                              }
                             }
                           }}
                           okText="确定"
@@ -941,7 +1116,7 @@ const ScheduleWorkbench: React.FC = () => {
                           </Button>
                         </Popconfirm>
                       )}
-                      {isPublished ? (
+                      {isPublished && !pendingChangeDemandIds.has(demand.id) ? (
                         <Button size="small" type="text" disabled>已发布</Button>
                       ) : (
                         <Button
@@ -951,7 +1126,31 @@ const ScheduleWorkbench: React.FC = () => {
                           onClick={async (e) => {
                             e.stopPropagation();
                             try {
-                              await api.publishSchedules(demand.id);
+                              if (pendingChangeDemandIds.has(demand.id)) {
+                                // 有本地待提交变更：先同步到后端再发布
+                                await api.deleteSchedulesByDemand(demand.id);
+                                const currentSchedules = schedules.filter(s => s.demandId === demand.id);
+                                if (currentSchedules.length > 0) {
+                                  const batchData = currentSchedules.map(s => ({
+                                    staffId: s.staffId,
+                                    demandId: s.demandId,
+                                    date: s.date,
+                                    percentage: s.percentage,
+                                    product: s.product,
+                                    testManager: s.testManager || '测试经理',
+                                    versionType: s.versionType,
+                                  }));
+                                  await api.createSchedulesBatch(batchData);
+                                }
+                                await api.publishSchedules(demand.id);
+                                setPendingChangeDemandIds(prev => {
+                                  const next = new Set(prev);
+                                  next.delete(demand.id);
+                                  return next;
+                                });
+                              } else {
+                                await api.publishSchedules(demand.id);
+                              }
                               message.success('发布成功');
                               fetchData();
                             } catch (err: any) {
@@ -959,7 +1158,7 @@ const ScheduleWorkbench: React.FC = () => {
                             }
                           }}
                         >
-                          发布
+                          {pendingChangeDemandIds.has(demand.id) ? '提交并发布' : '发布'}
                         </Button>
                       )}
                     </div>
@@ -972,7 +1171,54 @@ const ScheduleWorkbench: React.FC = () => {
 
         {/* 右侧：排班视图 */}
         <Card
-          title="人力排布视图"
+          title={
+            <Space size={8}>
+              <span>人力排布视图</span>
+              {draggedSchedule && (
+                <div
+                  onDrop={() => {
+                    handleDeleteSchedule(draggedSchedule);
+                    setDraggedSchedule(null);
+                    setDragOverTrash(false);
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  onDragEnter={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setDragOverTrash(true);
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setDragOverTrash(false);
+                  }}
+                  style={{
+                    width: dragOverTrash ? 40 : 32,
+                    height: dragOverTrash ? 40 : 32,
+                    borderRadius: 8,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: dragOverTrash ? '#ff4d4f' : '#fff1f0',
+                    border: dragOverTrash ? '2px solid #ff4d4f' : '2px dashed #ff4d4f',
+                    cursor: 'pointer',
+                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                    transform: dragOverTrash ? 'scale(1.2)' : 'scale(1)',
+                    boxShadow: dragOverTrash ? '0 0 14px rgba(255, 77, 79, 0.55)' : 'none',
+                  }}
+                >
+                  <DeleteOutlined style={{
+                    color: dragOverTrash ? '#fff' : '#ff4d4f',
+                    fontSize: dragOverTrash ? 20 : 16,
+                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                  }} />
+                </div>
+              )}
+            </Space>
+          }
           extra={
             <DatePicker
               picker="week"
@@ -1020,14 +1266,37 @@ const ScheduleWorkbench: React.FC = () => {
               style={{ width: 80 }}
               size="small"
             />
+            <span style={{ fontSize: 13, color: '#666', marginLeft: 12 }}>产品:</span>
+            <Select
+              mode="multiple"
+              placeholder="全部产品"
+              style={{ minWidth: 200 }}
+              value={filterProducts}
+              onChange={setFilterProducts}
+              allowClear
+              maxTagCount={2}
+              options={[...new Set(schedules.map(s => s.product).filter(Boolean))].map(p => ({ label: p, value: p }))}
+            />
           </div>
 
+          <style>{`
+            .drop-active {
+              transform: scale(0.88);
+              transition: transform 0.2s ease;
+              box-shadow: inset 0 0 12px rgba(24, 144, 255, 0.35);
+              border: 2px dashed #1890ff !important;
+              border-radius: 6px;
+              background: rgba(24, 144, 255, 0.06);
+            }
+          `}</style>
+          <div onDragLeave={() => setDragOverCell(null)}>
           <table className="kanban-table" style={{ minWidth: 1200 }}>
             <thead>
               <tr>
                 <th style={{ minWidth: 60, position: 'sticky', left: 0, background: '#fafafa', zIndex: 1 }}>姓名</th>
                 <th style={{ minWidth: 40, position: 'sticky', left: 60, background: '#fafafa', zIndex: 1 }}>系数</th>
                 <th style={{ minWidth: 60, position: 'sticky', left: 100, background: '#fafafa', zIndex: 1 }}>测试类型</th>
+                <th style={{ minWidth: 80, position: 'sticky', left: 160, background: '#fafafa', zIndex: 1 }}>熟悉模块</th>
                 {weekDates.map((date, index) => {
                   const isWeekend = [0, 6].includes(date.day());
                   return (
@@ -1047,11 +1316,19 @@ const ScheduleWorkbench: React.FC = () => {
               {staffs.filter(s => {
                 if (s.status !== 'active') return false;
                 // 测试组长只看本组
-                if (user?.role === 'testLead' && user?.testType && s.testType !== user.testType) return false;
+                if (user?.roles?.includes('testLead') && user?.testType && s.testType !== user.testType) return false;
                 // 筛选控件
                 if (filterTestTypes.length > 0 && s.testType && !filterTestTypes.includes(s.testType)) return false;
                 if (filterCoeffMin !== null && s.currentCoefficient < filterCoeffMin) return false;
                 if (filterCoeffMax !== null && s.currentCoefficient > filterCoeffMax) return false;
+                // 产品筛选：只展示在选定产品上有排班的人员
+                if (filterProducts.length > 0) {
+                  const weekDateStrs = weekDates.map(d => d.format('YYYY-MM-DD'));
+                  const hasMatchingSchedule = schedules.some(
+                    sch => sch.staffId === s.id && weekDateStrs.includes(sch.date) && filterProducts.includes(sch.product)
+                  );
+                  if (!hasMatchingSchedule) return false;
+                }
                 return true;
               }).map(staff => (
                 <tr key={staff.id}>
@@ -1087,18 +1364,36 @@ const ScheduleWorkbench: React.FC = () => {
                   }}>
                     {staff.testType || '-'}
                   </td>
+                  <td style={{
+                    position: 'sticky',
+                    left: 160,
+                    background: '#fff',
+                    zIndex: 1,
+                    padding: '4px 2px',
+                    fontSize: '11px',
+                    color: '#666',
+                  }}>
+                    {staff.familiarModules ? (
+                      <Tooltip title={staff.familiarModules}>
+                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 70 }}>
+                          {staff.familiarModules}
+                        </div>
+                      </Tooltip>
+                    ) : '-'}
+                  </td>
                   {weekDates.map((date, dayIndex) => {
                     const dateStr = date.format('YYYY-MM-DD');
                     const daySchedules = getSchedulesForStaffAndDate(staff.id, dateStr);
                     const totalPercent = getTotalPercentage(staff.id, dateStr);
-                    const maxCapacity = (staff.currentCoefficient || 1) * 100;
+                    const dailyStatus = getDailyStatus(staff.id, dateStr);
+                    const statusPercentage = getDailyStatusPercentage(staff.id, dateStr);
+                    const rawMaxCapacity = (staff.currentCoefficient || 1) * 100;
+                    const statusFactor = dailyStatus && dailyStatus !== 'AVAILABLE' ? (1 - statusPercentage / 100) : 1;
+                    const maxCapacity = rawMaxCapacity * statusFactor;
                     const hasConflict = totalPercent > maxCapacity;
                     const isWeekend = [5, 6].includes(dayIndex);
-                    const dailyStatus = getDailyStatus(staff.id, dateStr);
                     const canAssign = isAvailableForAssignment(staff.id, dateStr);
                     const isTestLead = hasPermission('manageDailyAvailability');
-                    const canManageStatus = isTestLead && daySchedules.length === 0;
-
                     const statusBgColor = dailyStatus && dailyStatus !== 'AVAILABLE'
                       ? `${DailyStatusColors[dailyStatus]}18`
                       : undefined;
@@ -1109,28 +1404,112 @@ const ScheduleWorkbench: React.FC = () => {
                     let cellCursor = 'default';
                     if (selectedDemand) {
                       cellCursor = canAssign ? 'copy' : 'not-allowed';
-                    } else if (canManageStatus) {
+                    } else if (isTestLead) {
                       cellCursor = 'pointer';
                     }
 
-                    const cellContent = daySchedules.length === 0 ? (
-                      dailyStatus && dailyStatus !== 'AVAILABLE' ? (
-                        <div style={{
-                          color: DailyStatusColors[dailyStatus],
-                          fontSize: 10,
-                          padding: '8px 2px',
-                          fontWeight: 500,
-                          textAlign: 'center',
-                        }}>
+                    const popoverKey = `${staff.id}-${dateStr}`;
+                    const isStatusPopoverOpen = statusPopoverOpen === popoverKey;
+
+                    const statusPopoverProps = {
+                      content: (
+                        <div style={{ minWidth: 200 }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 12, color: '#666', whiteSpace: 'nowrap' }}>状态</span>
+                              <Select
+                                value={statusDraft}
+                                onChange={(val) => setStatusDraft(val)}
+                                style={{ flex: 1 }}
+                                size="small"
+                                options={(['AVAILABLE', 'OTHER_TASKS', 'SECONDED', 'ON_LEAVE'] as DailyAvailabilityStatus[]).map(s => ({
+                                  value: s,
+                                  label: <span style={{ color: DailyStatusColors[s] }}>{DailyStatusLabels[s]}</span>,
+                                }))}
+                              />
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>投入百分比</div>
+                              <InputNumber
+                                min={0}
+                                max={100}
+                                step={5}
+                                value={statusDraft === 'AVAILABLE' ? 100 : statusPctDraft}
+                                onChange={(val) => setStatusPctDraft(val ?? 100)}
+                                disabled={statusDraft === 'AVAILABLE'}
+                                style={{ width: '100%' }}
+                                addonAfter="%"
+                                size="small"
+                              />
+                            </div>
+                            <Divider style={{ margin: '4px 0' }} />
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                              <Button size="small" onClick={() => setStatusPopoverOpen(null)}>取消</Button>
+                              <Button type="primary" size="small" onClick={() => {
+                                if (statusDraft === 'AVAILABLE') {
+                                  handleStatusChange(staff, dateStr, 'AVAILABLE');
+                                } else {
+                                  handleStatusChange(staff, dateStr, statusDraft, statusPctDraft);
+                                }
+                              }}>确定</Button>
+                            </div>
+                          </div>
+                        </div>
+                      ),
+                      title: `${staff.name} - ${dateStr}`,
+                      trigger: 'click' as const,
+                      open: isStatusPopoverOpen,
+                      onOpenChange: (open: boolean) => {
+                        if (open) {
+                          setStatusDraft(dailyStatus || 'AVAILABLE');
+                          setStatusPctDraft(statusPercentage);
+                          setStatusPopoverOpen(popoverKey);
+                        } else {
+                          setStatusPopoverOpen(null);
+                        }
+                      },
+                      placement: 'bottom' as const,
+                    };
+
+                    const statusCardNode = dailyStatus && dailyStatus !== 'AVAILABLE' ? (
+                      <div
+                        className="status-card"
+                        style={{
+                          background: `${DailyStatusColors[dailyStatus]}18`,
+                          borderLeft: `3px solid ${DailyStatusColors[dailyStatus]}`,
+                        }}
+                      >
+                        <div style={{ color: DailyStatusColors[dailyStatus], fontWeight: 500 }}>
                           {DailyStatusLabels[dailyStatus]}
                         </div>
-                      ) : (
-                        <div style={{ color: '#ccc', fontSize: 10, padding: '8px 0' }}>
-                          空闲
+                        <div style={{ fontSize: 10, color: '#666' }}>
+                          {statusPercentage < 100 ? `${statusPercentage}%` : ''}
                         </div>
-                      )
-                    ) : (
+                      </div>
+                    ) : null;
+
+                    const idleNode = (!dailyStatus || dailyStatus === 'AVAILABLE') && daySchedules.length === 0 ? (
+                      <div style={{ color: '#ccc', fontSize: 10, padding: '8px 0', cursor: isTestLead ? 'pointer' : undefined }}>
+                        空闲
+                      </div>
+                    ) : null;
+
+                    const cellContent = (
                       <div>
+                        {isTestLead ? (
+                          <>
+                            {statusCardNode ? (
+                              <Popover {...statusPopoverProps}>{statusCardNode}</Popover>
+                            ) : idleNode ? (
+                              <Popover {...statusPopoverProps}>{idleNode}</Popover>
+                            ) : null}
+                          </>
+                        ) : (
+                          <>
+                            {statusCardNode}
+                            {idleNode}
+                          </>
+                        )}
                         {daySchedules.map(schedule => (
                           <div
                             key={schedule.id}
@@ -1151,7 +1530,7 @@ const ScheduleWorkbench: React.FC = () => {
                           >
                             <div
                               className="product-name"
-                              style={{ color: getVersionTypeColor(schedule.versionType), fontWeight: 500 }}
+                              style={{ color: getVersionTypeColor(schedule.versionType), fontWeight: 500, paddingRight: 18 }}
                             >
                               {schedule.product}
                             </div>
@@ -1184,27 +1563,30 @@ const ScheduleWorkbench: React.FC = () => {
                             </div>
                           </div>
                         ))}
-                        <div style={{
-                          marginTop: 4,
-                          fontSize: 10,
-                          color: hasConflict ? '#ff4d4f' : '#666',
-                          fontWeight: hasConflict ? 600 : 400,
-                        }}>
-                          {totalPercent}%
-                        </div>
+                        {daySchedules.length > 0 && (
+                          <div style={{
+                            marginTop: 4,
+                            fontSize: 10,
+                            color: hasConflict ? '#ff4d4f' : '#666',
+                            fontWeight: hasConflict ? 600 : 400,
+                          }}>
+                            {totalPercent}%
+                          </div>
+                        )}
                       </div>
                     );
 
-                    const isStatusPopoverOpen = statusPopoverOpen === `${staff.id}-${dateStr}`;
-
+                    const cellKey = `${staff.id}-${dateStr}`;
                     return (
                       <td
                         key={dateStr}
                         style={{
                           background: cellBackground,
                           cursor: cellCursor,
+                          padding: 0,
                         }}
                         onDrop={() => {
+                          setDragOverCell(null);
                           if (draggedSchedule) {
                             handleScheduleTransfer(draggedSchedule, staff, dateStr);
                           } else {
@@ -1214,42 +1596,16 @@ const ScheduleWorkbench: React.FC = () => {
                         onDragOver={(e) => {
                           if (selectedDemand || draggedSchedule) {
                             e.preventDefault();
-                          }
-                        }}
-                        onClick={() => {
-                          if (canManageStatus) {
-                            setStatusPopoverOpen(isStatusPopoverOpen ? null : `${staff.id}-${dateStr}`);
+                            setDragOverCell(cellKey);
                           }
                         }}
                       >
-                        {canManageStatus ? (
-                          <Popover
-                            content={
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                {(['AVAILABLE', 'OTHER_TASKS', 'SECONDED', 'ON_LEAVE'] as DailyAvailabilityStatus[]).map(s => (
-                                  <Button
-                                    key={s}
-                                    size="small"
-                                    type={dailyStatus === s ? 'primary' : 'text'}
-                                    style={{ color: DailyStatusColors[s], textAlign: 'left' }}
-                                    onClick={() => handleStatusChange(staff, dateStr, s)}
-                                  >
-                                    {DailyStatusLabels[s]}
-                                  </Button>
-                                ))}
-                              </div>
-                            }
-                            title={`${staff.name} - ${dateStr}`}
-                            trigger="click"
-                            open={isStatusPopoverOpen}
-                            onOpenChange={(open) => { if (!open) setStatusPopoverOpen(null); }}
-                            placement="bottom"
-                          >
-                            <div style={{ minHeight: 20 }}>{cellContent}</div>
-                          </Popover>
-                        ) : (
-                          cellContent
-                        )}
+                        <div
+                          className={dragOverCell === cellKey ? 'drop-active' : ''}
+                          style={{ width: '100%', minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        >
+                        {cellContent}
+                        </div>
                       </td>
                     );
                   })}
@@ -1257,6 +1613,7 @@ const ScheduleWorkbench: React.FC = () => {
               ))}
             </tbody>
           </table>
+          </div>
         </Card>
       </div>
 

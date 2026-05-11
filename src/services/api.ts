@@ -59,6 +59,7 @@ class ApiService {
       token: string;
       username: string;
       role: string;
+      roles: string[];
       displayName: string;
       testType?: string;
     }>('/auth/login', {
@@ -160,6 +161,13 @@ class ApiService {
     return this.request<any>(`/demands/${id}/approve`, { method: 'PUT' });
   }
 
+  async approveDemandWithChanges(id: number, data: any) {
+    return this.request<any>(`/demands/${id}/approve-with-changes`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
   async rejectDemand(id: number) {
     return this.request<void>(`/demands/${id}/reject`, { method: 'PUT' });
   }
@@ -257,6 +265,10 @@ class ApiService {
     return this.request<string>(`/staff/role/${empNo}`);
   }
 
+  async getStaffRolesByEmpNo(empNo: string) {
+    return this.request<string[]>(`/staff/roles/${empNo}`);
+  }
+
   async updateStaff(id: number, staff: any) {
     return this.request<any>(`/staff/${id}`, {
       method: 'PUT',
@@ -282,10 +294,10 @@ class ApiService {
     return this.request<any[]>(`/daily-statuses?startDate=${startDate}&endDate=${endDate}`);
   }
 
-  async setDailyStatus(staffId: number, date: string, status: string) {
+  async setDailyStatus(staffId: number, date: string, status: string, percentage?: number) {
     return this.request<void>('/daily-statuses', {
       method: 'PUT',
-      body: JSON.stringify({ staffId, date, status }),
+      body: JSON.stringify({ staffId, date, status, percentage }),
     });
   }
 

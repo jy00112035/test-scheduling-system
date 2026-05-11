@@ -3,6 +3,8 @@ package com.testscheduling.dto;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 public class RegisterRequest {
 
@@ -18,6 +20,9 @@ public class RegisterRequest {
     @NotBlank(message = "显示名称不能为空")
     private String displayName;
 
-    @NotBlank(message = "角色不能为空")
     private String role;
+
+    private List<String> roles;
+
+    private String familiarModules;
 }

@@ -14,6 +14,8 @@ import {
   InputNumber,
   Upload,
   Alert,
+  Tooltip,
+  Switch,
 } from 'antd';
 import {
   PlusOutlined,
@@ -26,6 +28,8 @@ import {
 import dayjs from 'dayjs';
 import * as XLSX from 'xlsx';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import { useUserRole } from '../context/UserRoleContext';
 
 const { Option } = Select;
 
@@ -40,6 +44,8 @@ interface Staff {
   currentCoefficient: number;
   status: 'active' | 'leave' | 'resigned';
   role?: string;
+  familiarModules?: string;
+  confidentialClearance?: boolean;
 }
 
 interface FieldConfig {
@@ -61,7 +67,9 @@ interface ImportRow {
   initialCoefficient: number;
   currentCoefficient: number;
   status: 'active';
-  role: string;
+  roles: string[];
+  familiarModules: string;
+  confidentialClearance: boolean;
 }
 
 const roleMapping: Record<string, string> = {
@@ -83,6 +91,10 @@ const roleLabels: Record<string, string> = {
 };
 
 const StaffManagement: React.FC = () => {
+  const { user } = useAuth();
+  const { hasRole } = useUserRole();
+  const isTestLead = hasRole('testLead');
+
   const [staffs, setStaffs] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
@@ -148,7 +160,7 @@ const StaffManagement: React.FC = () => {
 
   // 下载导入模板
   const downloadTemplate = () => {
-    const template = '工号,姓名,入职日期,所属项目,测试类型,初始系数,当前系数,角色\nEMP001,张三,2024-01-01,功能测试组,功能测试,0.3,0.3,测试执行人员\nEMP002,李四,2024-01-15,自动化测试组,自动化测试,0.5,0.5,测试经理';
+    const template = '工号,姓名,入职日期,所属项目,测试类型,初始系数,当前系数,角色,熟悉模块,保密权限\nEMP001,张三,2024-01-01,功能测试组,功能测试,0.3,0.3,测试执行人员;测试组长,登录模块;支付模块,是\nEMP002,李四,2024-01-15,自动化测试组,自动化测试,0.5,0.5,测试经理,自动化框架,否';
     const blob = new Blob([template], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
@@ -207,6 +219,8 @@ const StaffManagement: React.FC = () => {
           const initialCoefKey = headers.find(h => h === '初始系数' || h === 'initialCoefficient');
           const currentCoefKey = headers.find(h => h === '当前系数' || h === 'currentCoefficient');
           const roleKey = headers.find(h => h === '角色' || h === 'role');
+          const familiarModulesKey = headers.find(h => h === '熟悉模块' || h === 'familiarModules');
+          const confidentialClearanceKey = headers.find(h => h === '保密权限' || h === 'confidentialClearance');
 
           if (!empNoKey || !nameKey) {
             message.error(`Excel文件缺少必要列：工号、姓名。当前表头：${headers.join(', ')}`);
@@ -244,7 +258,9 @@ const StaffManagement: React.FC = () => {
             }
 
             const rawRole = String(rowObj[roleKey] || '').trim();
-            const role = roleMapping[rawRole] || 'testExecutor';
+            const roles: string[] = rawRole
+              ? rawRole.split(';').map(r => roleMapping[r.trim()] || r.trim())
+              : ['testExecutor'];
 
             const rowData: ImportRow = {
               name: String(rowObj[nameKey] || '').trim(),
@@ -255,7 +271,9 @@ const StaffManagement: React.FC = () => {
               initialCoefficient: parseFloat(String(rowObj[initialCoefKey] || '0.3')) || 0.3,
               currentCoefficient: parseFloat(String(rowObj[currentCoefKey] || '0.3')) || 0.3,
               status: 'active',
-              role,
+              roles,
+              familiarModules: String(rowObj[familiarModulesKey] || '').trim(),
+              confidentialClearance: ['是', 'true', '有', 'yes'].includes(String(rowObj[confidentialClearanceKey] || '').trim()),
             };
             parsedData.push(rowData);
           }
@@ -325,17 +343,21 @@ const StaffManagement: React.FC = () => {
   const handleEdit = async (record: Staff) => {
     setEditingStaff(record);
     try {
-      const role = await api.getStaffRoleByEmpNo(record.empNo);
+      const roles = await api.getStaffRolesByEmpNo(record.empNo);
       form.setFieldsValue({
         ...record,
         joinDate: dayjs(record.joinDate),
-        role: role || 'testExecutor',
+        roles: roles && roles.length > 0 ? roles : ['testExecutor'],
+        familiarModules: record.familiarModules || '',
+        confidentialClearance: record.confidentialClearance || false,
       });
     } catch {
       form.setFieldsValue({
         ...record,
         joinDate: dayjs(record.joinDate),
-        role: 'testExecutor',
+        roles: ['testExecutor'],
+        familiarModules: record.familiarModules || '',
+        confidentialClearance: record.confidentialClearance || false,
       });
     }
     setIsModalVisible(true);
@@ -412,6 +434,9 @@ const StaffManagement: React.FC = () => {
       const staffData = {
         ...values,
         joinDate: values.joinDate.format('YYYY-MM-DD'),
+        role: values.roles?.[0] || 'testExecutor',
+        familiarModules: values.familiarModules || '',
+        confidentialClearance: values.confidentialClearance || false,
       };
 
       if (editingStaff) {
@@ -526,10 +551,42 @@ const StaffManagement: React.FC = () => {
     },
     {
       title: '角色',
-      dataIndex: 'role',
-      key: 'role',
-      width: 120,
-      render: (role: string) => role ? (roleLabels[role] || role) : '-',
+      dataIndex: 'roles',
+      key: 'roles',
+      width: 200,
+      render: (_roles: string[], record: any) => {
+        const displayRoles = _roles && _roles.length > 0 ? _roles : (record.role ? [record.role] : []);
+        if (displayRoles.length === 0) return '-';
+        return (
+          <Space wrap size={[0, 2]}>
+            {displayRoles.map((r: string) => (
+              <Tag key={r} color="blue">{roleLabels[r] || r}</Tag>
+            ))}
+          </Space>
+        );
+      },
+    },
+    {
+      title: '保密权限',
+      dataIndex: 'confidentialClearance',
+      key: 'confidentialClearance',
+      width: 80,
+      render: (val: boolean) => (
+        <Tag color={val ? 'red' : 'default'}>{val ? '有' : '无'}</Tag>
+      ),
+    },
+    {
+      title: '熟悉模块',
+      dataIndex: 'familiarModules',
+      key: 'familiarModules',
+      width: 150,
+      render: (text: string) => text ? (
+        <Tooltip title={text}>
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}>
+            {text}
+          </div>
+        </Tooltip>
+      ) : '-',
     },
     {
       title: '操作',
@@ -538,29 +595,33 @@ const StaffManagement: React.FC = () => {
       fixed: 'right' as const,
       render: (_: any, record: Staff) => (
         <Space size="small">
-          <Button
-            type="link"
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => handleEdit(record)}
-          >
-            编辑
-          </Button>
-          <Popconfirm
-            title="确定删除此人员？"
-            onConfirm={() => handleDelete(record.id)}
-            okText="确定"
-            cancelText="取消"
-          >
+          {(!isTestLead || (user?.testType && record.testType === user.testType)) && (
             <Button
               type="link"
               size="small"
-              danger
-              icon={<DeleteOutlined />}
+              icon={<EditOutlined />}
+              onClick={() => handleEdit(record)}
             >
-              删除
+              编辑
             </Button>
-          </Popconfirm>
+          )}
+          {!isTestLead && (
+            <Popconfirm
+              title="确定删除此人员？"
+              onConfirm={() => handleDelete(record.id)}
+              okText="确定"
+              cancelText="取消"
+            >
+              <Button
+                type="link"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+              >
+                删除
+              </Button>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -570,7 +631,7 @@ const StaffManagement: React.FC = () => {
     <div>
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16, gap: 8 }}>
-          {selectedRowKeys.length > 0 && (
+          {!isTestLead && selectedRowKeys.length > 0 && (
             <Popconfirm
               title={`确定删除选中的 ${selectedRowKeys.length} 条人员数据？`}
               onConfirm={handleBatchDelete}
@@ -588,23 +649,27 @@ const StaffManagement: React.FC = () => {
             style={{ width: 250 }}
             allowClear
           />
-          <Upload
-            showUploadList={false}
-            accept=".xlsx,.xls"
-            beforeUpload={() => false}
-            onChange={handleFileChange}
-          >
-            <Button icon={<UploadOutlined />} onClick={openImportModal}>
-              导入人员
+          {!isTestLead && (
+            <Upload
+              showUploadList={false}
+              accept=".xlsx,.xls"
+              beforeUpload={() => false}
+              onChange={handleFileChange}
+            >
+              <Button icon={<UploadOutlined />} onClick={openImportModal}>
+                导入人员
+              </Button>
+            </Upload>
+          )}
+          {!isTestLead && (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={handleAdd}
+            >
+              添加人员
             </Button>
-          </Upload>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={handleAdd}
-          >
-            添加人员
-          </Button>
+          )}
         </div>
 
         <Table
@@ -613,7 +678,7 @@ const StaffManagement: React.FC = () => {
           rowKey="id"
           bordered
           loading={loading}
-          rowSelection={{
+          rowSelection={isTestLead ? undefined : {
             selectedRowKeys,
             onChange: (keys) => setSelectedRowKeys(keys),
           }}
@@ -638,11 +703,13 @@ const StaffManagement: React.FC = () => {
         open={isModalVisible}
         onCancel={() => setIsModalVisible(false)}
         footer={null}
-        width={500}
+        width={600}
       >
         <Form
           form={form}
-          layout="vertical"
+          layout="horizontal"
+          labelCol={{ span: 6 }}
+          wrapperCol={{ span: 18 }}
           onFinish={handleSubmit}
           initialValues={{
             initialCoefficient: 0.3,
@@ -738,11 +805,11 @@ const StaffManagement: React.FC = () => {
           </Form.Item>
 
           <Form.Item
-            name="role"
+            name="roles"
             label="角色"
-            rules={[{ required: true, message: '请选择角色' }]}
+            rules={[{ required: true, message: '请选择至少一个角色' }]}
           >
-            <Select placeholder="请选择角色">
+            <Select mode="multiple" placeholder="请选择角色（可多选）">
               <Option value="testManager">测试经理</Option>
               <Option value="testLead">测试组长</Option>
               <Option value="resourceManager">资源主管</Option>
@@ -750,6 +817,21 @@ const StaffManagement: React.FC = () => {
               <Option value="testExecutor">测试执行人员</Option>
               <Option value="fieldAdmin">字段管理员</Option>
             </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="familiarModules"
+            label="熟悉模块"
+          >
+            <Input.TextArea rows={2} placeholder="请输入熟悉的模块" />
+          </Form.Item>
+
+          <Form.Item
+            name="confidentialClearance"
+            label="保密权限"
+            valuePropName="checked"
+          >
+            <Switch checkedChildren="有" unCheckedChildren="无" />
           </Form.Item>
 
           <Form.Item style={{ marginTop: 24 }}>
@@ -859,7 +941,18 @@ const StaffManagement: React.FC = () => {
                 { title: '测试类型', dataIndex: 'testType', key: 'testType', width: 100 },
                 { title: '初始系数', dataIndex: 'initialCoefficient', key: 'initialCoefficient', width: 80 },
                 { title: '当前系数', dataIndex: 'currentCoefficient', key: 'currentCoefficient', width: 80 },
-                { title: '角色', dataIndex: 'role', key: 'role', width: 100, render: (r: string) => roleLabels[r] || r },
+                { title: '角色', dataIndex: 'roles', key: 'roles', width: 120,
+                  render: (roles: string[]) => {
+                    if (!roles || roles.length === 0) return '-';
+                    return roles.map(r => roleLabels[r] || r).join('; ');
+                  },
+                },
+                { title: '熟悉模块', dataIndex: 'familiarModules', key: 'familiarModules', width: 150,
+                  render: (text: string) => text || '-',
+                },
+                { title: '保密权限', dataIndex: 'confidentialClearance', key: 'confidentialClearance', width: 80,
+                  render: (val: boolean) => val ? '是' : '否',
+                },
               ]}
             />
             <div style={{ marginTop: 16, textAlign: 'right' }}>

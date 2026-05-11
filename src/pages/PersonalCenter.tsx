@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Card, Form, Input, Button, message, Descriptions, Tag } from 'antd';
+import { Card, Form, Input, Button, message, Descriptions, Tag, Space } from 'antd';
 import { LockOutlined } from '@ant-design/icons';
 import { useAuth } from '../context/AuthContext';
 import { useUserRole } from '../context/UserRoleContext';
@@ -11,11 +11,21 @@ const roleLabels: Record<string, string> = {
   projectManager: '项目经理',
   testExecutor: '测试执行人员',
   fieldAdmin: '字段管理员',
+  testLead: '测试组长',
+};
+
+const roleColors: Record<string, string> = {
+  testManager: 'blue',
+  resourceManager: 'orange',
+  projectManager: 'green',
+  testExecutor: 'purple',
+  fieldAdmin: 'red',
+  testLead: 'cyan',
 };
 
 const PersonalCenter: React.FC = () => {
   const { user } = useAuth();
-  const { role } = useUserRole();
+  const { roles } = useUserRole();
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
 
@@ -43,7 +53,11 @@ const PersonalCenter: React.FC = () => {
           <Descriptions.Item label="用户名">{user?.username}</Descriptions.Item>
           <Descriptions.Item label="显示名称">{user?.displayName}</Descriptions.Item>
           <Descriptions.Item label="当前角色">
-            <Tag color="blue">{roleLabels[role] || role}</Tag>
+            <Space wrap>
+              {roles.map(r => (
+                <Tag key={r} color={roleColors[r] || 'blue'}>{roleLabels[r] || r}</Tag>
+              ))}
+            </Space>
           </Descriptions.Item>
         </Descriptions>
       </Card>

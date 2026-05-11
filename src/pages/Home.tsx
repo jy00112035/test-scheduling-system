@@ -22,7 +22,7 @@ import { useUserRole } from '../context/UserRoleContext';
 
 const Home: React.FC = () => {
   const navigate = useNavigate();
-  const { role } = useUserRole();
+  const { roles, hasPermission } = useUserRole();
 
   const features = [
     {
@@ -76,28 +76,9 @@ const Home: React.FC = () => {
   ];
 
   const getRoleFeatures = () => {
-    switch (role) {
-      case 'testManager':
-        return features.filter(f => [
-          'dashboard', 'demands', 'kanban', 'reports',
-        ].includes(f.key));
-      case 'resourceManager':
-        return features.filter(f => [
-          'dashboard', 'demands', 'kanban', 'schedule', 'staff', 'reports',
-        ].includes(f.key));
-      case 'projectManager':
-        return features.filter(f => [
-          'dashboard', 'demands', 'kanban', 'schedule', 'staff', 'reports',
-        ].includes(f.key));
-      case 'testExecutor':
-        return features.filter(f => [
-          'kanban',
-        ].includes(f.key));
-      case 'fieldAdmin':
-        return features;
-      default:
-        return features.filter(f => ['kanban'].includes(f.key));
-    }
+    return features.filter(f =>
+      f.permissions.some(p => hasPermission(p))
+    );
   };
 
   return (
@@ -120,10 +101,13 @@ const Home: React.FC = () => {
             <div>
               <Statistic
                 title="当前用户"
-                value={role === 'testManager' ? '测试经理' :
-                  role === 'resourceManager' ? '资源主管' :
-                    role === 'projectManager' ? '项目经理' :
-                      role === 'testExecutor' ? '测试执行人员' : '字段管理员'}
+                value={roles.length > 1 ? `${roles.length}个角色` : (
+                  roles[0] === 'testManager' ? '测试经理' :
+                  roles[0] === 'resourceManager' ? '资源主管' :
+                  roles[0] === 'projectManager' ? '项目经理' :
+                  roles[0] === 'testExecutor' ? '测试执行人员' :
+                  roles[0] === 'testLead' ? '测试组长' : '字段管理员'
+                )}
               />
             </div>
             <div>
@@ -179,7 +163,7 @@ const Home: React.FC = () => {
       {/* 角色功能说明 */}
       <Card title="角色功能说明">
         <div style={{ display: 'flex', justifyContent: 'space-around', flexWrap: 'wrap', gap: '24px' }}>
-          {role === 'testManager' && (
+          {roles.includes('testManager') && (
             <div style={{ textAlign: 'center' }}>
               <h3>测试经理</h3>
               <p style={{ fontSize: '14px', color: '#666' }}>负责提交和管理测试需求</p>
@@ -192,7 +176,7 @@ const Home: React.FC = () => {
               </Space>
             </div>
           )}
-          {role === 'resourceManager' && (
+          {roles.includes('resourceManager') && (
             <div style={{ textAlign: 'center' }}>
               <h3>资源主管</h3>
               <p style={{ fontSize: '14px', color: '#666' }}>负责整体测试人力排布</p>
@@ -205,7 +189,7 @@ const Home: React.FC = () => {
               </Space>
             </div>
           )}
-          {role === 'projectManager' && (
+          {roles.includes('projectManager') && (
             <div style={{ textAlign: 'center' }}>
               <h3>项目经理</h3>
               <p style={{ fontSize: '14px', color: '#666' }}>负责项目排期决策</p>
@@ -218,7 +202,7 @@ const Home: React.FC = () => {
               </Space>
             </div>
           )}
-          {role === 'testExecutor' && (
+          {roles.includes('testExecutor') && (
             <div style={{ textAlign: 'center' }}>
               <h3>测试执行人员</h3>
               <p style={{ fontSize: '14px', color: '#666' }}>实际执行测试任务</p>
@@ -229,7 +213,7 @@ const Home: React.FC = () => {
               </Space>
             </div>
           )}
-          {role === 'fieldAdmin' && (
+          {roles.includes('fieldAdmin') && (
             <div style={{ textAlign: 'center' }}>
               <h3>字段管理员</h3>
               <p style={{ fontSize: '14px', color: '#666' }}>系统配置和管理</p>

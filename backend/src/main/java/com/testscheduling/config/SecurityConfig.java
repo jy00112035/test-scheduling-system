@@ -19,6 +19,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
@@ -60,9 +61,10 @@ public class SecurityConfig {
                 String token = authHeader.substring(7);
                 try {
                     String username = jwtUtil.getUsernameFromToken(token);
-                    String role = jwtUtil.getRoleFromToken(token);
+                    List<String> roles = jwtUtil.getRolesFromToken(token);
                     request.setAttribute("username", username);
-                    request.setAttribute("role", role);
+                    request.setAttribute("roles", roles);
+                    request.setAttribute("role", roles.isEmpty() ? null : roles.get(0));
                 } catch (Exception e) {
                     // Invalid token, continue anyway
                 }

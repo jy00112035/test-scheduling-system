@@ -3,6 +3,7 @@ package com.testscheduling.dto;
 import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 @Data
 public class StaffRequest {
@@ -15,4 +16,7 @@ public class StaffRequest {
     private BigDecimal currentCoefficient;
     private String status;
     private String role;
+    private List<String> roles;
+    private String familiarModules;
+    private Boolean confidentialClearance;
 }

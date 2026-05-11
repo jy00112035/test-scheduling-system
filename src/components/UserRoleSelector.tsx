@@ -1,24 +1,24 @@
 import React, { useState } from 'react';
-import { Avatar, Dropdown, Menu, message } from 'antd';
+import { Avatar, Dropdown, Menu, message, Tag } from 'antd';
 import { UserOutlined, LogoutOutlined } from '@ant-design/icons';
 import { UserRole } from '../context/UserRoleContext';
 import { useAuth } from '../context/AuthContext';
 
 interface UserRoleSelectorProps {
-  currentRole: UserRole;
+  currentRoles: UserRole[];
   currentUser: string;
   onNavigatePersonal?: () => void;
 }
 
 const UserRoleSelector: React.FC<UserRoleSelectorProps> = ({
-  currentRole,
+  currentRoles,
   currentUser,
   onNavigatePersonal,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const { logout } = useAuth();
 
-  const roles: { value: UserRole; label: string; color: string }[] = [
+  const roleDefs: { value: UserRole; label: string; color: string }[] = [
     { value: 'testManager', label: '测试经理', color: 'blue' },
     { value: 'testLead', label: '测试组长', color: 'cyan' },
     { value: 'resourceManager', label: '资源主管', color: 'orange' },
@@ -33,6 +33,9 @@ const UserRoleSelector: React.FC<UserRoleSelectorProps> = ({
     message.success('已退出登录');
   };
 
+  const primaryRole = currentRoles[0];
+  const primaryInfo = roleDefs.find(r => r.value === primaryRole);
+
   const userMenu = (
     <Menu>
       <Menu.Item key="profile" disabled>
@@ -40,8 +43,11 @@ const UserRoleSelector: React.FC<UserRoleSelectorProps> = ({
           <div style={{ fontWeight: 600, marginBottom: 4 }}>
             {currentUser}
           </div>
-          <div style={{ fontSize: 12, color: '#666' }}>
-            {roles.find(r => r.value === currentRole)?.label}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+            {currentRoles.map(r => {
+              const def = roleDefs.find(d => d.value === r);
+              return <Tag key={r} color={def?.color}>{def?.label || r}</Tag>;
+            })}
           </div>
         </div>
       </Menu.Item>
@@ -58,7 +64,12 @@ const UserRoleSelector: React.FC<UserRoleSelectorProps> = ({
     </Menu>
   );
 
-  const currentRoleInfo = roles.find(r => r.value === currentRole);
+  const roleLabel = currentRoles
+    .map(r => {
+      const def = roleDefs.find(d => d.value === r);
+      return def?.label || r;
+    })
+    .join(' / ');
 
   return (
     <Dropdown
@@ -75,12 +86,12 @@ const UserRoleSelector: React.FC<UserRoleSelectorProps> = ({
         padding: '4px 8px',
         borderRadius: 4,
         transition: 'background-color 0.2s',
-        maxWidth: 180,
+        maxWidth: 200,
       }}>
         <Avatar
           size="small"
           style={{
-            backgroundColor: currentRoleInfo?.color,
+            backgroundColor: primaryInfo?.color,
             verticalAlign: 'middle',
             flexShrink: 0,
           }}
@@ -108,7 +119,7 @@ const UserRoleSelector: React.FC<UserRoleSelectorProps> = ({
             textOverflow: 'ellipsis',
             lineHeight: 1.3,
           }}>
-            {currentRoleInfo?.label}
+            {roleLabel}
           </span>
         </div>
       </div>

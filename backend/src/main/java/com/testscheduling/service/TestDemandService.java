@@ -102,7 +102,9 @@ public class TestDemandService {
     }
 
     public List<TestDemand> findPendingApproval() {
-        return testDemandRepository.findByStatus(TestDemand.DemandStatus.submitted);
+        List<TestDemand> demands = testDemandRepository.findByStatus(TestDemand.DemandStatus.submitted);
+        demands.forEach(this::enrichWithDetails);
+        return demands;
     }
 
     @Transactional
@@ -130,6 +132,31 @@ public class TestDemandService {
         for (Long id : ids) {
             approveDemand(id);
         }
+    }
+
+    @Transactional
+    public TestDemand approveWithChanges(Long id, TestDemand modifiedDemand) {
+        TestDemand demand = findById(id);
+        if (demand.getStatus() != TestDemand.DemandStatus.submitted) {
+            throw new RuntimeException("只能修改并批准状态为'已提交待审批'的需求");
+        }
+        // 只允许修改测试周期
+        demand.setStartDate(modifiedDemand.getStartDate());
+        demand.setEndDate(modifiedDemand.getEndDate());
+
+        // 更新人力明细
+        if (modifiedDemand.getManpowerDetails() != null) {
+            detailRepository.deleteByDemandId(id);
+            for (DemandManpowerDetail detail : modifiedDemand.getManpowerDetails()) {
+                detail.setDemandId(id);
+                detailRepository.save(detail);
+            }
+            BigDecimal total = computeTotalManpower(modifiedDemand.getManpowerDetails());
+            demand.setManpowerDemand(total);
+        }
+
+        demand.setStatus(TestDemand.DemandStatus.pending);
+        return enrichWithDetails(testDemandRepository.save(demand));
     }
 
     @Transactional

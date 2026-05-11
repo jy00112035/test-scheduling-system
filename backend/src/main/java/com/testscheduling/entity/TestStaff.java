@@ -7,6 +7,7 @@ import lombok.AllArgsConstructor;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Table(name = "test_staff")
@@ -42,6 +43,15 @@ public class TestStaff {
 
     @Transient
     private String role;
+
+    @Transient
+    private List<String> roles;
+
+    @Transient
+    private String familiarModules;
+
+    @Transient
+    private Boolean confidentialClearance;
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

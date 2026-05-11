@@ -35,7 +35,7 @@ const AppContent: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string>('');
   const [isRegistering, setIsRegistering] = useState(false);
-  const { role, userName, hasPermission } = useUserRole();
+  const { roles, userName, hasPermission } = useUserRole();
   const [pendingRegCount, setPendingRegCount] = useState(0);
   const [pendingDemandCount, setPendingDemandCount] = useState(0);
 
@@ -76,7 +76,7 @@ const AppContent: React.FC = () => {
     } else {
       setSelectedKey('demands');
     }
-  }, [role, hasPermission]);
+  }, [roles, hasPermission]);
 
   // 根据用户角色过滤菜单
   const menuItems = [
@@ -214,7 +214,7 @@ const AppContent: React.FC = () => {
             {menuItems.find(item => item.key === selectedKey)?.label}
           </span>
           <UserRoleSelector
-            currentRole={role}
+            currentRoles={roles}
             currentUser={userName}
             onNavigatePersonal={() => setSelectedKey('personal')}
           />

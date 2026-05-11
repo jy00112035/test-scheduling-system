@@ -91,6 +91,15 @@ public class TestDemandController {
         }
     }
 
+    @PutMapping("/{id}/approve-with-changes")
+    public ApiResponse<TestDemand> approveWithChanges(@PathVariable Long id, @RequestBody TestDemand demand) {
+        try {
+            return ApiResponse.success("修改并批准成功", testDemandService.approveWithChanges(id, demand));
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
     @PutMapping("/batch-approve")
     public ApiResponse<Void> batchApproveDemands(@RequestBody List<Long> ids) {
         try {

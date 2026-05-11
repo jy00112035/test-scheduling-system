@@ -97,6 +97,7 @@ export interface StaffDailyStatus {
   staffId: number;
   date: string;
   status: DailyAvailabilityStatus;
+  percentage?: number;
 }
 
 export const DailyStatusLabels: Record<DailyAvailabilityStatus, string> = {

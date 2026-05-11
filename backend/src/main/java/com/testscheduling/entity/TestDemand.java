@@ -45,6 +45,9 @@ public class TestDemand {
 
     private String submittedBy;
 
+    @Column
+    private Boolean confidential = false;
+
     @Transient
     private List<DemandManpowerDetail> manpowerDetails;
 

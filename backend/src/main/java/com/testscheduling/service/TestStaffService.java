@@ -55,7 +55,12 @@ public class TestStaffService {
     private void enrichWithRole(TestStaff staff) {
         if (staff != null) {
             userRepository.findByUsername(staff.getEmpNo())
-                .ifPresent(user -> staff.setRole(user.getRole()));
+                .ifPresent(user -> {
+                    staff.setRole(user.getRole());
+                    staff.setRoles(user.getRoles());
+                    staff.setFamiliarModules(user.getFamiliarModules());
+                    staff.setConfidentialClearance(user.getConfidentialClearance());
+                });
         }
     }
 
@@ -88,8 +93,14 @@ public class TestStaffService {
         User user = new User();
         user.setUsername(request.getEmpNo());
         user.setPassword(passwordEncoder.encode(plainPassword));
-        user.setRole(request.getRole() != null ? request.getRole() : "testExecutor");
+        if (request.getRoles() != null && !request.getRoles().isEmpty()) {
+            user.setRoles(request.getRoles());
+        } else {
+            user.setRole(request.getRole() != null ? request.getRole() : "testExecutor");
+        }
         user.setDisplayName(request.getName());
+        user.setFamiliarModules(request.getFamiliarModules());
+        user.setConfidentialClearance(request.getConfidentialClearance() != null ? request.getConfidentialClearance() : false);
         user.setEnabled(true);
         userRepository.save(user);
 
@@ -124,11 +135,15 @@ public class TestStaffService {
             user.setUsername(request.getEmpNo());
         }
 
-        if (request.getRole() != null) {
+        if (request.getRoles() != null && !request.getRoles().isEmpty()) {
+            user.setRoles(request.getRoles());
+        } else if (request.getRole() != null) {
             user.setRole(request.getRole());
         } else if (user.getRole() == null) {
             user.setRole("testExecutor");
         }
+        user.setFamiliarModules(request.getFamiliarModules());
+        user.setConfidentialClearance(request.getConfidentialClearance() != null ? request.getConfidentialClearance() : false);
         userRepository.save(user);
 
         return saved;
@@ -156,5 +171,11 @@ public class TestStaffService {
         return userRepository.findByUsername(empNo)
             .map(User::getRole)
             .orElse(null);
+    }
+
+    public List<String> getRolesByEmpNo(String empNo) {
+        return userRepository.findByUsername(empNo)
+            .map(User::getRoles)
+            .orElse(List.of());
     }
 }

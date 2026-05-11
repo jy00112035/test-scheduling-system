@@ -4,6 +4,7 @@ import { api } from '../services/api';
 interface User {
   username: string;
   role: string;
+  roles: string[];
   displayName: string;
   testType?: string;
 }
@@ -41,6 +42,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const userData = {
       username: data.username,
       role: data.role,
+      roles: data.roles || [data.role],
       displayName: data.displayName,
       testType: data.testType,
     };

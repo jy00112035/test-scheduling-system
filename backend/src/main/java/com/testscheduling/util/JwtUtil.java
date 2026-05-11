@@ -10,7 +10,9 @@ import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Component
 public class JwtUtil {
@@ -26,9 +28,11 @@ public class JwtUtil {
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
-    public String generateToken(String username, String role) {
+    public String generateToken(String username, List<String> roles) {
         Map<String, Object> claims = new HashMap<>();
-        claims.put("role", role);
+        String primaryRole = (roles != null && !roles.isEmpty()) ? roles.get(0) : null;
+        claims.put("role", primaryRole);
+        claims.put("roles", roles);
         return createToken(claims, username);
     }
 
@@ -59,6 +63,18 @@ public class JwtUtil {
 
     public String getRoleFromToken(String token) {
         return (String) getClaimsFromToken(token).get("role");
+    }
+
+    public List<String> getRolesFromToken(String token) {
+        Object rolesObj = getClaimsFromToken(token).get("roles");
+        if (rolesObj instanceof List<?> list) {
+            return list.stream()
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .collect(Collectors.toList());
+        }
+        String singleRole = getRoleFromToken(token);
+        return singleRole != null ? List.of(singleRole) : List.of();
     }
 
     public boolean isTokenExpired(String token) {

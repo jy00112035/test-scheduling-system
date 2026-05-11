@@ -3,12 +3,20 @@ import { useAuth } from './AuthContext';
 
 export type UserRole = 'testManager' | 'resourceManager' | 'projectManager' | 'testExecutor' | 'fieldAdmin' | 'testLead';
 
+const ALL_ROLES: UserRole[] = ['testManager', 'resourceManager', 'projectManager', 'testExecutor', 'fieldAdmin', 'testLead'];
+
+function isValidRole(r: string): r is UserRole {
+  return (ALL_ROLES as string[]).includes(r);
+}
+
 interface UserRoleContextType {
   role: UserRole;
+  roles: UserRole[];
   setRole: (role: UserRole) => void;
   userName: string;
   setUserName: (name: string) => void;
   hasPermission: (permission: string) => boolean;
+  hasRole: (roleName: string) => boolean;
 }
 
 const UserRoleContext = createContext<UserRoleContextType | undefined>(undefined);
@@ -19,19 +27,21 @@ interface UserRoleProviderProps {
 
 export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) => {
   const { user } = useAuth();
-  const [role, setRole] = useState<UserRole>('testManager');
+  const [roles, setRoles] = useState<UserRole[]>(['testManager']);
   const [userName, setUserName] = useState('');
 
-  // 当用户登录时，从后端获取的角色同步到本地状态
   useEffect(() => {
     if (user) {
-      setRole(user.role as UserRole);
+      const userRoles: UserRole[] = (user.roles?.length > 0
+        ? user.roles.filter(isValidRole)
+        : [user.role].filter(isValidRole)) as UserRole[];
+      setRoles(userRoles.length > 0 ? userRoles : ['testExecutor']);
       setUserName(user.username);
     }
   }, [user]);
 
   // 权限矩阵
-  const permissions = {
+  const permissions: Record<UserRole, string[]> = {
     testManager: [
       'viewDashboard',
       'viewTaskKanban',
@@ -111,25 +121,34 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
       'viewTestDemands',
       'viewReports',
       'manageDailyAvailability',
+      'manageStaff',
       'personalCenter',
     ],
   };
 
   const hasPermission = (permission: string): boolean => {
-    return permissions[role]?.includes(permission) || false;
+    return roles.some(role => permissions[role]?.includes(permission));
   };
 
+  const hasRole = (roleName: string): boolean => {
+    return (roles as string[]).includes(roleName);
+  };
+
+  const role = roles.length > 0 ? roles[0] : 'testExecutor';
+
   const handleSetRole = (newRole: UserRole) => {
-    setRole(newRole);
+    setRoles([newRole]);
   };
 
   return (
     <UserRoleContext.Provider value={{
       role,
+      roles,
       setRole: handleSetRole,
       userName,
       setUserName,
       hasPermission,
+      hasRole,
     }}>
       {children}
     </UserRoleContext.Provider>

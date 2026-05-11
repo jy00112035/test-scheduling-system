@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 @Component
 public class DataInitializer implements CommandLineRunner {
@@ -37,7 +38,7 @@ public class DataInitializer implements CommandLineRunner {
             User admin = new User();
             admin.setUsername("admin");
             admin.setPassword(passwordEncoder.encode("admin123"));
-            admin.setRole("fieldAdmin");
+            admin.setRoles(List.of("fieldAdmin", "testManager"));
             admin.setDisplayName("管理员");
             admin.setEnabled(true);
             userRepository.save(admin);
@@ -45,7 +46,7 @@ public class DataInitializer implements CommandLineRunner {
             User testManager = new User();
             testManager.setUsername("testmanager");
             testManager.setPassword(passwordEncoder.encode("test123"));
-            testManager.setRole("testManager");
+            testManager.setRoles(List.of("testManager"));
             testManager.setDisplayName("测试经理");
             testManager.setEnabled(true);
             userRepository.save(testManager);
@@ -53,7 +54,7 @@ public class DataInitializer implements CommandLineRunner {
             User resourceManager = new User();
             resourceManager.setUsername("resourcemanager");
             resourceManager.setPassword(passwordEncoder.encode("resource123"));
-            resourceManager.setRole("resourceManager");
+            resourceManager.setRoles(List.of("resourceManager"));
             resourceManager.setDisplayName("资源主管");
             resourceManager.setEnabled(true);
             userRepository.save(resourceManager);
@@ -61,7 +62,7 @@ public class DataInitializer implements CommandLineRunner {
             User projectManager = new User();
             projectManager.setUsername("projectmanager");
             projectManager.setPassword(passwordEncoder.encode("project123"));
-            projectManager.setRole("projectManager");
+            projectManager.setRoles(List.of("projectManager"));
             projectManager.setDisplayName("项目经理");
             projectManager.setEnabled(true);
             userRepository.save(projectManager);
@@ -69,7 +70,7 @@ public class DataInitializer implements CommandLineRunner {
             User testExecutor = new User();
             testExecutor.setUsername("testexecutor");
             testExecutor.setPassword(passwordEncoder.encode("test123"));
-            testExecutor.setRole("testExecutor");
+            testExecutor.setRoles(List.of("testExecutor"));
             testExecutor.setDisplayName("测试执行人员");
             testExecutor.setEnabled(true);
             userRepository.save(testExecutor);
@@ -77,7 +78,7 @@ public class DataInitializer implements CommandLineRunner {
             User testLead = new User();
             testLead.setUsername("testlead");
             testLead.setPassword(passwordEncoder.encode("test123"));
-            testLead.setRole("testLead");
+            testLead.setRoles(List.of("testLead"));
             testLead.setDisplayName("测试组长");
             testLead.setTestType("功能测试");
             testLead.setEnabled(true);

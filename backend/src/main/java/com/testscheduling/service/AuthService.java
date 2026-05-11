@@ -38,12 +38,13 @@ public class AuthService {
             throw new RuntimeException("账户已被禁用，请等待管理员审批");
         }
 
-        String token = jwtUtil.generateToken(user.getUsername(), user.getRole());
+        String token = jwtUtil.generateToken(user.getUsername(), user.getRoles());
 
         return new LoginResponse(
             token,
             user.getUsername(),
             user.getRole(),
+            user.getRoles(),
             user.getDisplayName(),
             user.getTestType()
         );
@@ -74,15 +75,22 @@ public class AuthService {
         user.setUsername(request.getUsername());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setDisplayName(request.getDisplayName());
-        user.setRole(request.getRole());
+        user.setFamiliarModules(request.getFamiliarModules());
+        if (request.getRoles() != null && !request.getRoles().isEmpty()) {
+            user.setRoles(request.getRoles());
+        } else {
+            user.setRole(request.getRole());
+        }
         user.setEnabled(false);
         userRepository.save(user);
     }
 
-    public List<User> getPendingApprovals(String approverRole) {
-        if ("resourceManager".equals(approverRole)) {
-            return userRepository.findByEnabledFalseAndRole("testExecutor");
-        } else if ("projectManager".equals(approverRole)) {
+    public List<User> getPendingApprovals(List<String> approverRoles) {
+        if (approverRoles.contains("resourceManager") && approverRoles.contains("projectManager")) {
+            return userRepository.findByEnabledFalse();
+        } else if (approverRoles.contains("resourceManager")) {
+            return userRepository.findPendingByRole("testExecutor");
+        } else if (approverRoles.contains("projectManager")) {
             List<User> all = userRepository.findByEnabledFalse();
             List<User> filtered = new ArrayList<>();
             for (User u : all) {

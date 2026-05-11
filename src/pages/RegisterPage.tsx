@@ -19,11 +19,15 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateLogin }) => {
     displayName: string;
     password: string;
     confirmPassword: string;
-    role: string;
+    roles: string[];
   }) => {
     setLoading(true);
     try {
-      await api.register(values);
+      await api.register({
+        ...values,
+        role: values.roles[0],
+        roles: values.roles,
+      } as any);
       message.success('注册成功！请等待管理员审批后登录。');
       form.resetFields();
     } catch (error: any) {
@@ -97,17 +101,25 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateLogin }) => {
           </Form.Item>
 
           <Form.Item
-            name="role"
+            name="roles"
             label="角色"
-            rules={[{ required: true, message: '请选择角色' }]}
+            rules={[{ required: true, message: '请选择至少一个角色' }]}
           >
-            <Select placeholder="请选择角色">
+            <Select mode="multiple" placeholder="请选择角色（可多选）">
               <Option value="testExecutor">测试执行人员（资源主管审批）</Option>
               <Option value="testManager">测试经理（项目经理审批）</Option>
               <Option value="resourceManager">资源主管（项目经理审批）</Option>
               <Option value="projectManager">项目经理（项目经理审批）</Option>
               <Option value="fieldAdmin">字段管理员（项目经理审批）</Option>
+              <Option value="testLead">测试组长（项目经理审批）</Option>
             </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="familiarModules"
+            label="熟悉模块"
+          >
+            <Input.TextArea rows={2} placeholder="请输入熟悉的模块" />
           </Form.Item>
 
           <Form.Item style={{ marginBottom: 12 }}>
