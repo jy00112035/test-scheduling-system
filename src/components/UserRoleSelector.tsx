@@ -6,14 +6,12 @@ import { useAuth } from '../context/AuthContext';
 
 interface UserRoleSelectorProps {
   currentRole: UserRole;
-  onRoleChange: (role: UserRole) => void;
   currentUser: string;
   onNavigatePersonal?: () => void;
 }
 
 const UserRoleSelector: React.FC<UserRoleSelectorProps> = ({
   currentRole,
-  onRoleChange,
   currentUser,
   onNavigatePersonal,
 }) => {
@@ -29,12 +27,6 @@ const UserRoleSelector: React.FC<UserRoleSelectorProps> = ({
     { value: 'fieldAdmin', label: '字段管理员', color: 'red' },
   ];
 
-  const handleRoleChange = (role: UserRole) => {
-    onRoleChange(role);
-    setIsOpen(false);
-    message.success(`已切换为${roles.find(r => r.value === role)?.label}`);
-  };
-
   const handleLogout = () => {
     logout();
     setIsOpen(false);
@@ -43,7 +35,7 @@ const UserRoleSelector: React.FC<UserRoleSelectorProps> = ({
 
   const userMenu = (
     <Menu>
-      <Menu.Item key="profile">
+      <Menu.Item key="profile" disabled>
         <div style={{ padding: 8 }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>
             {currentUser}
@@ -58,24 +50,6 @@ const UserRoleSelector: React.FC<UserRoleSelectorProps> = ({
         <UserOutlined />
         个人中心
       </Menu.Item>
-      <Menu.Divider />
-      {roles.map(role => (
-        <Menu.Item
-          key={role.value}
-          onClick={() => handleRoleChange(role.value)}
-          style={{ color: role.color }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: role.color,
-            }} />
-            {role.label}
-          </div>
-        </Menu.Item>
-      ))}
       <Menu.Divider />
       <Menu.Item key="logout" onClick={handleLogout} danger>
         <LogoutOutlined />

@@ -11,3 +11,4 @@ backend/*.iml
 *.jar
 *.war
 *.iml
+backend/data/

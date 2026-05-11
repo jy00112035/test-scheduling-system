@@ -35,7 +35,7 @@ const AppContent: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string>('');
   const [isRegistering, setIsRegistering] = useState(false);
-  const { role, setRole, userName, hasPermission } = useUserRole();
+  const { role, userName, hasPermission } = useUserRole();
   const [pendingRegCount, setPendingRegCount] = useState(0);
   const [pendingDemandCount, setPendingDemandCount] = useState(0);
 
@@ -215,7 +215,6 @@ const AppContent: React.FC = () => {
           </span>
           <UserRoleSelector
             currentRole={role}
-            onRoleChange={setRole}
             currentUser={userName}
             onNavigatePersonal={() => setSelectedKey('personal')}
           />

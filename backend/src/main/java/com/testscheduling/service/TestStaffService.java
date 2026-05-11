@@ -84,7 +84,7 @@ public class TestStaffService {
             throw new RuntimeException("该工号对应的用户账号已存在");
         }
 
-        String plainPassword = PasswordGenerator.generateRandomPassword();
+        String plainPassword = "12345678";
         User user = new User();
         user.setUsername(request.getEmpNo());
         user.setPassword(passwordEncoder.encode(plainPassword));

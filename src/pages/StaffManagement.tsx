@@ -418,29 +418,10 @@ const StaffManagement: React.FC = () => {
         await api.updateStaff(editingStaff.id, staffData);
         message.success('人员信息已更新');
       } else {
-        const result = await api.createStaff(staffData);
+        await api.createStaff(staffData);
         await syncFieldConfigs([staffData]);
         await fetchFieldConfigs();
-        if (result.generatedPassword) {
-          Modal.success({
-            title: '人员创建成功',
-            content: (
-              <div>
-                <p>人员信息已创建，系统已自动生成登录密码。</p>
-                <Alert
-                  type="warning"
-                  message={`初始密码：${result.generatedPassword}`}
-                  description="请妥善保管此密码，该密码仅显示一次。用户可使用工号作为用户名登录。"
-                  showIcon
-                  style={{ marginTop: 12 }}
-                />
-              </div>
-            ),
-            width: 480,
-          });
-        } else {
-          message.success('人员信息已添加');
-        }
+        message.success('人员已添加，初始登录密码为 12345678');
       }
 
       setIsModalVisible(false);
