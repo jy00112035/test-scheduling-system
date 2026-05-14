@@ -29,6 +29,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateRegister }) => {
     <div style={{
       minHeight: '100vh',
       display: 'flex',
+      flexDirection: 'column',
       justifyContent: 'center',
       alignItems: 'center',
       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
@@ -93,6 +94,16 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateRegister }) => {
           </p>
         </div>
       </Card>
+      <div style={{ marginTop: 24, paddingBottom: 24, textAlign: 'center' }}>
+        <a
+          href="https://beian.miit.gov.cn/"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, textDecoration: 'none' }}
+        >
+          陕ICP备2026011261号-1
+        </a>
+      </div>
     </div>
   );
 };

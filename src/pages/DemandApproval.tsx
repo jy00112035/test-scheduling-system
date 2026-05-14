@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Space, Popconfirm, message, Tag, Modal, DatePicker, InputNumber, Divider } from 'antd';
+import { Table, Button, Space, Popconfirm, message, Tag, Modal, DatePicker, InputNumber, Divider, Select } from 'antd';
 import { CheckOutlined, CloseOutlined, EditOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '../services/api';
@@ -20,6 +20,9 @@ const DemandApproval: React.FC = () => {
   const [editManpower, setEditManpower] = useState<Record<string, number>>({});
   const [editLoading, setEditLoading] = useState(false);
   const [testTypes, setTestTypes] = useState<string[]>([]);
+  const [originalPriority, setOriginalPriority] = useState<string>('');
+  const [editPriority, setEditPriority] = useState<string>('');
+  const [priorityOptions, setPriorityOptions] = useState<string[]>([]);
 
   useEffect(() => {
     fetchPending();
@@ -33,6 +36,10 @@ const DemandApproval: React.FC = () => {
       if (typeConfig && typeConfig.options) {
         const types = typeConfig.options.split(',').filter((o: string) => o.trim());
         setTestTypes(types);
+      }
+      const priorityConfig = configs.find((c: any) => c.fieldName === 'priority');
+      if (priorityConfig && priorityConfig.options) {
+        setPriorityOptions(priorityConfig.options.split(',').filter((o: string) => o.trim()));
       }
     } catch (error) {
       // ignore
@@ -81,10 +88,14 @@ const DemandApproval: React.FC = () => {
     ]);
 
     let details: DemandManpowerDetail[] = [];
+    let priority = record.priority || '';
     try {
       const fullDemand = await api.getDemand(record.id);
       if (fullDemand.manpowerDetails) {
         details = fullDemand.manpowerDetails;
+      }
+      if (fullDemand.priority) {
+        priority = fullDemand.priority;
       }
     } catch (e) {
       if (record.manpowerDetails) {
@@ -98,6 +109,8 @@ const DemandApproval: React.FC = () => {
     });
     setOriginalManpower(orig);
     setEditManpower({ ...orig });
+    setOriginalPriority(priority);
+    setEditPriority(priority);
     setEditModalOpen(true);
   };
 
@@ -123,6 +136,7 @@ const DemandApproval: React.FC = () => {
         startDate: editDateRange[0].format('YYYY-MM-DD'),
         endDate: editDateRange[1].format('YYYY-MM-DD'),
         manpowerDetails,
+        priority: editPriority,
       });
       message.success('修改并批准成功');
       setEditModalOpen(false);
@@ -176,9 +190,21 @@ const DemandApproval: React.FC = () => {
       ),
     },
     {
+      title: '保密项目', dataIndex: 'confidential', key: 'confidential', width: 90,
+      render: (v: boolean) => v ? <Tag color="red">是</Tag> : <Tag>否</Tag>,
+    },
+    {
+      title: '优先级', dataIndex: 'priority', key: 'priority', width: 80,
+      render: (p: string) => {
+        const colorMap: Record<string, string> = { '高': 'red', '中': 'orange', '低': 'green' };
+        return p ? <Tag color={colorMap[p] || 'default'}>{p}</Tag> : '-';
+      },
+    },
+    {
       title: '人力需求', dataIndex: 'manpowerDemand', key: 'manpowerDemand', width: 100,
       render: (v: number) => `${v} 人/天`,
     },
+    { title: '备注', dataIndex: 'description', key: 'description', width: 120, render: (t: string) => t || '-' },
     { title: '提交人', dataIndex: 'submittedBy', key: 'submittedBy', width: 100 },
     {
       title: '提交时间', dataIndex: 'createdAt', key: 'createdAt', width: 180,
@@ -269,6 +295,26 @@ const DemandApproval: React.FC = () => {
               <div>
                 <span style={{ color: '#666' }}>版本类型：</span>
                 <Tag color="blue">{editingDemand.versionType}</Tag>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 16, padding: '12px 16px', background: '#f5f5f5', borderRadius: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>需求优先级</span>
+                <Tag color={originalPriority === '高' ? 'red' : originalPriority === '中' ? 'orange' : 'green'}>
+                  {originalPriority || '未设置'}
+                </Tag>
+                <span style={{ color: '#999', fontSize: 12 }}>→</span>
+                <Select
+                  value={editPriority || undefined}
+                  onChange={(val) => setEditPriority(val)}
+                  style={{ width: 120 }}
+                  placeholder="选择优先级"
+                >
+                  {priorityOptions.map(opt => (
+                    <Select.Option key={opt} value={opt}>{opt}</Select.Option>
+                  ))}
+                </Select>
               </div>
             </div>
 

@@ -128,6 +128,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         versionPhase: values.versionPhase,
         description: values.description || '',
         confidential: values.confidential || false,
+        priority: values.priority,
         status: 'submitted',
         submittedBy: userName || '测试经理',
       };
@@ -282,6 +283,18 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
               placeholder="请选择版本所处阶段"
             >
               {getSelectOptions('versionPhase').map((option, index) => (
+                <Option key={index} value={option}>{option}</Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="priority"
+            label="需求优先级"
+            rules={[{ required: true, message: '请选择需求优先级' }]}
+          >
+            <Select placeholder="请选择需求优先级">
+              {getSelectOptions('priority').map((option, index) => (
                 <Option key={index} value={option}>{option}</Option>
               ))}
             </Select>

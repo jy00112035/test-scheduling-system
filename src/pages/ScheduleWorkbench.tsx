@@ -75,13 +75,30 @@ const ScheduleWorkbench: React.FC = () => {
   const [selectedDemandIds, setSelectedDemandIds] = useState<Set<number>>(new Set());
   const [unfulfilledDemands, setUnfulfilledDemands] = useState<Set<number>>(new Set());
   const [unfulfilledDetails, setUnfulfilledDetails] = useState<Array<{ product: string; shortage: number }>>([]);
+  const [aiDays, setAiDays] = useState(0);
+  const [aiFullAllocate, setAiFullAllocate] = useState(false);
+  const [editingPriorityId, setEditingPriorityId] = useState<number | null>(null);
+  const [priorityOptions, setPriorityOptions] = useState<string[]>([]);
 
-  const { hasPermission } = useUserRole();
+  const { hasPermission, hasRole } = useUserRole();
   const { user } = useAuth();
 
   useEffect(() => {
     fetchData();
+    fetchPriorityOptions();
   }, []);
+
+  const fetchPriorityOptions = async () => {
+    try {
+      const configs = await api.getFieldConfigs();
+      const priorityConfig = configs.find((c: any) => c.fieldName === 'priority');
+      if (priorityConfig && priorityConfig.options) {
+        setPriorityOptions(priorityConfig.options.split(',').filter((o: string) => o.trim()));
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -273,10 +290,14 @@ const ScheduleWorkbench: React.FC = () => {
       return;
     }
 
-    // 按需求人天降序排列（大需求优先）
-    const sortedDemands = [...pendingDemands].sort(
-      (a, b) => Number(b.manpowerDemand) - Number(a.manpowerDemand)
-    );
+    // 按优先级排序（高 > 中 > 低），同级按需求人天降序
+    const priorityOrder: Record<string, number> = { '高': 0, '中': 1, '低': 2 };
+    const sortedDemands = [...pendingDemands].sort((a, b) => {
+      const pa = priorityOrder[a.priority] ?? 9;
+      const pb = priorityOrder[b.priority] ?? 9;
+      if (pa !== pb) return pa - pb;
+      return Number(b.manpowerDemand) - Number(a.manpowerDemand);
+    });
 
     const newSchedules: any[] = [];
     const loadMap = new Map<string, number>(); // key: "staffId-date", value: total%
@@ -298,40 +319,53 @@ const ScheduleWorkbench: React.FC = () => {
           remainingByType.set(`${demand.id}-${d.testType}`, Number(d.manpowerDemand));
         });
       } else {
-        // 旧数据兼容：无 manpowerDetails，使用总人天
         remainingByType.set(`${demand.id}-__ALL__`, Number(demand.manpowerDemand));
       }
     }
 
+    // 计算所有需求的最早开始日期（不早于今天）
+    const today = dayjs();
+    const globalStart = today;
+    // 计算排班截止日期
+    const globalEnd = aiFullAllocate
+      ? dayjs().add(90, 'day')
+      : aiDays === 0
+        ? dayjs()
+        : dayjs().add(aiDays, 'day');
+
+    let allDates = getDemandDates(globalStart, globalEnd);
+    if (!includeWeekends) {
+      allDates = allDates.filter(d => ![0, 6].includes(d.day()));
+    }
+    allDates.sort((a, b) => a.unix() - b.unix());
+
+    // 收集每个需求需要的测试类型
+    const demandNeededTypes = new Map<number, string[]>();
     for (const demand of sortedDemands) {
-      const demandStart = dayjs(demand.startDate);
-      const demandEnd = dayjs(demand.endDate);
-
-      // 获取需求完整周期的可用日期
-      let dates = getDemandDates(demandStart, demandEnd);
-
-      // 过滤周末（若不勾选节假日）
-      if (!includeWeekends) {
-        dates = dates.filter(d => ![0, 6].includes(d.day()));
-      }
-
-      // 按日期先后排序
-      dates.sort((a, b) => a.unix() - b.unix());
-
-      // 获取该需求需要的测试类型（仍有剩余人天的）
-      const neededTypes = (demand.manpowerDetails || []).length > 0
+      demandNeededTypes.set(demand.id, (demand.manpowerDetails || []).length > 0
         ? demand.manpowerDetails.map((d: any) => d.testType)
-        : ['__ALL__'];
+        : ['__ALL__']);
+    }
 
-      for (const date of dates) {
-        const dateStr = date.format('YYYY-MM-DD');
+    // 日期外层循环：在同一天内按优先级依次满足所有需求
+    const completedDemands = new Set<number>();
+    for (const date of allDates) {
+      const dateStr = date.format('YYYY-MM-DD');
 
+      for (const demand of sortedDemands) {
+        if (completedDemands.has(demand.id)) continue;
+
+        // 跳过需求日期范围外的日期
+        const demandStart = dayjs(demand.startDate);
+        const demandEnd = dayjs(demand.endDate);
+        if (date.isBefore(demandStart) || date.isAfter(demandEnd)) continue;
+
+        const neededTypes = demandNeededTypes.get(demand.id) || [];
         const allAvailable = getAvailableStaffForDate(dateStr, loadMap, activeStaffs, demand.confidential);
 
         for (const staff of allAvailable) {
-          if (staff.capacity < 10) continue;
+          if (staff.capacity < 5) continue;
 
-          // 按 testType 匹配：只分配同类型员工
           const staffTestType = staff.testType;
           const matched = neededTypes.find((tt: string) => {
             if (tt === '__ALL__') return true;
@@ -341,12 +375,11 @@ const ScheduleWorkbench: React.FC = () => {
 
           const typeKey = `${demand.id}-${matched}`;
           const typeRemaining = remainingByType.get(typeKey) || 0;
-          if (typeRemaining <= 0.01) continue;
+          if (typeRemaining <= 0.001) continue;
 
-          // 分配 min(typeRemaining*100, 剩余容量)，不超过100
           const maxAlloc = Math.min(staff.capacity, 100);
           const alloc = Math.min(Math.round(typeRemaining * 100), maxAlloc);
-          if (alloc < 10) continue;
+          if (alloc < 5) continue;
 
           newSchedules.push({
             staffId: staff.id,
@@ -364,15 +397,23 @@ const ScheduleWorkbench: React.FC = () => {
         }
 
         // 检查是否所有类型都已满足
-        const allDone = neededTypes.every((tt: string) => (remainingByType.get(`${demand.id}-${tt}`) || 0) <= 0.01);
-        if (allDone) break;
+        const allDone = neededTypes.every((tt: string) => (remainingByType.get(`${demand.id}-${tt}`) || 0) <= 0.001);
+        if (allDone) {
+          completedDemands.add(demand.id);
+        }
       }
 
-      // 检查未满足情况
+      // 如果所有需求都已完成，提前终止
+      if (completedDemands.size === sortedDemands.length) break;
+    }
+
+    // 检查未满足情况
+    for (const demand of sortedDemands) {
+      const neededTypes = demandNeededTypes.get(demand.id) || [];
       const totalRemaining = neededTypes.reduce((sum: number, tt: string) =>
         sum + Math.max(0, remainingByType.get(`${demand.id}-${tt}`) || 0), 0
       );
-      if (totalRemaining > 0.01) {
+      if (totalRemaining > 0.001) {
         unfulfilledSet.add(demand.id);
         unfulfilledList.push({
           product: demand.product,
@@ -844,8 +885,9 @@ const ScheduleWorkbench: React.FC = () => {
 
   return (
     <div>
-      {/* 顶部操作栏 */}
-      <Card style={{ marginBottom: 16 }}>
+      <div style={{ position: 'sticky', top: 0, zIndex: 100, background: '#f0f2f5', paddingBottom: 8 }}>
+        {/* 顶部操作栏 */}
+        <Card style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Space>
             <Button
@@ -915,6 +957,7 @@ const ScheduleWorkbench: React.FC = () => {
           onClose={() => setUnfulfilledDetails([])}
         />
       )}
+      </div>
 
       <div style={{ display: 'flex', gap: 16 }}>
         {/* 左侧：待排期需求列表 */}
@@ -1078,6 +1121,47 @@ const ScheduleWorkbench: React.FC = () => {
                           紧急
                         </Tag>
                       )}
+                      {demand.priority && (
+                        editingPriorityId === demand.id && (hasRole('resourceManager') || hasRole('projectManager')) ? (
+                          <Select
+                            size="small"
+                            value={demand.priority}
+                            onChange={async (val) => {
+                              try {
+                                await api.updateDemandPriority(demand.id, val);
+                                setDemands(prev => prev.map(d => d.id === demand.id ? { ...d, priority: val } : d));
+                                message.success('优先级已更新');
+                              } catch (e: any) {
+                                message.error(e.message || '更新失败');
+                              }
+                              setEditingPriorityId(null);
+                            }}
+                            onBlur={() => setEditingPriorityId(null)}
+                            style={{ width: 80, marginLeft: 4 }}
+                            autoFocus
+                          >
+                            {priorityOptions.map(opt => (
+                              <Select.Option key={opt} value={opt}>{opt}</Select.Option>
+                            ))}
+                          </Select>
+                        ) : (
+                          <Tag
+                            color={(() => {
+                              const idx = priorityOptions.indexOf(demand.priority);
+                              const colors = ['red', 'orange', 'green', 'blue', 'purple', 'cyan', 'magenta', 'geekblue'];
+                              return idx >= 0 ? colors[idx % colors.length] : 'blue';
+                            })()}
+                            style={{ marginLeft: 4, cursor: (hasRole('resourceManager') || hasRole('projectManager')) ? 'pointer' : 'default' }}
+                            onClick={() => {
+                              if (hasRole('resourceManager') || hasRole('projectManager')) {
+                                setEditingPriorityId(demand.id);
+                              }
+                            }}
+                          >
+                            {demand.priority}优先级
+                          </Tag>
+                        )
+                      )}
                     </div>
                     <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                       {demandSchedules.length > 0 && (
@@ -1229,10 +1313,10 @@ const ScheduleWorkbench: React.FC = () => {
             />
           }
           style={{ flex: 1 }}
-          bodyStyle={{ padding: 0, overflow: 'auto' }}
+          bodyStyle={{ padding: 0, overflow: 'auto', maxHeight: 'calc(100vh - 220px)' }}
         >
           {/* 筛选控件 */}
-          <div style={{ padding: '8px 12px', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', borderBottom: '1px solid #f0f0f0' }}>
+          <div style={{ padding: '8px 12px', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', borderBottom: '1px solid #f0f0f0', position: 'sticky', top: 0, zIndex: 10, background: '#fff' }}>
             <span style={{ fontSize: 13, color: '#666' }}>筛选:</span>
             <Select
               mode="multiple"
@@ -1292,17 +1376,17 @@ const ScheduleWorkbench: React.FC = () => {
           <div onDragLeave={() => setDragOverCell(null)}>
           <table className="kanban-table" style={{ minWidth: 1200 }}>
             <thead>
-              <tr>
-                <th style={{ minWidth: 60, position: 'sticky', left: 0, background: '#fafafa', zIndex: 1 }}>姓名</th>
-                <th style={{ minWidth: 40, position: 'sticky', left: 60, background: '#fafafa', zIndex: 1 }}>系数</th>
-                <th style={{ minWidth: 60, position: 'sticky', left: 100, background: '#fafafa', zIndex: 1 }}>测试类型</th>
-                <th style={{ minWidth: 80, position: 'sticky', left: 160, background: '#fafafa', zIndex: 1 }}>熟悉模块</th>
+              <tr style={{ position: 'sticky', top: 40, zIndex: 5 }}>
+                <th style={{ minWidth: 60, position: 'sticky', left: 0, background: '#fafafa', zIndex: 6 }}>姓名</th>
+                <th style={{ minWidth: 40, position: 'sticky', left: 60, background: '#fafafa', zIndex: 6 }}>系数</th>
+                <th style={{ minWidth: 60, position: 'sticky', left: 100, background: '#fafafa', zIndex: 6 }}>测试类型</th>
+                <th style={{ minWidth: 80, position: 'sticky', left: 160, background: '#fafafa', zIndex: 6 }}>熟悉模块</th>
                 {weekDates.map((date, index) => {
                   const isWeekend = [0, 6].includes(date.day());
                   return (
                   <th key={date.format('YYYY-MM-DD')} style={{
                     minWidth: 70,
-                    background: isWeekend ? '#fff7e6' : undefined,
+                    background: isWeekend ? '#fff7e6' : '#fafafa',
                   }}>
                     <div style={{ color: isWeekend ? '#fa8c16' : undefined }}>{weekDays[index]}</div>
                     <div style={{ fontSize: 10, color: isWeekend ? '#fa8c16' : '#666' }}>
@@ -1819,17 +1903,45 @@ const ScheduleWorkbench: React.FC = () => {
           setAiModalOpen(false);
           setIncludeWeekends(false);
           setSelectedDemandIds(new Set());
+          setAiDays(0);
+          setAiFullAllocate(false);
         }}
-        okText="开始推荐"
+        okText="开始推荐排班"
         cancelText="取消"
         okButtonProps={{ disabled: selectedDemandIds.size === 0 }}
-        width={420}
+        width={480}
       >
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontWeight: 500, marginBottom: 8 }}>排班范围</div>
+          <Select
+            value={aiDays}
+            onChange={(val) => setAiDays(val)}
+            style={{ width: '100%' }}
+          >
+            <Select.Option value={0}>仅当天（{dayjs().format('MM月DD日')}）</Select.Option>
+            {[1, 2, 3, 4, 5, 6, 7].map(n => (
+              <Select.Option key={n} value={n}>
+                未来 {n} 天（至 {dayjs().add(n, 'day').format('MM月DD日')}）
+              </Select.Option>
+            ))}
+          </Select>
+        </div>
+
+        <Checkbox
+          checked={aiFullAllocate}
+          onChange={(e) => setAiFullAllocate(e.target.checked)}
+          style={{ marginBottom: 12 }}
+        >
+          按需求全部分配（超出周期外的日期持续排班直到满足全部人力需求）
+        </Checkbox>
+
+        <Divider style={{ margin: '12px 0' }} />
+
         <Checkbox
           checked={includeWeekends}
           onChange={(e) => setIncludeWeekends(e.target.checked)}
         >
-          节假日排班（周六、周日正常排班）
+          包含周末排班
         </Checkbox>
 
         <Divider style={{ margin: '12px 0' }} />
@@ -1863,7 +1975,7 @@ const ScheduleWorkbench: React.FC = () => {
                 <span style={{ fontSize: 13, color: '#888' }}>全选 / 取消全选</span>
               </Checkbox>
 
-              <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 6, padding: 4 }}>
+              <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 6, padding: 4 }}>
                 {eligibleDemands.length === 0 ? (
                   <div style={{ textAlign: 'center', color: '#999', padding: 16, fontSize: 13 }}>
                     没有可排期的需求
@@ -1873,6 +1985,7 @@ const ScheduleWorkbench: React.FC = () => {
                     const demandSchedules = schedules.filter(s => s.demandId === d.id);
                     const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
                     const remaining = Number(d.manpowerDemand) - allocatedDays;
+                    const priorityColor: Record<string, string> = { '高': 'red', '中': 'orange', '低': 'green' };
                     return (
                       <div
                         key={d.id}
@@ -1891,7 +2004,14 @@ const ScheduleWorkbench: React.FC = () => {
                           }}
                         />
                         <div style={{ marginLeft: 8, flex: 1 }}>
-                          <div style={{ fontSize: 13, fontWeight: 500 }}>{d.product}</div>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>
+                            {d.product}
+                            {d.priority && (
+                              <Tag color={priorityColor[d.priority] || 'default'} style={{ marginLeft: 4, fontSize: 10, lineHeight: '16px' }}>
+                                {d.priority}
+                              </Tag>
+                            )}
+                          </div>
                           <div style={{ fontSize: 11, color: '#888' }}>
                             {d.versionType}
                             {' | '}{dayjs(d.startDate).format('MM/DD')}~{dayjs(d.endDate).format('MM/DD')}
@@ -1919,7 +2039,7 @@ const ScheduleWorkbench: React.FC = () => {
         })()}
 
         <div style={{ marginTop: 16, color: '#666', fontSize: 13 }}>
-          将清空所选需求的已有排班并生成推荐方案。算法按需求人力降序分配，优先安排工作日和容量大的测试人员。
+          将清空所选需求的已有排班并生成推荐方案。按优先级排序，高优先级优先分配，同级按人力降序。
         </div>
       </Modal>
     </div>

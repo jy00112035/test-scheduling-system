@@ -191,16 +191,30 @@ const AppContent: React.FC = () => {
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Sider collapsible collapsed={collapsed} onCollapse={setCollapsed}>
-        <div className="logo" style={{ padding: '16px', color: 'white', fontSize: '18px', fontWeight: '600' }}>
-          {collapsed ? '排班' : '测试排班系统'}
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <div>
+            <div className="logo" style={{ padding: '16px', color: 'white', fontSize: '18px', fontWeight: '600' }}>
+              {collapsed ? '排班' : '测试排班系统'}
+            </div>
+            <Menu
+              theme="dark"
+              selectedKeys={[selectedKey]}
+              mode="inline"
+              items={menuItems}
+              onClick={({ key }) => setSelectedKey(key)}
+            />
+          </div>
+          <div style={{ marginTop: 'auto', padding: '12px 8px', textAlign: 'center', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+            <a
+              href="https://beian.miit.gov.cn/"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12, textDecoration: 'none' }}
+            >
+              {collapsed ? '备案' : '陕ICP备2026011261号-1'}
+            </a>
+          </div>
         </div>
-        <Menu
-          theme="dark"
-          selectedKeys={[selectedKey]}
-          mode="inline"
-          items={menuItems}
-          onClick={({ key }) => setSelectedKey(key)}
-        />
       </Sider>
       <Layout>
         <Header style={{

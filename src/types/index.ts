@@ -22,6 +22,8 @@ export interface TestDemand {
   status: 'submitted' | 'pending' | 'scheduled' | 'completed' | 'rejected';
   submittedBy: string;
   createdAt: string;
+  confidential?: boolean;
+  priority?: string;
   manpowerDetails?: DemandManpowerDetail[];
 }
 

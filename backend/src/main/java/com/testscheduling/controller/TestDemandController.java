@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/demands")
@@ -95,6 +96,16 @@ public class TestDemandController {
     public ApiResponse<TestDemand> approveWithChanges(@PathVariable Long id, @RequestBody TestDemand demand) {
         try {
             return ApiResponse.success("修改并批准成功", testDemandService.approveWithChanges(id, demand));
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @PutMapping("/{id}/priority")
+    public ApiResponse<TestDemand> updatePriority(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        try {
+            String priority = body.get("priority");
+            return ApiResponse.success("优先级更新成功", testDemandService.updatePriority(id, priority));
         } catch (Exception e) {
             return ApiResponse.error(e.getMessage());
         }

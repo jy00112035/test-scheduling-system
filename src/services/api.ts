@@ -168,6 +168,13 @@ class ApiService {
     });
   }
 
+  async updateDemandPriority(id: number, priority: string) {
+    return this.request<any>(`/demands/${id}/priority`, {
+      method: 'PUT',
+      body: JSON.stringify({ priority }),
+    });
+  }
+
   async rejectDemand(id: number) {
     return this.request<void>(`/demands/${id}/reject`, { method: 'PUT' });
   }

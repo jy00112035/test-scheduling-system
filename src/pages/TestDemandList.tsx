@@ -174,6 +174,23 @@ const TestDemandList: React.FC = () => {
       render: (phase: string) => phase || '-',
     },
     {
+      title: '优先级',
+      dataIndex: 'priority',
+      key: 'priority',
+      width: 80,
+      render: (p: string) => {
+        const colorMap: Record<string, string> = { '高': 'red', '中': 'orange', '低': 'green' };
+        return p ? <Tag color={colorMap[p] || 'default'}>{p}</Tag> : '-';
+      },
+    },
+    {
+      title: '保密项目',
+      dataIndex: 'confidential',
+      key: 'confidential',
+      width: 90,
+      render: (v: boolean) => v ? <Tag color="red">是</Tag> : <Tag>否</Tag>,
+    },
+    {
       title: '测试周期',
       key: 'dateRange',
       width: 200,

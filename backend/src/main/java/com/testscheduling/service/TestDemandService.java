@@ -73,6 +73,8 @@ public class TestDemandService {
         existing.setVersionType(demand.getVersionType());
         existing.setVersionPhase(demand.getVersionPhase());
         existing.setDescription(demand.getDescription());
+        existing.setConfidential(demand.getConfidential());
+        existing.setPriority(demand.getPriority());
         existing.setStatus(demand.getStatus());
 
         // 更新明细
@@ -140,9 +142,12 @@ public class TestDemandService {
         if (demand.getStatus() != TestDemand.DemandStatus.submitted) {
             throw new RuntimeException("只能修改并批准状态为'已提交待审批'的需求");
         }
-        // 只允许修改测试周期
+        // 只允许修改测试周期和优先级
         demand.setStartDate(modifiedDemand.getStartDate());
         demand.setEndDate(modifiedDemand.getEndDate());
+        if (modifiedDemand.getPriority() != null) {
+            demand.setPriority(modifiedDemand.getPriority());
+        }
 
         // 更新人力明细
         if (modifiedDemand.getManpowerDetails() != null) {
@@ -157,6 +162,13 @@ public class TestDemandService {
 
         demand.setStatus(TestDemand.DemandStatus.pending);
         return enrichWithDetails(testDemandRepository.save(demand));
+    }
+
+    @Transactional
+    public TestDemand updatePriority(Long id, String priority) {
+        TestDemand demand = findById(id);
+        demand.setPriority(priority);
+        return testDemandRepository.save(demand);
     }
 
     @Transactional

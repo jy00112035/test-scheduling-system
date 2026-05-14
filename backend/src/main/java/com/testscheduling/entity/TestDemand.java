@@ -48,6 +48,9 @@ public class TestDemand {
     @Column
     private Boolean confidential = false;
 
+    @Column
+    private String priority;
+
     @Transient
     private List<DemandManpowerDetail> manpowerDetails;
 

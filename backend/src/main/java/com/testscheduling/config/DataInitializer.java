@@ -146,6 +146,18 @@ public class DataInitializer implements CommandLineRunner {
     }
 
     private void initFieldConfigs() {
+        // 确保 priority 字段配置存在（即使其他配置已初始化）
+        if (fieldConfigRepository.findByFieldName("priority").isEmpty()) {
+            FieldConfig priorityConfig = new FieldConfig();
+            priorityConfig.setFieldName("priority");
+            priorityConfig.setFieldType("select");
+            priorityConfig.setOptions("高,中,低");
+            priorityConfig.setDescription("需求优先级");
+            priorityConfig.setRequired(true);
+            priorityConfig.setSortOrder(6);
+            fieldConfigRepository.save(priorityConfig);
+        }
+
         if (fieldConfigRepository.count() == 0) {
             FieldConfig f1 = new FieldConfig();
             f1.setFieldName("versionType");
@@ -191,6 +203,15 @@ public class DataInitializer implements CommandLineRunner {
             f5.setRequired(true);
             f5.setSortOrder(5);
             fieldConfigRepository.save(f5);
+
+            FieldConfig f6 = new FieldConfig();
+            f6.setFieldName("priority");
+            f6.setFieldType("select");
+            f6.setOptions("高,中,低");
+            f6.setDescription("需求优先级");
+            f6.setRequired(true);
+            f6.setSortOrder(6);
+            fieldConfigRepository.save(f6);
         }
     }
 }
