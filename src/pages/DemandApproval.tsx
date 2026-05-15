@@ -58,12 +58,15 @@ const DemandApproval: React.FC = () => {
     }
   };
 
+  const refreshCounts = () => window.dispatchEvent(new CustomEvent('refresh-pending-counts'));
+
   const handleApprove = async (id: number) => {
     try {
       await api.approveDemand(id);
       message.success('已批准');
       setPendingDemands(prev => prev.filter(d => d.id !== id));
       setSelectedRowKeys(prev => prev.filter(k => k !== id));
+      refreshCounts();
     } catch (error: any) {
       message.error(error.message || '操作失败');
     }
@@ -75,6 +78,7 @@ const DemandApproval: React.FC = () => {
       message.success('已退回');
       setPendingDemands(prev => prev.filter(d => d.id !== id));
       setSelectedRowKeys(prev => prev.filter(k => k !== id));
+      refreshCounts();
     } catch (error: any) {
       message.error(error.message || '操作失败');
     }
@@ -139,6 +143,7 @@ const DemandApproval: React.FC = () => {
         priority: editPriority,
       });
       message.success('修改并批准成功');
+      refreshCounts();
       setEditModalOpen(false);
       setEditingDemand(null);
       setPendingDemands(prev => prev.filter(d => d.id !== editingDemand.id));
@@ -154,6 +159,7 @@ const DemandApproval: React.FC = () => {
     try {
       await api.batchApproveDemands(selectedRowKeys as number[]);
       message.success(`已批量批准 ${selectedRowKeys.length} 个需求`);
+      refreshCounts();
       setPendingDemands(prev => prev.filter(d => !selectedRowKeys.includes(d.id)));
       setSelectedRowKeys([]);
     } catch (error: any) {
@@ -165,6 +171,7 @@ const DemandApproval: React.FC = () => {
     try {
       await api.batchRejectDemands(selectedRowKeys as number[]);
       message.success(`已批量退回 ${selectedRowKeys.length} 个需求`);
+      refreshCounts();
       setPendingDemands(prev => prev.filter(d => !selectedRowKeys.includes(d.id)));
       setSelectedRowKeys([]);
     } catch (error: any) {
@@ -229,8 +236,8 @@ const DemandApproval: React.FC = () => {
   ];
 
   return (
-    <div>
-      <div style={{ marginBottom: 16 }}>
+    <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 96px)' }}>
+      <div style={{ marginBottom: 16, position: 'sticky', top: 0, zIndex: 10, background: '#f0f2f5', paddingTop: 4, paddingBottom: 8 }}>
         {selectedRowKeys.length > 0 && (
           <Space>
             <Popconfirm
@@ -263,6 +270,7 @@ const DemandApproval: React.FC = () => {
         rowKey="id"
         loading={loading}
         bordered
+        sticky={{ offsetHeader: 48 }}
         rowSelection={{
           selectedRowKeys,
           onChange: (keys) => setSelectedRowKeys(keys),

@@ -10,6 +10,8 @@ import {
   BarChartOutlined,
   SettingOutlined,
   AuditOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import Dashboard from './pages/Dashboard';
 import TaskKanban from './pages/TaskKanban';
@@ -57,7 +59,12 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     fetchPendingCounts();
     const timer = setInterval(fetchPendingCounts, 30000);
-    return () => clearInterval(timer);
+    const handleRefresh = () => fetchPendingCounts();
+    window.addEventListener('refresh-pending-counts', handleRefresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('refresh-pending-counts', handleRefresh);
+    };
   }, [hasPermission]);
 
   // 进入审批中心时刷新计数
@@ -189,8 +196,14 @@ const AppContent: React.FC = () => {
   }
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Sider collapsible collapsed={collapsed} onCollapse={setCollapsed}>
+    <Layout style={{ height: '100vh', overflow: 'hidden' }}>
+      <Sider
+        collapsed={collapsed}
+        onCollapse={setCollapsed}
+        trigger={null}
+        collapsible
+        style={{ position: 'relative' }}
+      >
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <div>
             <div className="logo" style={{ padding: '16px', color: 'white', fontSize: '18px', fontWeight: '600' }}>
@@ -215,6 +228,30 @@ const AppContent: React.FC = () => {
             </a>
           </div>
         </div>
+        <div
+          onClick={() => setCollapsed(!collapsed)}
+          style={{
+            position: 'absolute',
+            right: -12,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: 24,
+            height: 48,
+            background: '#001529',
+            borderRadius: '0 6px 6px 0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            color: 'rgba(255,255,255,0.65)',
+            fontSize: 14,
+            zIndex: 101,
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderLeft: 'none',
+          }}
+        >
+          {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+        </div>
       </Sider>
       <Layout>
         <Header style={{
@@ -233,7 +270,7 @@ const AppContent: React.FC = () => {
             onNavigatePersonal={() => setSelectedKey('personal')}
           />
         </Header>
-        <Content style={{ margin: '16px', background: '#f0f2f5' }}>
+        <Content style={{ margin: '16px', overflow: 'auto' }}>
           {renderContent()}
         </Content>
       </Layout>

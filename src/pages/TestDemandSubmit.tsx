@@ -141,6 +141,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         await api.createDemand(demandData);
         message.success('测试需求已成功提交，请等待项目经理审批！');
       }
+      window.dispatchEvent(new CustomEvent('refresh-pending-counts'));
 
       setTimeout(() => {
         setLoading(false);

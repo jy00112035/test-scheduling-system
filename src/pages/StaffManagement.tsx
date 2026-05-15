@@ -628,9 +628,9 @@ const StaffManagement: React.FC = () => {
   ];
 
   return (
-    <div>
+    <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 96px)' }}>
       <Card style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16, gap: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16, gap: 8, position: 'sticky', top: 0, zIndex: 10, background: '#fff', paddingTop: 8, paddingBottom: 8 }}>
           {!isTestLead && selectedRowKeys.length > 0 && (
             <Popconfirm
               title={`确定删除选中的 ${selectedRowKeys.length} 条人员数据？`}
@@ -677,6 +677,7 @@ const StaffManagement: React.FC = () => {
           dataSource={filteredStaffs}
           rowKey="id"
           bordered
+          sticky={{ offsetHeader: 48 }}
           loading={loading}
           rowSelection={isTestLead ? undefined : {
             selectedRowKeys,

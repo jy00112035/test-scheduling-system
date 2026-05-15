@@ -114,13 +114,12 @@ const TaskKanban: React.FC = () => {
         </div>
       </Card>
 
-      <Card loading={loading}>
-        <div style={{ overflowX: 'auto' }}>
+      <Card loading={loading} bodyStyle={{ padding: 0, overflow: 'auto', maxHeight: 'calc(100vh - 180px)' }}>
           <table className="kanban-table">
             <thead>
-              <tr>
-                <th style={{ minWidth: 120, position: 'sticky', left: 0, background: '#fafafa', zIndex: 2 }}>人员</th>
-                <th style={{ minWidth: 80, position: 'sticky', left: 120, background: '#fafafa', zIndex: 2 }}>测试小组</th>
+              <tr style={{ position: 'sticky', top: 0, zIndex: 5 }}>
+                <th style={{ minWidth: 120, position: 'sticky', left: 0, background: '#fafafa', zIndex: 6 }}>人员</th>
+                <th style={{ minWidth: 80, position: 'sticky', left: 120, background: '#fafafa', zIndex: 6 }}>测试小组</th>
                 {weekDates.map((date, index) => {
                   const isWeekend = [0, 6].includes(date.day());
                   return (
@@ -212,7 +211,6 @@ const TaskKanban: React.FC = () => {
               ))}
             </tbody>
           </table>
-        </div>
       </Card>
     </div>
   );

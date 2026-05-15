@@ -29,6 +29,7 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateLogin }) => {
         roles: values.roles,
       } as any);
       message.success('注册成功！请等待管理员审批后登录。');
+      window.dispatchEvent(new CustomEvent('refresh-pending-counts'));
       form.resetFields();
     } catch (error: any) {
       message.error(error.message || '注册失败');

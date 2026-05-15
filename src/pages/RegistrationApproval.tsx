@@ -36,12 +36,15 @@ const RegistrationApproval: React.FC = () => {
     }
   };
 
+  const refreshCounts = () => window.dispatchEvent(new CustomEvent('refresh-pending-counts'));
+
   const handleApprove = async (id: number) => {
     try {
       await api.approveUser(id);
       message.success('已批准');
       setPendingUsers(prev => prev.filter(u => u.id !== id));
       setSelectedRowKeys(prev => prev.filter(k => k !== id));
+      refreshCounts();
     } catch (error: any) {
       message.error(error.message || '操作失败');
     }
@@ -53,6 +56,7 @@ const RegistrationApproval: React.FC = () => {
       message.success('已拒绝');
       setPendingUsers(prev => prev.filter(u => u.id !== id));
       setSelectedRowKeys(prev => prev.filter(k => k !== id));
+      refreshCounts();
     } catch (error: any) {
       message.error(error.message || '操作失败');
     }
@@ -64,6 +68,7 @@ const RegistrationApproval: React.FC = () => {
       message.success(`已批量批准 ${selectedRowKeys.length} 个用户`);
       setPendingUsers(prev => prev.filter(u => !selectedRowKeys.includes(u.id)));
       setSelectedRowKeys([]);
+      refreshCounts();
     } catch (error: any) {
       message.error(error.message || '操作失败');
     }
@@ -75,6 +80,7 @@ const RegistrationApproval: React.FC = () => {
       message.success(`已批量拒绝 ${selectedRowKeys.length} 个用户`);
       setPendingUsers(prev => prev.filter(u => !selectedRowKeys.includes(u.id)));
       setSelectedRowKeys([]);
+      refreshCounts();
     } catch (error: any) {
       message.error(error.message || '操作失败');
     }

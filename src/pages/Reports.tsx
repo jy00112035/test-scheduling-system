@@ -166,8 +166,8 @@ const Reports: React.FC = () => {
   ];
 
   return (
-    <div>
-      <Card style={{ marginBottom: 16 }}>
+    <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 96px)' }}>
+      <Card style={{ marginBottom: 16, position: 'sticky', top: 0, zIndex: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Space>
             <span>时间范围：</span>
@@ -190,6 +190,7 @@ const Reports: React.FC = () => {
           bordered
           loading={loading}
           pagination={false}
+          sticky={{ offsetHeader: 64 }}
           scroll={{ x: 800 }}
         />
       </Card>
