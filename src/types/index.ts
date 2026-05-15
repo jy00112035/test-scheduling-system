@@ -24,6 +24,7 @@ export interface TestDemand {
   createdAt: string;
   confidential?: boolean;
   priority?: string;
+  testDeviceCount?: number;
   manpowerDetails?: DemandManpowerDetail[];
 }
 

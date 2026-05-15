@@ -12,7 +12,21 @@
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); items=d['data']; print\\(f'count={len\\(items\\)}'\\); print\\('has confidential' if items and 'confidential' in items[0] else 'no confidential field'\\)\")",
       "Bash(curl -s http://localhost:8080/api/staff -H 'Authorization: Bearer eyJhbGciOiJIUzUxMiJ9.eyJyb2xlIjoiZmllbGRBZG1pbiIsInJvbGVzIjpbImZpZWxkQWRtaW4iLCJ0ZXN0TWFuYWdlciJdLCJzdWIiOiJhZG1pbiIsImlhdCI6MTc3ODQ4MTg4NCwiZXhwIjoxNzc4NDgyMTg0fQ.TgS7W0OG4kKJy2hlK2GcA92cyOPLZZE-oiMvP4QFRfcPN8kw-K5ZQ9pDmNkLYNMrPZ6N8s23NS4z5dgvJ0wViA')",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); s=d['data'][0]; print\\('confidentialClearance' in s, s.get\\('confidentialClearance'\\)\\)\")",
-      "Bash(lsof -ti:3000)"
+      "Bash(lsof -ti:3000)",
+      "Bash(ps -o lstart -p 91530)",
+      "Bash(jar tf *)",
+      "Bash(javap -p /Users/mac/Desktop/code/ceshi-v1.1/backend/target/classes/com/testscheduling/entity/TestDemand.class)",
+      "Bash(kill 91530)",
+      "Bash(grep -n \"</div>$\\\\|</Card>$\\\\|</table>$\\\\|</tbody>\" /Users/mac/Desktop/code/ceshi-v1.1/src/pages/ScheduleWorkbench.tsx)",
+      "Bash(git remote *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Read(//Users/mac/.ssh/**)",
+      "Bash(ssh -T git@gitee.com)"
+    ],
+    "additionalDirectories": [
+      "/Users/mac/.ssh"
     ]
   }
 }

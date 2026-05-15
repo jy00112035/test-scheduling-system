@@ -51,6 +51,9 @@ public class TestDemand {
     @Column
     private String priority;
 
+    @Column
+    private Integer testDeviceCount;
+
     @Transient
     private List<DemandManpowerDetail> manpowerDetails;
 

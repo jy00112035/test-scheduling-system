@@ -75,6 +75,7 @@ public class TestDemandService {
         existing.setDescription(demand.getDescription());
         existing.setConfidential(demand.getConfidential());
         existing.setPriority(demand.getPriority());
+        existing.setTestDeviceCount(demand.getTestDeviceCount());
         existing.setStatus(demand.getStatus());
 
         // 更新明细
@@ -147,6 +148,9 @@ public class TestDemandService {
         demand.setEndDate(modifiedDemand.getEndDate());
         if (modifiedDemand.getPriority() != null) {
             demand.setPriority(modifiedDemand.getPriority());
+        }
+        if (modifiedDemand.getTestDeviceCount() != null) {
+            demand.setTestDeviceCount(modifiedDemand.getTestDeviceCount());
         }
 
         // 更新人力明细

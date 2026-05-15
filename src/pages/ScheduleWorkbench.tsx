@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Tag, Space, Alert, Modal, message, InputNumber, Descriptions, Divider, Popconfirm, DatePicker, Popover, Select, Checkbox, Tooltip, Badge } from 'antd';
+import { Card, Button, Tag, Space, Alert, Modal, message, InputNumber, Descriptions, Divider, Popconfirm, DatePicker, Popover, Select, Checkbox, Tooltip, Badge, Tabs } from 'antd';
 import {
   RobotOutlined,
   CheckCircleOutlined,
@@ -69,7 +69,7 @@ const ScheduleWorkbench: React.FC = () => {
   const [filterCoeffMax, setFilterCoeffMax] = useState<number | null>(null);
   const [filterProducts, setFilterProducts] = useState<string[]>([]);
 
-  // AI 推荐排班状态
+  // 推荐排班状态
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [includeWeekends, setIncludeWeekends] = useState(false);
   const [selectedDemandIds, setSelectedDemandIds] = useState<Set<number>>(new Set());
@@ -347,6 +347,9 @@ const ScheduleWorkbench: React.FC = () => {
         : ['__ALL__']);
     }
 
+    // 跟踪每个需求每天已分配的人员（用于样机数量约束）
+    const deviceStaffMap = new Map<string, Set<number>>(); // key: "demandId-dateStr"
+
     // 日期外层循环：在同一天内按优先级依次满足所有需求
     const completedDemands = new Set<number>();
     for (const date of allDates) {
@@ -362,9 +365,20 @@ const ScheduleWorkbench: React.FC = () => {
 
         const neededTypes = demandNeededTypes.get(demand.id) || [];
         const allAvailable = getAvailableStaffForDate(dateStr, loadMap, activeStaffs, demand.confidential);
+        const deviceCount = demand.testDeviceCount;
 
         for (const staff of allAvailable) {
           if (staff.capacity < 5) continue;
+
+          // 样机数量约束：当天分配给该需求的人数不能超过样机数
+          if (deviceCount && deviceCount > 0) {
+            const dcKey = `${demand.id}-${dateStr}`;
+            const assignedSet = deviceStaffMap.get(dcKey);
+            const alreadyAssigned = assignedSet ? assignedSet.size : 0;
+            if (!assignedSet?.has(staff.id) && alreadyAssigned >= deviceCount) {
+              continue;
+            }
+          }
 
           const staffTestType = staff.testType;
           const matched = neededTypes.find((tt: string) => {
@@ -394,6 +408,13 @@ const ScheduleWorkbench: React.FC = () => {
           const key = `${staff.id}-${dateStr}`;
           loadMap.set(key, (loadMap.get(key) || 0) + alloc);
           remainingByType.set(typeKey, typeRemaining - alloc / 100);
+
+          // 记录该需求当天已分配的人员
+          const dcKey = `${demand.id}-${dateStr}`;
+          if (!deviceStaffMap.has(dcKey)) {
+            deviceStaffMap.set(dcKey, new Set());
+          }
+          deviceStaffMap.get(dcKey)!.add(staff.id);
         }
 
         // 检查是否所有类型都已满足
@@ -523,15 +544,37 @@ const ScheduleWorkbench: React.FC = () => {
 
   const handlePublish = () => {
     const pendingCount = pendingChangeDemandIds.size;
+
+    // 收集所有未发布的排班需求ID
+    const unpublishdDemandIds = new Set<number>();
+    schedules.forEach(s => {
+      if (!s.published && s.demandId) {
+        unpublishdDemandIds.add(s.demandId);
+      }
+    });
+
+    const allDemandIds = new Set([...pendingChangeDemandIds, ...unpublishdDemandIds]);
+    const totalCount = allDemandIds.size;
+
+    const contentParts: string[] = [];
+    if (pendingCount > 0) {
+      contentParts.push(`有 ${pendingCount} 个需求存在未提交的本地修改，将一并提交`);
+    }
+    if (unpublishdDemandIds.size > 0) {
+      contentParts.push(`共 ${totalCount} 个需求待发布`);
+    }
+    if (contentParts.length === 0) {
+      message.info('没有需要发布的排期');
+      return;
+    }
+
     confirm({
       title: '确认发布排期',
       icon: <CheckCircleOutlined />,
-      content: pendingCount > 0
-        ? `有 ${pendingCount} 个需求存在未提交的修改，发布时将一并提交。确定要发布吗？`
-        : '排期发布后将通知所有相关人员，确定要发布吗？',
+      content: `${contentParts.join('，')}。确定要发布吗？`,
       onOk: async () => {
         try {
-          // 提交所有本地待处理变更
+          // 1. 提交所有本地待处理变更（已发布的排班被拖拽/删除/清除后产生的草稿）
           for (const demandId of pendingChangeDemandIds) {
             await api.deleteSchedulesByDemand(demandId);
             const currentSchedules = schedules.filter(s => s.demandId === demandId);
@@ -549,6 +592,14 @@ const ScheduleWorkbench: React.FC = () => {
             }
             await api.publishSchedules(demandId);
           }
+
+          // 2. 发布其余未发布的排班（推荐排班生成后尚未发布的）
+          for (const demandId of unpublishdDemandIds) {
+            if (!pendingChangeDemandIds.has(demandId)) {
+              await api.publishSchedules(demandId);
+            }
+          }
+
           setPendingChangeDemandIds(new Set());
           message.success('排期已成功发布！相关人员已收到通知。');
           fetchData();
@@ -895,7 +946,7 @@ const ScheduleWorkbench: React.FC = () => {
               icon={<RobotOutlined />}
               onClick={handleAIRecommend}
             >
-              AI 推荐排班
+              推荐排班
             </Button>
             <Button
               icon={<ExclamationCircleOutlined />}
@@ -960,26 +1011,42 @@ const ScheduleWorkbench: React.FC = () => {
       </div>
 
       <div style={{ display: 'flex', gap: 16 }}>
-        {/* 左侧：待排期需求列表 */}
+        {/* 左侧：需求列表 */}
         <Card
-          title="待排期需求"
-          style={{ width: 380, flexShrink: 0 }}
-          bodyStyle={{ padding: 12, maxHeight: 600, overflowY: 'auto' }}
+          style={{ width: 230, flexShrink: 0 }}
+          bodyStyle={{ padding: 0, maxHeight: 600, overflowY: 'auto' }}
         >
-          {demands.length === 0 ? (
-            <div style={{ textAlign: 'center', color: '#999', padding: 20 }}>
-              暂无待排期需求
-            </div>
-          ) : (
-            demands.map(demand => {
-              const activeStaffIds = staffs.map(s => s.id);
-              const demandSchedules = schedules.filter(s => s.demandId === demand.id && activeStaffIds.includes(s.staffId));
-              const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
-              const remainingDays = demand.manpowerDemand - allocatedDays;
-              const isPublished = demandSchedules.length > 0 && demandSchedules.every(s => s.published);
-              const daysToEnd = dayjs(demand.endDate).diff(dayjs(), 'day');
-              const isUrgent = daysToEnd <= 3 && remainingDays > 0;
-              const isUnfulfilled = unfulfilledDemands.has(demand.id);
+          <Tabs
+            size="small"
+            style={{ padding: '0 12px' }}
+            items={[
+              {
+                key: 'pending',
+                label: '待排期',
+                children: (
+                  <div style={{ maxHeight: 520, overflowY: 'auto' }}>
+                    {demands.filter(d => {
+                      const demandSchedules = schedules.filter(s => s.demandId === d.id && staffs.some(st => st.id === s.staffId));
+                      const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
+                      return allocatedDays < Number(d.manpowerDemand || 0);
+                    }).length === 0 ? (
+                      <div style={{ textAlign: 'center', color: '#999', padding: 20 }}>
+                        暂无待排期需求
+                      </div>
+                    ) : (
+                      demands.filter(d => {
+                        const demandSchedules = schedules.filter(s => s.demandId === d.id && staffs.some(st => st.id === s.staffId));
+                        const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
+                        return allocatedDays < Number(d.manpowerDemand || 0);
+                      }).map(demand => {
+                        const activeStaffIds = staffs.map(s => s.id);
+                        const demandSchedules = schedules.filter(s => s.demandId === demand.id && activeStaffIds.includes(s.staffId));
+                        const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
+                        const remainingDays = demand.manpowerDemand - allocatedDays;
+                        const isPublished = demandSchedules.length > 0 && demandSchedules.every(s => s.published);
+                        const daysToEnd = dayjs(demand.endDate).diff(dayjs(), 'day');
+                        const isUrgent = daysToEnd <= 3 && remainingDays > 0;
+                        const isUnfulfilled = unfulfilledDemands.has(demand.id);
 
               let borderColor = '#b7eb8f';
               let bgColor = '#f6ffed';
@@ -998,10 +1065,10 @@ const ScheduleWorkbench: React.FC = () => {
                   onDragStart={(e) => handleDragStart(e, demand)}
                   onDragEnd={() => setDragOverCell(null)}
                   style={{
-                    padding: 12,
+                    padding: '8px 10px',
                     border: `1px solid ${borderColor}`,
-                    borderRadius: 8,
-                    marginBottom: 12,
+                    borderRadius: 6,
+                    marginBottom: 8,
                     cursor: 'move',
                     background: bgColor,
                   }}
@@ -1010,117 +1077,10 @@ const ScheduleWorkbench: React.FC = () => {
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
-                    marginBottom: 8,
+                    marginBottom: 2,
                   }}>
-                    <strong style={{ fontSize: 14 }}>{demand.product}</strong>
-                    <Space size={4}>
-                      {demand.confidential && (
-                        <Tag color="red" style={{ margin: 0 }}>保密</Tag>
-                      )}
-                      {pendingChangeDemandIds.has(demand.id) && (
-                        <Tag color="processing" style={{ margin: 0 }}>待提交</Tag>
-                      )}
-                      <Tag
-                        color={demand.status === 'pending' ? 'orange' : 'green'}
-                        style={{ margin: 0 }}
-                      >
-                        {demand.status === 'pending' ? '待排期' : '已排期'}
-                      </Tag>
-                    </Space>
-                  </div>
-                  <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>
-                    版本号：{demand.version || '无版本号'}
-                  </div>
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    fontSize: 12,
-                    color: '#666',
-                  }}>
-                    <span>测试周期：{dayjs(demand.startDate).format('MM-DD')} ~ {dayjs(demand.endDate).format('MM-DD')}</span>
-                    <span style={{ fontWeight: 500, color: '#1890ff' }}>
-                      {demand.manpowerDemand} 人/天
-                    </span>
-                  </div>
-                  {(() => {
-                    const allocations = computeAllocationByTestType(demand);
-                    const typeEntries = Object.entries(allocations);
-                    if (typeEntries.length > 0) {
-                      return (
-                        <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse', marginTop: 6 }}>
-                          <thead>
-                            <tr style={{ background: '#fafafa' }}>
-                              <th style={{ padding: '2px 4px', textAlign: 'left', borderBottom: '1px solid #f0f0f0' }}>类型</th>
-                              <th style={{ padding: '2px 4px', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>需求</th>
-                              <th style={{ padding: '2px 4px', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>已分配</th>
-                              <th style={{ padding: '2px 4px', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>待分配</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {typeEntries.map(([tt, info]: [string, any]) => {
-                              const rem = Math.max(0, info.demand - info.allocated);
-                              const isShort = rem > 0;
-                              return (
-                                <tr key={tt} style={{ borderBottom: '1px solid #fafafa' }}>
-                                  <td style={{ padding: '2px 4px', color: '#1890ff', fontSize: 10 }}>{tt}</td>
-                                  <td style={{ padding: '2px 4px', textAlign: 'right' }}>{info.demand.toFixed(1)}</td>
-                                  <td style={{ padding: '2px 4px', textAlign: 'right', color: '#52c41a' }}>
-                                    {info.allocated.toFixed(1)}
-                                  </td>
-                                  <td style={{ padding: '2px 4px', textAlign: 'right', color: isShort ? '#faad14' : '#999', fontWeight: isShort ? 500 : 400 }}>
-                                    {rem.toFixed(1)}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                          <tfoot>
-                            <tr style={{ fontWeight: 500, fontSize: 11 }}>
-                              <td style={{ padding: '3px 4px', borderTop: '1px solid #f0f0f0' }}>合计</td>
-                              <td style={{ padding: '3px 4px', textAlign: 'right', borderTop: '1px solid #f0f0f0' }}>
-                                {Number(demand.manpowerDemand || 0).toFixed(1)}
-                              </td>
-                              <td style={{ padding: '3px 4px', textAlign: 'right', borderTop: '1px solid #f0f0f0', color: '#52c41a' }}>
-                                {allocatedDays.toFixed(1)}
-                              </td>
-                              <td style={{ padding: '3px 4px', textAlign: 'right', borderTop: '1px solid #f0f0f0', color: remainingDays > 0 ? '#faad14' : '#999' }}>
-                                {Math.max(0, remainingDays).toFixed(1)}
-                              </td>
-                            </tr>
-                          </tfoot>
-                        </table>
-                      );
-                    }
-                    // 旧数据兼容：无 manpowerDetails
-                    return (
-                      <>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginTop: 6 }}>
-                          <span style={{ color: '#52c41a' }}>已分配：{allocatedDays.toFixed(1)} 人/天</span>
-                          <span style={{ color: remainingDays > 0 ? '#faad14' : '#999' }}>
-                            待分配：{remainingDays.toFixed(1)} 人/天
-                          </span>
-                        </div>
-                        {isUnfulfilled && (
-                          <div style={{ marginTop: 4, textAlign: 'right' }}>
-                            <Tag color="red">人力缺口：{remainingDays.toFixed(1)} 人/天</Tag>
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                  <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <Tag
-                        color={getVersionTypeColor(demand.versionType)}
-                        style={{ margin: 0 }}
-                      >
-                        {demand.versionPhase || demand.versionType}
-                      </Tag>
-                      {isUrgent && (
-                        <Tag color="red" style={{ marginLeft: 4 }}>
-                          紧急
-                        </Tag>
-                      )}
+                    <strong style={{ fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{demand.product}</strong>
+                    <Space size={2} style={{ flexShrink: 0 }}>
                       {demand.priority && (
                         editingPriorityId === demand.id && (hasRole('resourceManager') || hasRole('projectManager')) ? (
                           <Select
@@ -1137,8 +1097,9 @@ const ScheduleWorkbench: React.FC = () => {
                               setEditingPriorityId(null);
                             }}
                             onBlur={() => setEditingPriorityId(null)}
-                            style={{ width: 80, marginLeft: 4 }}
+                            style={{ width: 70, fontSize: 11 }}
                             autoFocus
+                            onClick={(e: React.MouseEvent) => e.stopPropagation()}
                           >
                             {priorityOptions.map(opt => (
                               <Select.Option key={opt} value={opt}>{opt}</Select.Option>
@@ -1151,16 +1112,104 @@ const ScheduleWorkbench: React.FC = () => {
                               const colors = ['red', 'orange', 'green', 'blue', 'purple', 'cyan', 'magenta', 'geekblue'];
                               return idx >= 0 ? colors[idx % colors.length] : 'blue';
                             })()}
-                            style={{ marginLeft: 4, cursor: (hasRole('resourceManager') || hasRole('projectManager')) ? 'pointer' : 'default' }}
-                            onClick={() => {
+                            style={{ margin: 0, fontSize: 10, lineHeight: '16px', cursor: (hasRole('resourceManager') || hasRole('projectManager')) ? 'pointer' : 'default' }}
+                            onClick={(e: React.MouseEvent) => {
+                              e.stopPropagation();
                               if (hasRole('resourceManager') || hasRole('projectManager')) {
-                                setEditingPriorityId(demand.id);
+                                setEditingPriorityId(editingPriorityId === demand.id ? null : demand.id);
                               }
                             }}
                           >
-                            {demand.priority}优先级
+                            {demand.priority}
                           </Tag>
                         )
+                      )}
+                      {demand.confidential && (
+                        <Tag color="red" style={{ margin: 0, fontSize: 10, lineHeight: '16px' }}>保密</Tag>
+                      )}
+                      {pendingChangeDemandIds.has(demand.id) && (
+                        <Tag color="processing" style={{ margin: 0, fontSize: 10, lineHeight: '16px' }}>待提交</Tag>
+                      )}
+                      <Tag
+                        color={demand.status === 'pending' ? 'orange' : 'green'}
+                        style={{ margin: 0, fontSize: 10, lineHeight: '16px' }}
+                      >
+                        {demand.status === 'pending' ? '待排期' : '已排期'}
+                      </Tag>
+                    </Space>
+                  </div>
+                  <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>
+                    {demand.version || '无版本号'}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>
+                    {dayjs(demand.startDate).format('MM/DD')} ~ {dayjs(demand.endDate).format('MM/DD')}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>
+                    {[
+                      `${Number(demand.manpowerDemand || 0).toFixed(1)} 人/天`,
+                      demand.testDeviceCount != null && `${demand.testDeviceCount} 台样机`,
+                    ].filter(Boolean).join(' ｜ ')}
+                  </div>
+                  {(() => {
+                    const allocations = computeAllocationByTestType(demand);
+                    const typeEntries = Object.entries(allocations);
+                    if (typeEntries.length > 0) {
+                      return (
+                        <table style={{ width: '100%', fontSize: 10, borderCollapse: 'collapse', marginTop: 2 }}>
+                          <thead>
+                            <tr style={{ background: '#fafafa' }}>
+                              <th style={{ padding: '1px 4px', textAlign: 'left', borderBottom: '1px solid #f0f0f0', fontWeight: 400 }}>类型</th>
+                              <th style={{ padding: '1px 4px', textAlign: 'right', borderBottom: '1px solid #f0f0f0', fontWeight: 400 }}>需求</th>
+                              <th style={{ padding: '1px 4px', textAlign: 'right', borderBottom: '1px solid #f0f0f0', fontWeight: 400 }}>已分</th>
+                              <th style={{ padding: '1px 4px', textAlign: 'right', borderBottom: '1px solid #f0f0f0', fontWeight: 400 }}>待分</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {typeEntries.map(([tt, info]: [string, any]) => {
+                              const rem = Math.max(0, info.demand - info.allocated);
+                              const isShort = rem > 0;
+                              return (
+                                <tr key={tt}>
+                                  <td style={{ padding: '1px 4px', color: '#1890ff' }}>{tt}</td>
+                                  <td style={{ padding: '1px 4px', textAlign: 'right' }}>{info.demand.toFixed(1)}</td>
+                                  <td style={{ padding: '1px 4px', textAlign: 'right', color: '#52c41a' }}>
+                                    {info.allocated.toFixed(1)}
+                                  </td>
+                                  <td style={{ padding: '1px 4px', textAlign: 'right', color: isShort ? '#faad14' : '#999', fontWeight: isShort ? 500 : 400 }}>
+                                    {rem.toFixed(1)}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      );
+                    }
+                    // 旧数据兼容：无 manpowerDetails
+                    return (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 2 }}>
+                        <span style={{ color: '#52c41a' }}>已分 {allocatedDays.toFixed(1)}</span>
+                        <span style={{ color: remainingDays > 0 ? '#faad14' : '#999' }}>
+                          待分 {remainingDays.toFixed(1)}
+                        </span>
+                        {isUnfulfilled && (
+                          <Tag color="red" style={{ margin: 0, fontSize: 10 }}>缺口 {remainingDays.toFixed(1)}</Tag>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                      <Tag
+                        color={getVersionTypeColor(demand.versionType)}
+                        style={{ margin: 0, fontSize: 10, lineHeight: '18px' }}
+                      >
+                        {demand.versionPhase || demand.versionType}
+                      </Tag>
+                      {isUrgent && (
+                        <Tag color="red" style={{ margin: 0, fontSize: 10, lineHeight: '18px' }}>
+                          紧急
+                        </Tag>
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -1251,6 +1300,108 @@ const ScheduleWorkbench: React.FC = () => {
               );
             })
           )}
+                  </div>
+                ),
+              },
+              {
+                key: 'assigned',
+                label: '已分配项目',
+                children: (
+                  <div style={{ maxHeight: 520, overflowY: 'auto' }}>
+                    {demands.filter(d => {
+                      const demandSchedules = schedules.filter(s => s.demandId === d.id && staffs.some(st => st.id === s.staffId));
+                      const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
+                      const isPublished = demandSchedules.length > 0 && demandSchedules.every(s => s.published);
+                      const notExpired = dayjs().isBefore(dayjs(d.endDate).add(1, 'day'));
+                      return allocatedDays >= Number(d.manpowerDemand || 0) && isPublished && notExpired;
+                    }).length === 0 ? (
+                      <div style={{ textAlign: 'center', color: '#999', padding: 20 }}>
+                        暂无已分配项目
+                      </div>
+                    ) : (
+                      demands.filter(d => {
+                        const demandSchedules = schedules.filter(s => s.demandId === d.id && staffs.some(st => st.id === s.staffId));
+                        const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
+                        const isPublished = demandSchedules.length > 0 && demandSchedules.every(s => s.published);
+                        const notExpired = dayjs().isBefore(dayjs(d.endDate).add(1, 'day'));
+                        return allocatedDays >= Number(d.manpowerDemand || 0) && isPublished && notExpired;
+                      }).map(demand => {
+                        const activeStaffIds = staffs.map(s => s.id);
+                        const demandSchedules = schedules.filter(s => s.demandId === demand.id && activeStaffIds.includes(s.staffId));
+                        const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
+                        const isPublished = demandSchedules.length > 0 && demandSchedules.every(s => s.published);
+
+                        let borderColor = '#b7eb8f';
+                        let bgColor = '#f6ffed';
+
+                        return (
+                          <div
+                            key={demand.id}
+                            style={{
+                              padding: '8px 10px',
+                              border: `1px solid ${borderColor}`,
+                              borderRadius: 6,
+                              marginBottom: 8,
+                              background: bgColor,
+                            }}
+                          >
+                            <div style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              marginBottom: 2,
+                            }}>
+                              <strong style={{ fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{demand.product}</strong>
+                              <Space size={2} style={{ flexShrink: 0 }}>
+                                {demand.priority && (
+                                  <Tag
+                                    color={(() => {
+                                      const idx = priorityOptions.indexOf(demand.priority);
+                                      const colors = ['red', 'orange', 'green', 'blue', 'purple', 'cyan', 'magenta', 'geekblue'];
+                                      return idx >= 0 ? colors[idx % colors.length] : 'blue';
+                                    })()}
+                                    style={{ margin: 0, fontSize: 10, lineHeight: '16px' }}
+                                  >
+                                    {demand.priority}
+                                  </Tag>
+                                )}
+                                {demand.confidential && (
+                                  <Tag color="red" style={{ margin: 0, fontSize: 10, lineHeight: '16px' }}>保密</Tag>
+                                )}
+                                <Tag color="green" style={{ margin: 0, fontSize: 10, lineHeight: '16px' }}>
+                                  已发布
+                                </Tag>
+                              </Space>
+                            </div>
+                            <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>
+                              {demand.version || '无版本号'}
+                            </div>
+                            <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>
+                              {dayjs(demand.startDate).format('MM/DD')} ~ {dayjs(demand.endDate).format('MM/DD')}
+                            </div>
+                            <div style={{ fontSize: 11, color: '#888' }}>
+                              {[
+                                `${Number(demand.manpowerDemand || 0).toFixed(1)} 人/天`,
+                                demand.testDeviceCount != null && `${demand.testDeviceCount} 台样机`,
+                              ].filter(Boolean).join(' ｜ ')}
+                            </div>
+                            <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Tag
+                                color={getVersionTypeColor(demand.versionType)}
+                                style={{ margin: 0, fontSize: 10, lineHeight: '18px' }}
+                              >
+                                {demand.versionPhase || demand.versionType}
+                              </Tag>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                ),
+              },
+            ]}
+          />
         </Card>
 
         {/* 右侧：排班视图 */}
@@ -1894,9 +2045,9 @@ const ScheduleWorkbench: React.FC = () => {
         )}
       </Modal>
 
-      {/* AI 推荐排班设置 Modal */}
+      {/* 推荐排班设置 Modal */}
       <Modal
-        title="AI 推荐排班设置"
+        title="推荐排班设置"
         open={aiModalOpen}
         onOk={runRecommendation}
         onCancel={() => {

@@ -129,6 +129,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         description: values.description || '',
         confidential: values.confidential || false,
         priority: values.priority,
+        testDeviceCount: values.testDeviceCount,
         status: 'submitted',
         submittedBy: userName || '测试经理',
       };
@@ -183,6 +184,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
           labelCol={{ span: 6 }}
           wrapperCol={{ span: 18 }}
           onFinish={handleSubmit}
+          initialValues={{ confidential: false, testDeviceCount: null }}
           style={{ maxWidth: 800, margin: '0 auto' }}
           className="demand-form"
         >
@@ -298,6 +300,14 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
                 <Option key={index} value={option}>{option}</Option>
               ))}
             </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="testDeviceCount"
+            label="可提供样机数量"
+            rules={[{ required: true, message: '请输入可提供的测试样机数量' }]}
+          >
+            <InputNumber min={0} step={1} style={{ width: '100%' }} placeholder="请输入样机数量" />
           </Form.Item>
 
           <Form.Item
