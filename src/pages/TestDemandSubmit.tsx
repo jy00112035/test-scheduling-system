@@ -51,6 +51,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
   const [loading, setLoading] = useState(false);
   const [fieldConfigs, setFieldConfigs] = useState<FieldConfig[]>([]);
   const [manpowerInputs, setManpowerInputs] = useState<Record<string, number>>({});
+  const [manpowerRemarks, setManpowerRemarks] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchFieldConfigs();
@@ -86,13 +87,16 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
           dayjs(initialValues.endDate),
         ],
       });
-      // 回填各测试类型人力
+      // 回填各测试类型人力和备注
       if (initialValues.manpowerDetails) {
         const map: Record<string, number> = {};
+        const remarkMap: Record<string, string> = {};
         initialValues.manpowerDetails.forEach((d: DemandManpowerDetail) => {
           map[d.testType] = d.manpowerDemand;
+          if (d.remark) remarkMap[d.testType] = d.remark;
         });
         setManpowerInputs(map);
+        setManpowerRemarks(remarkMap);
       }
     }
   }, [initialValues, form]);
@@ -109,6 +113,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
       .map(tt => ({
         testType: tt,
         manpowerDemand: manpowerInputs[tt],
+        remark: manpowerRemarks[tt] || undefined,
       }));
 
     if (manpowerDetails.length === 0) {
@@ -246,6 +251,16 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
                       ...prev,
                       [testType]: val ?? 0,
                     }))}
+                  />
+                  <Input
+                    style={{ width: 180, marginLeft: 8 }}
+                    placeholder="所需模块（选填）"
+                    value={manpowerRemarks[testType] || ''}
+                    onChange={(e) => setManpowerRemarks(prev => ({
+                      ...prev,
+                      [testType]: e.target.value,
+                    }))}
+                    maxLength={100}
                   />
                 </div>
               ))}

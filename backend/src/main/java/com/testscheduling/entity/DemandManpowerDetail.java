@@ -25,4 +25,7 @@ public class DemandManpowerDetail {
 
     @Column(precision = 10, scale = 2)
     private BigDecimal manpowerDemand;
+
+    @Column(length = 200)
+    private String remark;
 }

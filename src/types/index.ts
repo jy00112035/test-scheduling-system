@@ -33,6 +33,7 @@ export interface DemandManpowerDetail {
   demandId?: number;
   testType: string;
   manpowerDemand: number;
+  remark?: string;
 }
 
 export interface Schedule {
