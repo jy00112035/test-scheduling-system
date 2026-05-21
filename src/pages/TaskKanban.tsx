@@ -1,9 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Select, DatePicker, Tag, Tooltip, message } from 'antd';
+import { Card, Select, DatePicker, Tag, Tooltip, message, Button } from 'antd';
+import { DownloadOutlined } from '@ant-design/icons';
 import dayjs, { Dayjs } from 'dayjs';
 import { api } from '../services/api';
+import * as XLSX from 'xlsx';
+import { DailyAvailabilityStatus, DailyStatusLabels, DailyStatusColors } from '../types';
 
 const { Option } = Select;
+const { RangePicker } = DatePicker;
 
 const dayLabels = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
@@ -14,24 +18,93 @@ const TaskKanban: React.FC = () => {
   const [staffs, setStaffs] = useState<any[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [exportDateRange, setExportDateRange] = useState<[Dayjs, Dayjs] | null>(null);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [dailyStatuses, setDailyStatuses] = useState<Map<string, { status: DailyAvailabilityStatus; percentage: number }>>(new Map());
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [viewDate]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [staffData, scheduleData] = await Promise.all([
+      const weekEnd = viewDate.add(6, 'day').format('YYYY-MM-DD');
+      const weekStart = viewDate.format('YYYY-MM-DD');
+      const [staffData, scheduleData, statusData] = await Promise.all([
         api.getStaff(),
-        api.getPublishedSchedules()
+        api.getPublishedSchedules(),
+        api.getDailyStatuses(weekStart, weekEnd),
       ]);
       setStaffs(staffData);
       setSchedules(scheduleData);
+      const map = new Map<string, { status: DailyAvailabilityStatus; percentage: number }>();
+      statusData.forEach((s: any) => map.set(`${s.staffId}-${s.date}`, { status: s.status, percentage: s.percentage ?? 100 }));
+      setDailyStatuses(map);
     } catch (error: any) {
       message.error(error.message || '获取数据失败');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (!exportDateRange || exportDateRange.length !== 2) {
+      message.warning('请选择导出的日期范围');
+      return;
+    }
+    setExportLoading(true);
+    try {
+      const startDate = exportDateRange[0].format('YYYY-MM-DD');
+      const endDate = exportDateRange[1].format('YYYY-MM-DD');
+      const exportSchedules = await api.getSchedulesByRange(startDate, endDate);
+
+      if (exportSchedules.length === 0) {
+        message.info('所选日期范围内无排班数据');
+        setExportLoading(false);
+        return;
+      }
+
+      const staffMap = new Map(staffs.map((s: any) => [s.id, s]));
+
+      const rows = exportSchedules.map((s: any) => {
+        const staff = staffMap.get(s.staffId);
+        return {
+          '日期': s.date,
+          '产品': s.product,
+          '版本号': s.version || '',
+          '版本类型': s.versionType || '',
+          '人员姓名': staff?.name || '',
+          '工号': staff?.empNo || '',
+          '测试小组': staff?.testType || '',
+          '投入比例(%)': s.percentage,
+          '测试经理': s.testManager || '',
+        };
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, '排班数据');
+
+      const colWidths = [
+        { wch: 12 }, // 日期
+        { wch: 20 }, // 产品
+        { wch: 12 }, // 版本号
+        { wch: 10 }, // 版本类型
+        { wch: 10 }, // 人员姓名
+        { wch: 12 }, // 工号
+        { wch: 14 }, // 测试小组
+        { wch: 13 }, // 投入比例
+        { wch: 14 }, // 测试经理
+      ];
+      worksheet['!cols'] = colWidths;
+
+      XLSX.writeFile(workbook, `任务看板排班导出_${startDate}_${endDate}.xlsx`);
+      message.success(`成功导出 ${rows.length} 条排班记录`);
+    } catch (error: any) {
+      message.error(error.message || '导出失败');
+    } finally {
+      setExportLoading(false);
     }
   };
 
@@ -105,6 +178,21 @@ const TaskKanban: React.FC = () => {
               maxTagCount={2}
               options={[...new Set(schedules.map(s => s.product).filter(Boolean))].map(p => ({ label: p, value: p }))}
             />
+            <RangePicker
+              value={exportDateRange as any}
+              onChange={(dates) => setExportDateRange(dates as [Dayjs, Dayjs] | null)}
+              placeholder={['导出开始日期', '导出结束日期']}
+              format="YYYY-MM-DD"
+              allowClear
+              style={{ width: 260 }}
+            />
+            <Button
+              icon={<DownloadOutlined />}
+              loading={exportLoading}
+              onClick={handleExport}
+            >
+              导出
+            </Button>
           </div>
           <div>
             <span style={{ color: '#666' }}>
@@ -170,11 +258,26 @@ const TaskKanban: React.FC = () => {
                     const dateStr = date.format('YYYY-MM-DD');
                     const daySchedules = getSchedulesForStaffAndDate(staff.id, dateStr);
                     const isWeekend = [0, 6].includes(date.day());
+                    const statusEntry = dailyStatuses.get(`${staff.id}-${dateStr}`);
+                    const dailyStatus = statusEntry?.status;
+                    const statusBgColor = dailyStatus && dailyStatus !== 'AVAILABLE'
+                      ? `${DailyStatusColors[dailyStatus]}18`
+                      : undefined;
+
+                    let cellBg = '#fff';
+                    if (statusBgColor) {
+                      cellBg = statusBgColor;
+                    } else if (isWeekend) {
+                      cellBg = '#fff7e6';
+                    } else if (isToday(date)) {
+                      cellBg = '#f0f5ff';
+                    }
+
                     return (
                       <td
                         key={dayIndex}
                         style={{
-                          background: isWeekend ? '#fff7e6' : isToday(date) ? '#f0f5ff' : '#fff',
+                          background: cellBg,
                           verticalAlign: 'top',
                           padding: '4px',
                           borderLeft: '1px solid #e8e8e8'
@@ -186,7 +289,8 @@ const TaskKanban: React.FC = () => {
                             title={
                               <div>
                                 <div>产品：{schedule.product}</div>
-                                <div>版本：{schedule.versionType}</div>
+                                {schedule.version && <div>版本号：{schedule.version}</div>}
+                                <div>版本类型：{schedule.versionType}</div>
                                 <div>投入：{schedule.percentage}%</div>
                               </div>
                             }
@@ -204,6 +308,21 @@ const TaskKanban: React.FC = () => {
                             </div>
                           </Tooltip>
                         ))}
+                        {dailyStatus && dailyStatus !== 'AVAILABLE' && (
+                          <div style={{
+                            fontSize: 10,
+                            color: DailyStatusColors[dailyStatus],
+                            fontWeight: 500,
+                            textAlign: 'center',
+                            marginTop: 2,
+                            padding: '1px 2px',
+                            background: `${DailyStatusColors[dailyStatus]}22`,
+                            borderRadius: 2,
+                          }}>
+                            {DailyStatusLabels[dailyStatus]}
+                            {statusEntry!.percentage < 100 && ` ${statusEntry!.percentage}%`}
+                          </div>
+                        )}
                       </td>
                     );
                   })}

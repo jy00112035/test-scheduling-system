@@ -32,6 +32,8 @@ public class Schedule {
 
     private String versionType;
 
+    private String version;
+
     private Boolean published = false;
 
     private LocalDateTime createdAt;

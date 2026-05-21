@@ -36,6 +36,7 @@ public class StaffDailyStatus {
         AVAILABLE,
         OTHER_TASKS,
         SECONDED,
-        ON_LEAVE
+        ON_LEAVE,
+        COMPENSATORY_LEAVE
     }
 }

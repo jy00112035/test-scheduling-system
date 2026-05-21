@@ -23,10 +23,29 @@
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
       "Read(//Users/mac/.ssh/**)",
-      "Bash(ssh -T git@gitee.com)"
+      "Bash(ssh -T git@gitee.com)",
+      "Bash(ls /Users/mac/Desktop/code/ceshi-v1.1/.claude/ 2>/dev/null && echo \"---\" && ls /Users/mac/.claude/ 2>/dev/null)",
+      "Read(//Users/mac/.claude/**)",
+      "Bash(claude --version)",
+      "Bash(claude plugin *)",
+      "WebSearch",
+      "Bash(java --version)",
+      "Bash(mvn --version)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8080/api/demands/pending)",
+      "Bash(cd /Users/mac/Desktop/code/ceshi-v1.1/.claude/skills && rm -rf brainstorming dispatching-parallel-agents mcp-builder receiving-code-review requesting-code-review subagent-driven-development using-git-worktrees using-superpowers workflow-runner writing-skills finishing-a-development-branch chinese-git-workflow test-driven-development && echo \"Deleted. Remaining:\" && ls)",
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(f'submittedBy: {d.get\\(\\\\\"submittedBy\\\\\"\\)}'\\) for d in \\(data.get\\('data', data\\) if isinstance\\(data,dict\\) else data\\)[:3]]\")",
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); arr=data.get\\('data',data\\) if isinstance\\(data,dict\\) else data; [print\\(f'id:{s.get\\(\\\\\"id\\\\\"\\)}, empNo:{s.get\\(\\\\\"empNo\\\\\"\\)}, name:{s.get\\(\\\\\"name\\\\\"\\)}'\\) for s in \\(arr[:5] if arr else []\\)]\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8080/api/auth/login)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('code'\\), d.get\\('message'\\)\\)\")",
+      "Bash(echo \"PID: $!\")",
+      "Read(//tmp/**)",
+      "Read(//private/tmp/**)",
+      "Bash(lsof -ti:8080 | xargs kill -9 2>/dev/null; sleep 1 *)"
     ],
     "additionalDirectories": [
-      "/Users/mac/.ssh"
+      "/Users/mac/.ssh",
+      "/Users/mac/Desktop/code/ceshi-v1.1/.claude/skills/brainstorming",
+      "/private/tmp"
     ]
   }
 }

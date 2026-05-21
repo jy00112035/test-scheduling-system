@@ -45,6 +45,7 @@ export interface Schedule {
   product: string;
   testManager: string;
   versionType: string;
+  version?: string;
 }
 
 export interface VersionType {
@@ -94,7 +95,7 @@ export interface UserRole {
   name: string;
 }
 
-export type DailyAvailabilityStatus = 'AVAILABLE' | 'OTHER_TASKS' | 'SECONDED' | 'ON_LEAVE';
+export type DailyAvailabilityStatus = 'AVAILABLE' | 'OTHER_TASKS' | 'SECONDED' | 'ON_LEAVE' | 'COMPENSATORY_LEAVE';
 
 export interface StaffDailyStatus {
   id?: number;
@@ -109,6 +110,7 @@ export const DailyStatusLabels: Record<DailyAvailabilityStatus, string> = {
   OTHER_TASKS: '完成其他任务',
   SECONDED: '借调其他项目组',
   ON_LEAVE: '请假',
+  COMPENSATORY_LEAVE: '调休',
 };
 
 export const DailyStatusColors: Record<DailyAvailabilityStatus, string> = {
@@ -116,4 +118,5 @@ export const DailyStatusColors: Record<DailyAvailabilityStatus, string> = {
   OTHER_TASKS: '#1890ff',
   SECONDED: '#fa8c16',
   ON_LEAVE: '#ff4d4f',
+  COMPENSATORY_LEAVE: '#722ed1',
 };

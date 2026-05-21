@@ -126,8 +126,8 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
       const demandData: any = {
         product: values.product,
         version: values.version || '',
-        startDate: values.dateRange[0].format('YYYY-MM-DD'),
-        endDate: values.dateRange[1].format('YYYY-MM-DD'),
+        startDate: values.dateRange[0].format('YYYY-MM-DDTHH:mm'),
+        endDate: values.dateRange[1].format('YYYY-MM-DDTHH:mm'),
         manpowerDetails,
         versionType: values.versionType,
         versionPhase: values.versionPhase,
@@ -214,7 +214,8 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
             <RangePicker
               style={{ width: '100%' }}
               placeholder={['开始日期', '结束日期']}
-              format="YYYY-MM-DD"
+              format="YYYY-MM-DD HH:mm"
+              showTime={{ format: 'HH:mm' }}
               disabledDate={(current) =>
                 current && current < dayjs().startOf('day')
               }
