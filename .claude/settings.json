@@ -46,7 +46,10 @@
       "Read(//Users/mac/.m2/repository/com/h2database/h2/**)",
       "Bash(find /Users/mac/.m2/repository/org/hibernate -path \"*/hibernate-core/*.jar\" 2>/dev/null | head -3)",
       "Read(//Users/mac/.m2/repository/org/hibernate/**)",
-      "Bash(java -cp *)"
+      "Bash(java -cp *)",
+      "Bash(git checkout *)",
+      "Bash(git merge *)",
+      "Bash(git stash *)"
     ],
     "additionalDirectories": [
       "/Users/mac/.ssh",
