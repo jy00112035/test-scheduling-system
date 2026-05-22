@@ -11,20 +11,24 @@ import {
   Modal,
   message,
   TagProps,
+  DatePicker,
 } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
   CheckCircleOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
-import dayjs from 'dayjs';
+import dayjs, { Dayjs } from 'dayjs';
 import { TestDemand } from '../types';
 import TestDemandSubmit from './TestDemandSubmit';
 import { api } from '../services/api';
+import * as XLSX from 'xlsx';
 
 const { Option } = Select;
 const { Search } = Input;
+const { RangePicker } = DatePicker;
 
 const TestDemandList: React.FC = () => {
   const [demands, setDemands] = useState<TestDemand[]>([]);
@@ -34,6 +38,10 @@ const TestDemandList: React.FC = () => {
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [editingDemand, setEditingDemand] = useState<TestDemand | null>(null);
   const [loading, setLoading] = useState(false);
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
+  const [exportModalVisible, setExportModalVisible] = useState(false);
+  const [exportDateRange, setExportDateRange] = useState<[Dayjs, Dayjs] | null>(null);
+  const [exportLoading, setExportLoading] = useState(false);
 
   useEffect(() => {
     fetchDemands();
@@ -137,6 +145,67 @@ const TestDemandList: React.FC = () => {
     message.success('操作成功！');
   };
 
+  const handleExport = async () => {
+    if (!exportDateRange || exportDateRange.length !== 2) {
+      message.warning('请选择导出的日期范围');
+      return;
+    }
+    setExportLoading(true);
+    try {
+      const startDate = exportDateRange[0].format('YYYY-MM-DD');
+      const endDate = exportDateRange[1].format('YYYY-MM-DD');
+
+      const allDemands = await api.getDemands();
+      const filtered = allDemands.filter((d: TestDemand) => {
+        const created = dayjs(d.createdAt).format('YYYY-MM-DD');
+        return created >= startDate && created <= endDate;
+      });
+
+      if (filtered.length === 0) {
+        message.info('所选日期范围内无需求数据');
+        setExportLoading(false);
+        return;
+      }
+
+      const rows = filtered.map((d: TestDemand) => ({
+        '产品': d.product,
+        '版本号': d.version || '',
+        '版本类型': d.versionType || '',
+        '版本阶段': d.versionPhase || '',
+        '优先级': d.priority || '',
+        '保密项目': d.confidential ? '是' : '否',
+        '测试周期开始': dayjs(d.startDate).format('YYYY-MM-DD'),
+        '测试周期结束': dayjs(d.endDate).format('YYYY-MM-DD'),
+        '人力需求(人/天)': d.manpowerDemand,
+        '样机数量': d.testDeviceCount ?? '',
+        '状态': d.status,
+        '提交人': d.submittedBy || '',
+        '提交时间': dayjs(d.createdAt).format('YYYY-MM-DD'),
+        '备注': d.description || '',
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, '测试需求');
+
+      const colWidths = [
+        { wch: 20 }, { wch: 12 }, { wch: 10 }, { wch: 10 },
+        { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 14 },
+        { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+        { wch: 14 }, { wch: 30 },
+      ];
+      worksheet['!cols'] = colWidths;
+
+      XLSX.writeFile(workbook, `测试需求导出_${startDate}_${endDate}.xlsx`);
+      message.success(`成功导出 ${rows.length} 条需求记录`);
+      setExportModalVisible(false);
+    } catch (error: any) {
+      message.error(error.message || '导出失败');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
   const columns = [
     {
       title: '产品信息',
@@ -193,14 +262,11 @@ const TestDemandList: React.FC = () => {
     {
       title: '测试周期',
       key: 'dateRange',
-      width: 200,
+      width: 220,
       render: (_: any, record: TestDemand) => (
-        <div>
-          <div>{dayjs(record.startDate).format('YYYY-MM-DD')}</div>
-          <div style={{ color: '#999', fontSize: 12 }}>
-            ~ {dayjs(record.endDate).format('YYYY-MM-DD')}
-          </div>
-        </div>
+        <span style={{ whiteSpace: 'nowrap' }}>
+          {dayjs(record.startDate).format('YYYY-MM-DD')} ~ {dayjs(record.endDate).format('YYYY-MM-DD')}
+        </span>
       ),
     },
     {
@@ -336,16 +402,24 @@ const TestDemandList: React.FC = () => {
               ))}
             </Select>
           </Space>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => {
-              setEditingDemand(null);
-              setShowSubmitModal(true);
-            }}
-          >
-            提交需求
-          </Button>
+          <Space>
+            <Button
+              icon={<DownloadOutlined />}
+              onClick={() => setExportModalVisible(true)}
+            >
+              导出
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                setEditingDemand(null);
+                setShowSubmitModal(true);
+              }}
+            >
+              提交需求
+            </Button>
+          </Space>
         </div>
 
         <Table
@@ -354,11 +428,14 @@ const TestDemandList: React.FC = () => {
           rowKey="id"
           bordered
           loading={loading}
-          scroll={{ x: 1200 }}
+          scroll={{ x: 1200, y: 'calc(100vh - 360px)' }}
           pagination={{
-            pageSize: 10,
+            current: pagination.current,
+            pageSize: pagination.pageSize,
             showSizeChanger: true,
+            pageSizeOptions: ['10', '20', '50', '100'],
             showTotal: (total) => `共 ${total} 条`,
+            onChange: (page, pageSize) => setPagination({ current: page, pageSize }),
           }}
         />
       </Card>
@@ -376,6 +453,38 @@ const TestDemandList: React.FC = () => {
           initialValues={editingDemand || undefined}
           isEdit={!!editingDemand}
         />
+      </Modal>
+
+      <Modal
+        title="导出测试需求"
+        open={exportModalVisible}
+        onCancel={() => setExportModalVisible(false)}
+        footer={null}
+        width={420}
+        destroyOnClose
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <div style={{ marginBottom: 4, fontWeight: 500 }}>提交日期范围</div>
+            <RangePicker
+              value={exportDateRange as any}
+              onChange={(dates) => setExportDateRange(dates as [Dayjs, Dayjs] | null)}
+              placeholder={['开始日期', '结束日期']}
+              format="YYYY-MM-DD"
+              allowClear
+              style={{ width: '100%' }}
+            />
+          </div>
+          <Button
+            type="primary"
+            icon={<DownloadOutlined />}
+            loading={exportLoading}
+            onClick={handleExport}
+            block
+          >
+            导出
+          </Button>
+        </div>
       </Modal>
     </div>
   );

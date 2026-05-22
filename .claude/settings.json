@@ -40,7 +40,13 @@
       "Bash(echo \"PID: $!\")",
       "Read(//tmp/**)",
       "Read(//private/tmp/**)",
-      "Bash(lsof -ti:8080 | xargs kill -9 2>/dev/null; sleep 1 *)"
+      "Bash(lsof -ti:8080 | xargs kill -9 2>/dev/null; sleep 1 *)",
+      "Bash(java -cp /Users/mac/Desktop/code/ceshi-v1.1/backend/data/testdb.mv.db)",
+      "Bash(find /Users/mac/.m2/repository/com/h2database/h2 -name \"*.jar\" 2>/dev/null | head -5)",
+      "Read(//Users/mac/.m2/repository/com/h2database/h2/**)",
+      "Bash(find /Users/mac/.m2/repository/org/hibernate -path \"*/hibernate-core/*.jar\" 2>/dev/null | head -3)",
+      "Read(//Users/mac/.m2/repository/org/hibernate/**)",
+      "Bash(java -cp *)"
     ],
     "additionalDirectories": [
       "/Users/mac/.ssh",

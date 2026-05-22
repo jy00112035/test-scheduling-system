@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Select, DatePicker, Tag, Tooltip, message, Button } from 'antd';
+import { Card, Select, DatePicker, Tag, Tooltip, message, Button, Modal } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import dayjs, { Dayjs } from 'dayjs';
 import { api } from '../services/api';
@@ -18,7 +18,10 @@ const TaskKanban: React.FC = () => {
   const [staffs, setStaffs] = useState<any[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [exportModalVisible, setExportModalVisible] = useState(false);
   const [exportDateRange, setExportDateRange] = useState<[Dayjs, Dayjs] | null>(null);
+  const [exportProduct, setExportProduct] = useState<string | undefined>(undefined);
+  const [exportVersion, setExportVersion] = useState<string | undefined>(undefined);
   const [exportLoading, setExportLoading] = useState(false);
   const [dailyStatuses, setDailyStatuses] = useState<Map<string, { status: DailyAvailabilityStatus; percentage: number }>>(new Map());
 
@@ -59,15 +62,23 @@ const TaskKanban: React.FC = () => {
       const endDate = exportDateRange[1].format('YYYY-MM-DD');
       const exportSchedules = await api.getSchedulesByRange(startDate, endDate);
 
-      if (exportSchedules.length === 0) {
-        message.info('所选日期范围内无排班数据');
+      let filtered = exportSchedules;
+      if (exportProduct) {
+        filtered = filtered.filter((s: any) => s.product === exportProduct);
+      }
+      if (exportVersion) {
+        filtered = filtered.filter((s: any) => s.version === exportVersion);
+      }
+
+      if (filtered.length === 0) {
+        message.info('所选条件下无排班数据');
         setExportLoading(false);
         return;
       }
 
       const staffMap = new Map(staffs.map((s: any) => [s.id, s]));
 
-      const rows = exportSchedules.map((s: any) => {
+      const rows = filtered.map((s: any) => {
         const staff = staffMap.get(s.staffId);
         return {
           '日期': s.date,
@@ -101,6 +112,7 @@ const TaskKanban: React.FC = () => {
 
       XLSX.writeFile(workbook, `任务看板排班导出_${startDate}_${endDate}.xlsx`);
       message.success(`成功导出 ${rows.length} 条排班记录`);
+      setExportModalVisible(false);
     } catch (error: any) {
       message.error(error.message || '导出失败');
     } finally {
@@ -178,18 +190,9 @@ const TaskKanban: React.FC = () => {
               maxTagCount={2}
               options={[...new Set(schedules.map(s => s.product).filter(Boolean))].map(p => ({ label: p, value: p }))}
             />
-            <RangePicker
-              value={exportDateRange as any}
-              onChange={(dates) => setExportDateRange(dates as [Dayjs, Dayjs] | null)}
-              placeholder={['导出开始日期', '导出结束日期']}
-              format="YYYY-MM-DD"
-              allowClear
-              style={{ width: 260 }}
-            />
             <Button
               icon={<DownloadOutlined />}
-              loading={exportLoading}
-              onClick={handleExport}
+              onClick={() => setExportModalVisible(true)}
             >
               导出
             </Button>
@@ -206,8 +209,9 @@ const TaskKanban: React.FC = () => {
           <table className="kanban-table">
             <thead>
               <tr style={{ position: 'sticky', top: 0, zIndex: 5 }}>
-                <th style={{ minWidth: 120, position: 'sticky', left: 0, background: '#fafafa', zIndex: 6 }}>人员</th>
-                <th style={{ minWidth: 80, position: 'sticky', left: 120, background: '#fafafa', zIndex: 6 }}>测试小组</th>
+                <th style={{ minWidth: 110, position: 'sticky', left: 0, background: '#fafafa', zIndex: 6 }}>姓名</th>
+                <th style={{ minWidth: 80, position: 'sticky', left: 110, background: '#fafafa', zIndex: 6 }}>工号</th>
+                <th style={{ minWidth: 80, position: 'sticky', left: 190, background: '#fafafa', zIndex: 6 }}>测试小组</th>
                 {weekDates.map((date, index) => {
                   const isWeekend = [0, 6].includes(date.day());
                   return (
@@ -229,28 +233,40 @@ const TaskKanban: React.FC = () => {
                     left: 0,
                     background: '#fff',
                     zIndex: 1,
-                    padding: '6px 4px',
+                    padding: '4px 4px',
                     fontSize: '13px',
-                    borderRight: '1px solid #e8e8e8'
+                    borderRight: '1px solid #e8e8e8',
+                    whiteSpace: 'nowrap',
                   }}>
-                    <div style={{ fontWeight: 500 }}>{staff.name}</div>
-                    <div style={{ fontSize: 11, color: '#666' }}>{staff.groupName}</div>
+                    <span style={{ fontWeight: 500 }}>{staff.name}</span>
                     <Tag
                       color={staff.currentCoefficient === 1.0 ? 'green' : 'orange'}
-                      style={{ fontSize: '10px', padding: '0 4px', marginTop: 2 }}
+                      style={{ fontSize: '10px', padding: '0 4px', marginLeft: 4 }}
                     >
-                      系数 {staff.currentCoefficient?.toFixed(1) || '1.0'}
+                      {staff.currentCoefficient?.toFixed(1) || '1.0'}
                     </Tag>
                   </td>
                   <td style={{
                     position: 'sticky',
-                    left: 120,
+                    left: 110,
                     background: '#fff',
                     zIndex: 1,
-                    padding: '6px 4px',
+                    padding: '4px 4px',
                     fontSize: '12px',
                     color: '#666',
-                    borderRight: '1px solid #e8e8e8'
+                    borderRight: '1px solid #e8e8e8',
+                  }}>
+                    {staff.empNo || '-'}
+                  </td>
+                  <td style={{
+                    position: 'sticky',
+                    left: 190,
+                    background: '#fff',
+                    zIndex: 1,
+                    padding: '4px 4px',
+                    fontSize: '12px',
+                    color: '#666',
+                    borderRight: '1px solid #e8e8e8',
                   }}>
                     {staff.testType || '-'}
                   </td>
@@ -331,6 +347,64 @@ const TaskKanban: React.FC = () => {
             </tbody>
           </table>
       </Card>
+
+      <Modal
+        title="导出排班数据"
+        open={exportModalVisible}
+        onCancel={() => setExportModalVisible(false)}
+        footer={null}
+        width={420}
+        destroyOnClose
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <div style={{ marginBottom: 4, fontWeight: 500 }}>日期范围</div>
+            <RangePicker
+              value={exportDateRange as any}
+              onChange={(dates) => setExportDateRange(dates as [Dayjs, Dayjs] | null)}
+              placeholder={['开始日期', '结束日期']}
+              format="YYYY-MM-DD"
+              allowClear
+              style={{ width: '100%' }}
+            />
+          </div>
+          <div>
+            <div style={{ marginBottom: 4, fontWeight: 500 }}>产品（可选）</div>
+            <Select
+              value={exportProduct}
+              onChange={setExportProduct}
+              placeholder="全部产品"
+              allowClear
+              style={{ width: '100%' }}
+              options={[...new Set(schedules.map((s: any) => s.product).filter(Boolean))].map(p => ({ label: p, value: p }))}
+            />
+          </div>
+          <div>
+            <div style={{ marginBottom: 4, fontWeight: 500 }}>版本号（可选）</div>
+            <Select
+              value={exportVersion}
+              onChange={setExportVersion}
+              placeholder="全部版本"
+              allowClear
+              style={{ width: '100%' }}
+              options={[...new Set(schedules
+                .filter((s: any) => !exportProduct || s.product === exportProduct)
+                .map((s: any) => s.version)
+                .filter(Boolean)
+              )].map(v => ({ label: v, value: v }))}
+            />
+          </div>
+          <Button
+            type="primary"
+            icon={<DownloadOutlined />}
+            loading={exportLoading}
+            onClick={handleExport}
+            block
+          >
+            导出
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 };
