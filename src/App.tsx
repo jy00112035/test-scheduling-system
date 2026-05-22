@@ -270,7 +270,7 @@ const AppContent: React.FC = () => {
             onNavigatePersonal={() => setSelectedKey('personal')}
           />
         </Header>
-        <Content style={{ margin: '16px', overflow: 'auto' }}>
+        <Content style={{ margin: '16px', overflow: 'auto', height: 0 }}>
           {renderContent()}
         </Content>
       </Layout>
