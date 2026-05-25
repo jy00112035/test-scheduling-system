@@ -278,7 +278,7 @@ const ScheduleWorkbench: React.FC = () => {
   const getDemandDates = (demandStart: dayjs.Dayjs, demandEnd: dayjs.Dayjs): dayjs.Dayjs[] => {
     const dates: dayjs.Dayjs[] = [];
     let current = demandStart;
-    while (current.isBefore(demandEnd) || current.isSame(demandEnd, 'day')) {
+    while (current.isBefore(demandEnd, 'day') || current.isSame(demandEnd, 'day')) {
       dates.push(current);
       current = current.add(1, 'day');
     }
@@ -323,7 +323,6 @@ const ScheduleWorkbench: React.FC = () => {
     const unfulfilledSet = new Set<number>();
 
     // ---- 原因追踪数据结构 ----
-    const hasDateOverlap = new Map<number, boolean>();       // 需求周期与排班日期有交集
     const hasMatchingStaff = new Map<number, Set<string>>(); // 有匹配员工的测试类型
     const dateCoverageMap = new Map<number, Set<string>>();  // 实际被排班覆盖的日期
     const deviceBlockedCount = new Map<number, number>();    // 样机限制跳过次数
@@ -345,7 +344,6 @@ const ScheduleWorkbench: React.FC = () => {
       } else {
         remainingByType.set(`${demand.id}-__ALL__`, Number(demand.manpowerDemand));
       }
-      hasDateOverlap.set(demand.id, false);
       hasMatchingStaff.set(demand.id, new Set());
       dateCoverageMap.set(demand.id, new Set());
       deviceBlockedCount.set(demand.id, 0);
@@ -360,6 +358,21 @@ const ScheduleWorkbench: React.FC = () => {
         : ['__ALL__']);
     }
 
+    // 预检查：标记每个需求所需的测试类型中，哪些在活跃员工中存在
+    for (const demand of sortedDemands) {
+      const neededTypes = demandNeededTypes.get(demand.id) || [];
+      const matchSet = hasMatchingStaff.get(demand.id)!;
+      for (const tt of neededTypes) {
+        const hasStaff = activeStaffs.some((s: any) => {
+          if (tt === '__ALL__') return true;
+          return s.testType === tt;
+        });
+        if (hasStaff) {
+          matchSet.add(tt);
+        }
+      }
+    }
+
     // 跟踪每个需求每天已分配的人员（样机数量约束）
     const deviceStaffMap = new Map<string, Set<number>>();
 
@@ -370,12 +383,8 @@ const ScheduleWorkbench: React.FC = () => {
       for (const demand of sortedDemands) {
         if (completedDemands.has(demand.id)) continue;
 
-        const demandStart = dayjs(demand.startDate);
-        const demandEnd = dayjs(demand.endDate);
-        if (date.isBefore(demandStart) || date.isAfter(demandEnd)) continue;
-
-        // 记录日期与需求周期有交集
-        hasDateOverlap.set(demand.id, true);
+        // 排班日期早于需求开始日期时不可排班
+        if (date.isBefore(dayjs(demand.startDate), 'day')) continue;
 
         const neededTypes = demandNeededTypes.get(demand.id) || [];
         const allAvailable = getAvailableStaffForDate(dateStr, loadMap, activeStaffs, demand.confidential);
@@ -472,50 +481,41 @@ const ScheduleWorkbench: React.FC = () => {
       const reasons: string[] = [];
       const perTypeDetails: Array<{ testType: string; shortage: number }> = [];
 
-      // 1. 日期交集检查
-      if (!hasDateOverlap.get(demand.id)) {
-        reasons.push(`需求周期（${dayjs(demand.startDate).format('MM/DD')}~${dayjs(demand.endDate).format('MM/DD')}）与排班日期无交集`);
-      } else {
-        // 2. 按测试类型分析
-        for (const tt of neededTypes) {
-          const remaining = Math.max(0, remainingByType.get(`${demand.id}-${tt}`) || 0);
-          if (remaining <= 0.001) continue;
-          const typeShortage = Math.round(remaining * 10) / 10;
-          const matchSet = hasMatchingStaff.get(demand.id) || new Set();
-          const displayType = tt === '__ALL__' ? '总计' : tt;
-          perTypeDetails.push({ testType: displayType, shortage: typeShortage });
-          if (!matchSet.has(tt)) {
-            reasons.push(`缺少「${displayType}」类型的测试人员`);
-          }
+      // 按测试类型分析
+      for (const tt of neededTypes) {
+        const remaining = Math.max(0, remainingByType.get(`${demand.id}-${tt}`) || 0);
+        if (remaining <= 0.001) continue;
+        const typeShortage = Math.round(remaining * 10) / 10;
+        const matchSet = hasMatchingStaff.get(demand.id) || new Set();
+        const displayType = tt === '__ALL__' ? '总计' : tt;
+        perTypeDetails.push({ testType: displayType, shortage: typeShortage });
+        if (!matchSet.has(tt)) {
+          reasons.push(`缺少「${displayType}」类型的测试人员`);
         }
+      }
 
-        // 3. 容量不足
-        const capBlocked = capacityBlockedCount.get(demand.id) || 0;
-        if (capBlocked > 0) {
-          reasons.push(`员工日容量不足（${capBlocked} 次因容量<5%被跳过）`);
-        }
+      // 容量不足
+      const capBlocked = capacityBlockedCount.get(demand.id) || 0;
+      if (capBlocked > 0) {
+        reasons.push(`员工日容量不足（${capBlocked} 次因容量<5%被跳过）`);
+      }
 
-        // 4. 样机限制
-        const devBlocked = deviceBlockedCount.get(demand.id) || 0;
-        if (devBlocked > 0) {
-          reasons.push(`样机数量限制（${devBlocked} 次因达到设备上限被跳过）`);
-        }
+      // 样机限制
+      const devBlocked = deviceBlockedCount.get(demand.id) || 0;
+      if (devBlocked > 0) {
+        reasons.push(`样机数量限制（${devBlocked} 次因达到设备上限被跳过）`);
+      }
 
-        // 5. 日期覆盖不全
-        const demandTotalDays = dayjs(demand.endDate).diff(dayjs(demand.startDate), 'day') + 1;
-        const coveredDays = dateCoverageMap.get(demand.id)?.size || 0;
-        const allocDatesInWindow = dateStrings.filter(ds => {
-          const d = dayjs(ds);
-          return !d.isBefore(dayjs(demand.startDate)) && !d.isAfter(dayjs(demand.endDate));
-        }).length;
-        if (coveredDays < demandTotalDays) {
-          reasons.push(`排班日期仅覆盖 ${coveredDays}/${demandTotalDays} 天（窗口内 ${allocDatesInWindow} 天可供排班）`);
-        }
+      // 日期覆盖不全
+      const demandTotalDays = dayjs(demand.endDate).diff(dayjs(demand.startDate), 'day') + 1;
+      const coveredDays = dateCoverageMap.get(demand.id)?.size || 0;
+      if (coveredDays < demandTotalDays) {
+        reasons.push(`排班日期仅覆盖 ${coveredDays}/${demandTotalDays} 天`);
+      }
 
-        // 无明确原因时的兜底
-        if (reasons.length === 0) {
-          reasons.push('人力需求超出可用资源总量');
-        }
+      // 无明确原因时的兜底
+      if (reasons.length === 0) {
+        reasons.push('人力需求超出可用资源总量');
       }
 
       unfulfilledDetailsList.push({
@@ -681,7 +681,7 @@ const ScheduleWorkbench: React.FC = () => {
     let globalStart = today;
     for (const d of sortedDemands) {
       const dStart = dayjs(d.startDate);
-      if (dStart.isBefore(globalStart)) globalStart = dStart;
+      if (dStart.isBefore(globalStart, 'day')) globalStart = dStart;
     }
     const globalEnd = today.add(90, 'day');
     const allDates = getDemandDates(globalStart, globalEnd);
@@ -1200,8 +1200,8 @@ const ScheduleWorkbench: React.FC = () => {
   // 筛选并排序：待排期需求（按结束日期距今日最近优先）
   const pendingDemands = useMemo(() => demands.filter(d => {
     const demandSchedules = schedules.filter(s => s.demandId === d.id && staffs.some(st => st.id === s.staffId));
-    const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
-    const hasRemaining = allocatedDays < Number(d.manpowerDemand || 0);
+    const publishedAllocatedDays = demandSchedules.filter(s => s.published).reduce((sum, s) => sum + s.percentage / 100, 0);
+    const hasRemaining = publishedAllocatedDays < Number(d.manpowerDemand || 0);
     let matchesTestType = true;
     if (filterDemandTestTypes.length > 0) {
       matchesTestType = (d.manpowerDetails || []).some((md: any) =>
@@ -1216,7 +1216,7 @@ const ScheduleWorkbench: React.FC = () => {
     const demandSchedules = schedules.filter(s => s.demandId === d.id && staffs.some(st => st.id === s.staffId));
     const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
     const isPublished = demandSchedules.length > 0 && demandSchedules.every(s => s.published);
-    const notExpired = dayjs().isBefore(dayjs(d.endDate).add(1, 'day'));
+    const notExpired = dayjs().isBefore(dayjs(d.endDate).add(1, 'day'), 'day');
     let matchesTestType = true;
     if (filterDemandTestTypes.length > 0) {
       matchesTestType = (d.manpowerDetails || []).some((md: any) =>
@@ -1231,7 +1231,8 @@ const ScheduleWorkbench: React.FC = () => {
     const eligibleDemands = demands.filter(d => {
       const demandSchedules = schedules.filter(s => s.demandId === d.id);
       const published = demandSchedules.length > 0 && demandSchedules.every(s => s.published);
-      return !published && (d.status === 'pending' || d.status === 'scheduled');
+      const notStarted = dayjs(d.startDate).isAfter(dayjs(), 'day');
+      return !published && !notStarted && (d.status === 'pending' || d.status === 'scheduled');
     });
     const allEligibleIds = eligibleDemands.map(d => d.id);
     const allSelected = allEligibleIds.length > 0 && allEligibleIds.every(id => selectedDemandIds.has(id));
