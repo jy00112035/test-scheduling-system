@@ -159,7 +159,7 @@ const ScheduleWorkbench: React.FC = () => {
 
   const dayLabels = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
   const weekDates = Array.from({ length: 7 }, (_, i) =>
-    weekViewDate.add(i, 'day')
+    weekViewDate.clone().add(i, 'day')
   );
   const weekDays = weekDates.map(d => dayLabels[d.day()]);
 
@@ -220,9 +220,10 @@ const ScheduleWorkbench: React.FC = () => {
   const handleDateRecommend = () => {
     const eligibleIds = demands
       .filter(d => {
-        const demandSchedules = schedules.filter(s => s.demandId === d.id);
-        const published = demandSchedules.length > 0 && demandSchedules.every(s => s.published);
-        return !published && (d.status === 'pending' || d.status === 'scheduled');
+        const demandSchedules = schedules.filter(s => s.demandId === d.id && staffs.some(st => st.id === s.staffId));
+        const publishedAllocatedDays = demandSchedules.filter(s => s.published).reduce((sum, s) => sum + s.percentage / 100, 0);
+        const hasRemaining = publishedAllocatedDays < Number(d.manpowerDemand || 0);
+        return hasRemaining && (d.status === 'pending' || d.status === 'scheduled');
       })
       .map(d => d.id);
     setSelectedDemandIds(new Set(eligibleIds));
@@ -234,9 +235,10 @@ const ScheduleWorkbench: React.FC = () => {
   const handleFullAllocateRecommend = () => {
     const eligibleIds = demands
       .filter(d => {
-        const demandSchedules = schedules.filter(s => s.demandId === d.id);
-        const published = demandSchedules.length > 0 && demandSchedules.every(s => s.published);
-        return !published && (d.status === 'pending' || d.status === 'scheduled');
+        const demandSchedules = schedules.filter(s => s.demandId === d.id && staffs.some(st => st.id === s.staffId));
+        const publishedAllocatedDays = demandSchedules.filter(s => s.published).reduce((sum, s) => sum + s.percentage / 100, 0);
+        const hasRemaining = publishedAllocatedDays < Number(d.manpowerDemand || 0);
+        return hasRemaining && (d.status === 'pending' || d.status === 'scheduled');
       })
       .map(d => d.id);
     setSelectedDemandIds(new Set(eligibleIds));
@@ -1044,11 +1046,10 @@ const ScheduleWorkbench: React.FC = () => {
 
     setAssignLoading(true);
     try {
-      const startDate = dayjs(assignTarget.date);
       const newSchedules: any[] = [];
 
       for (let i = 0; i < assignDays; i++) {
-        const currentDate = startDate.add(i, 'day').format('YYYY-MM-DD');
+        const currentDate = dayjs(assignTarget.date).add(i, 'day').format('YYYY-MM-DD');
         newSchedules.push({
           staffId: assignTarget.staff.id,
           demandId: selectedDemand.id,
@@ -1229,10 +1230,10 @@ const ScheduleWorkbench: React.FC = () => {
   // 推荐排班弹框中共用的需求选择列表
   const renderDemandSelectionList = (priorityOpts: string[]) => {
     const eligibleDemands = demands.filter(d => {
-      const demandSchedules = schedules.filter(s => s.demandId === d.id);
-      const published = demandSchedules.length > 0 && demandSchedules.every(s => s.published);
-      const notStarted = dayjs(d.startDate).isAfter(dayjs(), 'day');
-      return !published && !notStarted && (d.status === 'pending' || d.status === 'scheduled');
+      const demandSchedules = schedules.filter(s => s.demandId === d.id && staffs.some(st => st.id === s.staffId));
+      const publishedAllocatedDays = demandSchedules.filter(s => s.published).reduce((sum, s) => sum + s.percentage / 100, 0);
+      const hasRemaining = publishedAllocatedDays < Number(d.manpowerDemand || 0);
+      return hasRemaining && (d.status === 'pending' || d.status === 'scheduled');
     });
     const allEligibleIds = eligibleDemands.map(d => d.id);
     const allSelected = allEligibleIds.length > 0 && allEligibleIds.every(id => selectedDemandIds.has(id));
@@ -2159,36 +2160,48 @@ const ScheduleWorkbench: React.FC = () => {
       </div>
 
       {/* 分配弹窗 */}
-      <Modal
-        title="分配测试任务"
-        open={assignModalVisible}
-        onCancel={() => {
-          setAssignModalVisible(false);
-          setSelectedDemand(null);
-          setAssignTarget(null);
-        }}
-        footer={[
-          <Button key="cancel" onClick={() => setAssignModalVisible(false)}>
-            取消
-          </Button>,
-          <Button
-            key="confirm"
-            type="primary"
-            loading={assignLoading}
-            onClick={handleAssignConfirm}
-          >
-            确认分配
-          </Button>
-        ]}
-      >
-        {assignTarget && selectedDemand && (() => {
-          const currentDemandSchedules = schedules.filter(s => s.demandId === selectedDemand.id);
-          const alreadyAllocated = currentDemandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
-          const remaining = selectedDemand.manpowerDemand - alreadyAllocated;
-          const thisAllocation = (assignDays * assignPercentage) / 100;
-          const exceeds = thisAllocation > remaining;
+      {(() => {
+        const alreadyAllocated = assignTarget && selectedDemand
+          ? schedules.filter(s => s.demandId === selectedDemand.id).reduce((sum, s) => sum + s.percentage / 100, 0)
+          : 0;
+        const remaining = assignTarget && selectedDemand
+          ? selectedDemand.manpowerDemand - alreadyAllocated
+          : 0;
+        const thisAllocation = (assignDays * assignPercentage) / 100;
+        const exceeds = thisAllocation > remaining;
+        const dateRangeDays = assignTarget && selectedDemand
+          ? dayjs(selectedDemand.endDate).diff(dayjs(assignTarget.date), 'day') + 1
+          : 1;
+        const capacityMaxDays = assignPercentage > 0
+          ? Math.floor(remaining / (assignPercentage / 100))
+          : 0;
+        const effectiveMaxDays = Math.min(dateRangeDays, Math.max(1, capacityMaxDays), 30);
 
-          return (
+        return (
+        <Modal
+          title="分配测试任务"
+          open={assignModalVisible}
+          onCancel={() => {
+            setAssignModalVisible(false);
+            setSelectedDemand(null);
+            setAssignTarget(null);
+          }}
+          footer={[
+            <Button key="cancel" onClick={() => setAssignModalVisible(false)}>
+              取消
+            </Button>,
+            <Button
+              key="confirm"
+              type="primary"
+              loading={assignLoading}
+              disabled={exceeds}
+              onClick={handleAssignConfirm}
+            >
+              确认分配
+            </Button>,
+          ]}
+        >
+          {assignTarget && selectedDemand && (
           <div>
             <Descriptions column={1} bordered size="small">
               <Descriptions.Item label="测试人员">
@@ -2246,10 +2259,7 @@ const ScheduleWorkbench: React.FC = () => {
                 <span style={{ fontSize: 14, color: '#666' }}>连续分配 </span>
                 <InputNumber
                   min={1}
-                  max={Math.min(
-                    dayjs(selectedDemand.endDate).diff(dayjs(assignTarget.date), 'day') + 1,
-                    30
-                  )}
+                  max={effectiveMaxDays}
                   value={assignDays}
                   onChange={(value) => setAssignDays(value || 1)}
                   style={{ width: 80, margin: '0 8px' }}
@@ -2275,10 +2285,10 @@ const ScheduleWorkbench: React.FC = () => {
               </div>
             </div>
           </div>
-          );
-          })()
-        }
-      </Modal>
+          )}
+        </Modal>
+        );
+      })()}
 
       {/* 编辑弹窗 */}
       <Modal

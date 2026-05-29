@@ -100,9 +100,18 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateRegister }) => {
           href="https://beian.miit.gov.cn/"
           target="_blank"
           rel="noopener noreferrer"
-          style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, textDecoration: 'none' }}
+          style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, textDecoration: 'none', display: 'block' }}
         >
           陕ICP备2026011261号-1
+        </a>
+        <a
+          href="http://www.beian.gov.cn/portal/registerSystemInfo?recordcode=61040202000898"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', marginTop: 4 }}
+        >
+          <img src="/beian-icon.png" alt="公安图标" style={{ width: 16, height: 16, marginRight: 4 }} />
+          陕公网安备61040202000898号
         </a>
       </div>
     </div>

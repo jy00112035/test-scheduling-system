@@ -222,9 +222,18 @@ const AppContent: React.FC = () => {
               href="https://beian.miit.gov.cn/"
               target="_blank"
               rel="noopener noreferrer"
-              style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12, textDecoration: 'none' }}
+              style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12, textDecoration: 'none', display: 'block' }}
             >
               {collapsed ? '备案' : '陕ICP备2026011261号-1'}
+            </a>
+            <a
+              href="http://www.beian.gov.cn/portal/registerSystemInfo?recordcode=61040202000898"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12, textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 4 }}
+            >
+              <img src="/beian-icon.png" alt="公安图标" style={{ width: 16, height: 16, marginRight: 4, flexShrink: 0 }} />
+              {collapsed ? '' : '陕公网安备61040202000898号'}
             </a>
           </div>
         </div>
@@ -270,7 +279,7 @@ const AppContent: React.FC = () => {
             onNavigatePersonal={() => setSelectedKey('personal')}
           />
         </Header>
-        <Content style={{ margin: '16px', overflow: 'auto', height: 0 }}>
+        <Content style={{ margin: '16px', overflow: 'auto', flex: 1, minHeight: 0 }}>
           {renderContent()}
         </Content>
       </Layout>
