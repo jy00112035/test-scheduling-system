@@ -12,8 +12,6 @@ import {
   Tag,
   Modal,
   Table,
-  Popconfirm,
-  Select,
 } from 'antd';
 import {
   SaveOutlined,
@@ -28,7 +26,6 @@ import { useNavigate } from 'react-router-dom';
 import { TestDemand } from '../types';
 
 const { TextArea } = Input;
-const { Option } = Select;
 
 interface SupplementRequestProps {
   onBack?: () => void;
@@ -96,13 +93,6 @@ const SupplementRequest: React.FC<SupplementRequestProps> = ({
       r.id === id ? { ...r, status: 'approved' } : r
     ));
     message.success('补充测试申请已批准！');
-  };
-
-  const handleReject = (id: string) => {
-    setRequests(requests.map(r =>
-      r.id === id ? { ...r, status: 'rejected' } : r
-    ));
-    message.success('补充测试申请已驳回！');
   };
 
   const getStatusColor = (status: string) => {

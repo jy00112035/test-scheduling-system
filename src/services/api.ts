@@ -1,4 +1,4 @@
-const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:8080/api`;
+const API_BASE_URL = '/api';
 
 interface ApiResponse<T> {
   code: number;
@@ -141,13 +141,13 @@ class ApiService {
     });
   }
 
-  async deleteDemand(id: number) {
+  async deleteDemand(id: string) {
     return this.request<void>(`/demands/${id}`, {
       method: 'DELETE',
     });
   }
 
-  async closeDemand(id: number) {
+  async closeDemand(id: string) {
     return this.request<any>(`/demands/${id}/close`, {
       method: 'POST',
     });

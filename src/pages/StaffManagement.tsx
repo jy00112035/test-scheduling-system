@@ -249,7 +249,7 @@ const StaffManagement: React.FC = () => {
             }
 
             // 处理日期格式
-            let joinDate = rowObj[joinDateKey] || dayjs().format('YYYY-MM-DD');
+            let joinDate = joinDateKey ? rowObj[joinDateKey] : dayjs().format('YYYY-MM-DD');
             if (typeof joinDate === 'number') {
               // Excel 日期序列号转换
               joinDate = dayjs((joinDate - 25569) * 86400 * 1000).format('YYYY-MM-DD');
@@ -257,23 +257,23 @@ const StaffManagement: React.FC = () => {
               joinDate = dayjs(joinDate).format('YYYY-MM-DD') || dayjs().format('YYYY-MM-DD');
             }
 
-            const rawRole = String(rowObj[roleKey] || '').trim();
+            const rawRole = roleKey ? String(rowObj[roleKey] || '').trim() : '';
             const roles: string[] = rawRole
               ? rawRole.split(';').map(r => roleMapping[r.trim()] || r.trim())
               : ['testExecutor'];
 
             const rowData: ImportRow = {
-              name: String(rowObj[nameKey] || '').trim(),
+              name: String(rowObj[nameKey!] || '').trim(),
               empNo: empNo,
               joinDate: joinDate,
-              groupName: String(rowObj[groupNameKey] || '').trim(),
-              testType: String(rowObj[testTypeKey] || '').trim() || undefined,
-              initialCoefficient: parseFloat(String(rowObj[initialCoefKey] || '0.3')) || 0.3,
-              currentCoefficient: parseFloat(String(rowObj[currentCoefKey] || '0.3')) || 0.3,
+              groupName: groupNameKey ? String(rowObj[groupNameKey] || '').trim() : '',
+              testType: testTypeKey ? String(rowObj[testTypeKey] || '').trim() || undefined : undefined,
+              initialCoefficient: initialCoefKey ? parseFloat(String(rowObj[initialCoefKey] || '0.3')) || 0.3 : 0.3,
+              currentCoefficient: currentCoefKey ? parseFloat(String(rowObj[currentCoefKey] || '0.3')) || 0.3 : 0.3,
               status: 'active',
               roles,
-              familiarModules: String(rowObj[familiarModulesKey] || '').trim(),
-              confidentialClearance: ['是', 'true', '有', 'yes'].includes(String(rowObj[confidentialClearanceKey] || '').trim()),
+              familiarModules: familiarModulesKey ? String(rowObj[familiarModulesKey] || '').trim() : '',
+              confidentialClearance: confidentialClearanceKey ? ['是', 'true', '有', 'yes'].includes(String(rowObj[confidentialClearanceKey] || '').trim()) : false,
             };
             parsedData.push(rowData);
           }
@@ -692,7 +692,7 @@ const StaffManagement: React.FC = () => {
             onChange: (page, pageSize) => {
               setPagination({ current: page, pageSize });
             },
-            onShowSizeChange: (current, size) => {
+            onShowSizeChange: (_current, size) => {
               setPagination({ current: 1, pageSize: size });
             },
           }}
@@ -884,7 +884,7 @@ const StaffManagement: React.FC = () => {
                 accept=".xlsx,.xls"
                 beforeUpload={() => false}
                 onChange={handleFileChange}
-                fileList={selectedFile ? [{ uid: '-1', name: selectedFile.name, status: 'done', originFileObj: selectedFile }] : []}
+                fileList={selectedFile ? [{ uid: '-1', name: selectedFile.name, status: 'done' as const, originFileObj: selectedFile as any }] : []}
               >
                 <Button icon={<UploadOutlined />}>选择Excel文件</Button>
               </Upload>

@@ -111,7 +111,7 @@ const TestDemandList: React.FC = () => {
     return matchesSearch && matchesStatus && matchesProduct;
   });
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     try {
       await api.deleteDemand(id);
       setDemands(demands.filter(d => d.id !== id));
@@ -121,7 +121,7 @@ const TestDemandList: React.FC = () => {
     }
   };
 
-  const handleClose = async (id: number) => {
+  const handleClose = async (id: string) => {
     try {
       await api.closeDemand(id);
       setDemands(demands.map(d =>
