@@ -4,6 +4,7 @@ dist/
 .idea/
 *.log
 .DS_Store
+.superpowers/
 backend/target/
 backend/.idea/
 backend/*.iml

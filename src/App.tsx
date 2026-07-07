@@ -5,6 +5,7 @@ import {
   DashboardOutlined,
   TableOutlined,
   FileTextOutlined,
+  HomeOutlined,
   ScheduleOutlined,
   UserOutlined,
   BarChartOutlined,
@@ -14,6 +15,7 @@ import {
   MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import Dashboard from './pages/Dashboard';
+import Home from './pages/Home';
 import TaskKanban from './pages/TaskKanban';
 import StaffManagement from './pages/StaffManagement';
 import ScheduleWorkbench from './pages/ScheduleWorkbench';
@@ -76,17 +78,17 @@ const AppContent: React.FC = () => {
 
   // 根据用户角色确定默认页面
   useEffect(() => {
-    if (hasPermission('viewDashboard')) {
-      setSelectedKey('dashboard');
-    } else if (hasPermission('viewTaskKanban')) {
-      setSelectedKey('kanban');
-    } else {
-      setSelectedKey('demands');
-    }
-  }, [roles, hasPermission]);
+    setSelectedKey('home');
+  }, [roles]);
 
   // 根据用户角色过滤菜单
   const menuItems = [
+    {
+      key: 'home',
+      icon: <HomeOutlined />,
+      label: '首页',
+      permissions: [],
+    },
     {
       key: 'dashboard',
       icon: <DashboardOutlined />,
@@ -144,6 +146,9 @@ const AppContent: React.FC = () => {
       permissions: ['approveRegistration', 'approveTestDemand'],
     },
   ].filter(item => {
+    if (item.key === 'home') {
+      return true;
+    }
     // 任务看板和个人中心对所有用户可见
     if (item.key === 'kanban' || item.key === 'personal') {
       return true;
@@ -157,6 +162,8 @@ const AppContent: React.FC = () => {
   // 渲染页面内容
   const renderContent = () => {
     switch (selectedKey) {
+      case 'home':
+        return <Home onNavigate={setSelectedKey} />;
       case 'dashboard':
         return <Dashboard />;
       case 'demands':
@@ -176,7 +183,7 @@ const AppContent: React.FC = () => {
       case 'approvals':
         return <ApprovalCenter pendingRegCount={pendingRegCount} pendingDemandCount={pendingDemandCount} />;
       default:
-        return <Dashboard />;
+        return <Home onNavigate={setSelectedKey} />;
     }
   };
 
@@ -217,12 +224,12 @@ const AppContent: React.FC = () => {
               onClick={({ key }) => setSelectedKey(key)}
             />
           </div>
-          <div style={{ marginTop: 'auto', padding: '12px 8px', textAlign: 'center', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+          <div className={`sider-records ${collapsed ? 'collapsed' : ''}`}>
             <a
               href="https://beian.miit.gov.cn/"
               target="_blank"
               rel="noopener noreferrer"
-              style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12, textDecoration: 'none', display: 'block' }}
+              className="sider-records-link icp-record"
             >
               {collapsed ? '备案' : '陕ICP备2026011261号-1'}
             </a>
@@ -230,10 +237,10 @@ const AppContent: React.FC = () => {
               href="http://www.beian.gov.cn/portal/registerSystemInfo?recordcode=61040202000898"
               target="_blank"
               rel="noopener noreferrer"
-              style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12, textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 4 }}
+              className="sider-records-link public-record"
             >
-              <img src="/beian-icon.png" alt="公安图标" style={{ width: 16, height: 16, marginRight: 4, flexShrink: 0 }} />
-              {collapsed ? '' : '陕公网安备61040202000898号'}
+              <img src="/beian-icon.png" alt="公安图标" className="public-record-icon" />
+              {!collapsed && <span>陕公网安备61040202000898号</span>}
             </a>
           </div>
         </div>
