@@ -47,6 +47,33 @@
 
 页面默认不展示全量人员矩阵，而是先展示待处理需求。用户选择一批需求后，系统根据所选需求自动收束人员和日期范围，再在相关时间轴中展示排布结果。
 
+### 两步式生成草稿：明确定义
+
+本文档中"两步式"指两个有明确边界的交互阶段：
+
+**第一步：可行性预估（轻量、即时、不写入数据库）**
+
+用户勾选一批需求后，系统在前端聚合计算：
+- 本批需求总人天（按测试类型拆分）
+- 匹配人员池在日期范围内的可用容量
+- 预计可满足人天和预计缺口人天
+- 缺口按测试类型列出原因
+
+此时**尚未调用后端推荐算法，未生成任何排班记录**。用户可以调整人员池配置（固定人员、排除人员）后重新预估，也可以根据不同需求组合多次试探。
+
+前端能力上限：前端只做容量加减，不做排班分配。预估是"如果容量够用，大概率可以满足"的粗粒度判断，不是排班方案。
+
+**第二步：生成草稿（调用后端推荐算法，写入数据库）**
+
+用户确认可行性预估可接受后，点击"生成推荐草稿"。系统调用后端推荐接口，将本批需求、人员池配置（含固定/排除）、日期范围提交给后端。后端运行排班算法，生成具体的人员-日期-百分比分配方案，写入数据库（`published=false`）。
+
+生成完成后，时间轴从"容量概览"切换为"草稿排班视图"，用户可以拖拽微调。缺口与发布面板从"预估"切换为"实际结果"——展示哪些需求完全满足、哪些有缺口、哪些有冲突。
+
+**为什么需要两步分开？**
+- 第一步允许用户零成本试探不同需求组合，不需要等待后端算法，也不需要清理错误草稿。
+- 第二步才产生持久化数据，用户明确知道"这版草稿是我确认过可行性的"。
+- 避免用户在不可行的需求组合上浪费后端计算资源和等待时间。
+
 ## 信息架构
 
 ### 顶部调度总览条
@@ -307,6 +334,86 @@
 4. `冲突`：当前周期内已经超过容量。
 5. `不可用`：权限、测试类型或状态不满足本批需求。
 
+### 状态流转图
+
+#### 需求排布状态流转
+
+```
+                            ┌──────────────┐
+              用户取消选择   │   未选择     │
+             ◄───────────── │ (在队列中)   │
+                            └──────┬───────┘
+                                   │ 用户勾选
+                                   ▼
+                            ┌──────────────┐
+             人员/日期不足   │  本批已选    │
+             ◄───────────── │              │
+                            └──────┬───────┘
+                                   │ 点击"可行性预估"
+                                   ▼
+                  ┌────────────────┴────────────────┐
+                  │                                  │
+                  ▼                                  ▼
+         ┌──────────────┐                   ┌──────────────┐
+         │  预估可满足   │                   │ 预估有缺口    │
+         └──────┬───────┘                   └──────┬───────┘
+                │                                  │
+                │ 点击"生成推荐草稿"                 │ 用户决定继续
+                ▼                                  ▼
+         ┌──────────────┐                   ┌──────────────┐
+         │  草稿已生成   │◄──────────────────│  草稿已生成   │
+         │  (无冲突)     │                   │  (有缺口)    │
+         └──────┬───────┘                   └──────┬───────┘
+                │                                  │
+                │ 用户微调后消除冲突                  │ 用户微调/固定人员
+                ▼                                  ▼
+         ┌──────────────┐                   ┌──────────────┐
+         │   可发布      │◄──────────────────│   可发布      │
+         └──────┬───────┘                   └──────┬───────┘
+                │                                  │
+                │ 点击"发布本批"（部分需求）          │
+                ▼                                  │
+         ┌──────────────┐                          │
+         │   已发布      │◄─────────────────────────┘
+         └──────────────┘
+
+         异常路径：
+         ┌──────────────┐     用户手动清除草稿     ┌──────────────┐
+         │  草稿有冲突   │────────────────────────►│  本批已选    │
+         └──────────────┘                         └──────────────┘
+```
+
+#### 排班卡片状态流转
+
+```
+                  ┌──────────┐
+                  │   草稿    │──────── 拖拽/编辑 ────────┐
+                  └────┬─────┘                          │
+                       │ 发布                            │
+                       ▼                                ▼
+                  ┌──────────┐                   ┌──────────────┐
+                  │  已发布   │─── 拖拽/编辑 ───►│ 待提交变更    │
+                  └──────────┘                   └──────┬───────┘
+                       ▲                               │
+                       │ 取消变更（丢弃本地修改）         │ 点击"发布"
+                       └───────────────────────────────┘
+                                                        │
+                                                        ▼
+                                                  ┌──────────┐
+                                                  │  已发布   │
+                                                  └──────────┘
+```
+
+#### 关键状态约束
+
+| 约束 | 说明 |
+|------|------|
+| 草稿 → 已发布 | 只有 `published=false` 的排班可以被发布 |
+| 已发布 → 待提交变更 | 仅前端本地状态，后端仍为 `published=true`；刷新页面后此状态丢失（见草稿持久化方案） |
+| 草稿 → 删除 | 直接删除，无保护 |
+| 已发布 → 删除 | 必须先反发布（`unpublish`），不直接删除 |
+| 已发布 → 拖拽转移 | 实际上是修改 `staffId` 或 `date`，进入待提交变更状态 |
+
 ## 数据与计算要求
 
 ### 风险排序计算
@@ -348,7 +455,201 @@
 5. 保密需求只统计有保密权限的人员容量。
 6. 样机数量限制会限制同一需求同一天可并行安排的人数。
 
-## 组件拆分建议
+## 数据模型补充
+
+### 当前数据模型缺口
+
+以下字段在当前代码中为 `@Transient`（不持久化），但本设计的匹配分计算和缺口分析依赖它们。**必须在实施前持久化**：
+
+#### TestStaff 缺少的持久化字段
+
+| 字段 | 当前状态 | 设计依赖 | 影响 |
+|------|---------|---------|------|
+| `familiarModules` | `@Transient`，无持久化 | 匹配分：熟悉模块命中 0~20 分 | 不持久化则人员卡片无此信息，匹配分仅靠 testType 区分度极低 |
+| `confidentialClearance` | `@Transient`，无持久化 | 匹配分：保密权限 0 或 10 分 | 不持久化则保密需求无法自动过滤人员 |
+| `roles` | `@Transient`，从 User 表关联 | 人员角色展示 | 已有关联逻辑，无额外改造 |
+
+**改造方案**：
+```sql
+ALTER TABLE test_staff ADD COLUMN familiar_modules VARCHAR(500) DEFAULT '';
+ALTER TABLE test_staff ADD COLUMN confidential_clearance BOOLEAN DEFAULT FALSE;
+```
+
+#### TestDemand 缺少的持久化字段
+
+| 字段 | 当前状态 | 设计依赖 | 影响 |
+|------|---------|---------|------|
+| `manpowerDetails` | `@Transient`，无持久化 | 按测试类型缺口计算 | 不持久化则缺口面板无法展示"哪个测试类型缺了什么人" |
+
+**改造方案**：
+`demand_manpower_detail` 表已存在于 JPA 实体中，检查其是否已有数据库表。如果没有，建表：
+```sql
+CREATE TABLE demand_manpower_detail (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    demand_id BIGINT NOT NULL,
+    test_type VARCHAR(50) NOT NULL,
+    manpower_days DECIMAL(10,2) NOT NULL,
+    FOREIGN KEY (demand_id) REFERENCES test_demand(id)
+);
+```
+
+### 不需要新增的后端字段
+
+以下设计概念不需要新增持久化字段：
+
+| 概念 | 实现方式 |
+|------|---------|
+| 需求风险分数 | 前端 `useMemo` 派生，计算因子均来自现有字段（剩余天数、剩余人天、priority、confidential） |
+| 人员匹配分 | 前端 `useMemo` 派生，计算因子均来自现有字段（testType、familiarModules（持久化后）、currentCoefficient、已有排班负载） |
+| 需求排布 UI 状态（"本批已选"、"预估有缺口"等） | 纯前端 `useState`/`useReducer` 管理，不写入后端 |
+| "待提交变更"排班状态 | 纯前端状态，仅当用户点击"发布"时才调用后端 API |
+
+## 后端 API 需求
+
+### 现有可用接口
+
+当前后端已具备以下接口，可直接使用：
+
+| 接口 | 方法 | 用途 |
+|------|------|------|
+| `/api/demands` | GET | 获取全部需求列表 |
+| `/api/demands/{id}` | GET | 获取需求详情（含 manpowerDetails） |
+| `/api/schedules` | GET | 获取全部排班 |
+| `/api/schedules/range?startDate=&endDate=` | GET | 按日期范围获取排班 |
+| `/api/schedules/published` | GET | 获取已发布排班 |
+| `/api/schedules` | POST | 创建单条排班 |
+| `/api/schedules/batch` | POST | 批量创建排班 |
+| `/api/schedules/{id}` | PUT | 更新排班 |
+| `/api/schedules/{id}` | DELETE | 删除单条排班 |
+| `/api/schedules/demand/{demandId}` | DELETE | 按需求删除排班（⚠️ 无 published 保护） |
+| `/api/schedules/publish/{demandId}` | PUT | 发布单需求排班 |
+| `/api/schedules/unpublish/{demandId}` | PUT | 反发布单需求排班 |
+| `/api/staff` | GET | 获取全部人员 |
+| `/api/daily-statuses?startDate=&endDate=` | GET | 获取每日可用状态 |
+| `/api/field-configs` | GET | 获取字段配置 |
+
+### 需要新增的后端接口
+
+#### 1. 批量发布排班
+
+```
+POST /api/schedules/batch-publish
+Request: { demandIds: number[] }
+Response: {
+  success: [{ demandId: number, scheduleCount: number }],
+  failed: [{ demandId: number, reason: string }]
+}
+```
+
+**关键设计决策**：采用**逐条处理 + 收集成功/失败明细**模式（非 `@Transactional` 全量回滚）。
+- 遍历每个 demandId，尝试发布
+- 成功 → 记录到 `success` 列表
+- 失败（如状态已变更、存在硬冲突）→ 记录到 `failed` 列表，**继续处理下一个**
+- 前端根据 `failed` 列表给出精确提示："3 条发布成功，1 条（产品X）因存在超容量冲突发布失败"
+
+#### 2. 推荐排班生成（批量需求）
+
+```
+POST /api/schedules/recommend
+Request: {
+  demandIds: number[],
+  dateRange: { startDate: string, endDate: string },
+  config: {
+    fixedStaffIds?: number[],    // 固定人员（优先分配）
+    excludedStaffIds?: number[], // 排除人员
+    includeSaturdays?: boolean,
+    includeSundays?: boolean
+  }
+}
+Response: {
+  generatedSchedules: Schedule[],
+  unfulfilledDemands: [{
+    demandId: number,
+    product: string,
+    totalManpower: number,
+    fulfilledManpower: number,
+    shortage: number,
+    shortageByTestType: [{ testType: string, shortage: number }],
+    reasons: string[]
+  }],
+  conflicts: [{
+    staffId: number,
+    staffName: string,
+    date: string,
+    totalLoadPercent: number,
+    maxCapacityPercent: number,
+    reason: string
+  }]
+}
+```
+
+#### 3. 人员日期范围容量查询（聚合接口，减少前端 N+1 请求）
+
+```
+GET /api/staff/availability?startDate=&endDate=
+Response: [{
+  staffId: number,
+  staffName: string,
+  testType: string,
+  currentCoefficient: number,
+  familiarModules: string,
+  confidentialClearance: boolean,
+  dailyCapacity: {
+    [date: string]: {
+      maxPercent: number,         // coefficient × 100
+      usedPercent: number,        // 已占用（已发布 + 草稿）
+      availablePercent: number,   // 可用 = max - used
+      status: string,             // AVAILABLE / LEAVE / ...
+      conflictDetails: string[]
+    }
+  }
+}]
+```
+
+#### 4. 按需求删除排班 —— 增加已发布保护
+
+```
+DELETE /api/schedules/demand/{demandId}?scope=draft_only
+```
+
+默认 `scope=draft_only`，仅删除 `published=false` 的排班。若传入 `scope=all`，需额外确认且先自动反发布。
+
+#### 5. 需求排序/筛选增强（可选，前端优先兜底）
+
+```
+GET /api/demands?status=pending,scheduled&sortBy=risk&filterTestTypes=&filterProducts=&filterPriority=
+```
+
+如果前端全量加载后排序/筛选的性能可接受，此接口可推迟到第二阶段。
+
+### 需要改造的现有接口
+
+#### ScheduleService.deleteByDemandId —— 增加 published 保护
+
+当前实现无差别删除。改为：
+```java
+// 默认仅删除草稿
+scheduleRepository.deleteByDemandIdAndPublishedFalse(demandId);
+```
+
+新增重载方法 `deleteByDemandId(demandId, includePublished)` 用于发布流程中的"先清后建"场景。
+
+#### ScheduleService.create / createBatch —— 增加累计百分比硬校验
+
+在保存前校验同人同日累计百分比不超过 `coefficient × 100`：
+```java
+for (Schedule s : schedules) {
+    List<Schedule> existing = scheduleRepository
+        .findByStaffIdAndDate(s.getStaffId(), s.getDate());
+    int total = existing.stream().mapToInt(Schedule::getPercentage).sum();
+    int maxCap = staff.getCurrentCoefficient().multiply(BigDecimal.valueOf(100)).intValue();
+    if (total + s.getPercentage() > maxCap) {
+        throw new BusinessException(String.format(
+            "%s 在 %s 累计排班 %d%%，超过上限 %d%%",
+            staff.getName(), s.getDate(), total + s.getPercentage(), maxCap));
+    }
+}
+```
 
 当前 `src/pages/ScheduleWorkbench.tsx` 文件职责过重。实施时建议在不改变功能边界的前提下拆分为以下组件和工具：
 
@@ -361,7 +662,242 @@
 7. `workbench/workbenchCalculations.ts`：风险排序、匹配分、缺口计算、批次指标。
 8. `workbench/workbenchTypes.ts`：批次状态、匹配结果、缺口明细等类型。
 
-## 视觉原则
+## 并发与数据一致性
+
+### 并发场景
+
+多人排班工作台的核心并发风险场景：
+
+| 场景 | 风险 | 影响 |
+|------|------|------|
+| 两位资源主管同时对同一需求生成推荐草稿 | 后生成的覆盖先生成的草稿 | 用户 A 的微调丢失 |
+| 用户 A 在微调草稿，用户 B 发布了同一需求 | 用户 A 基于过时数据编辑 | 发布后又被覆盖 |
+| 用户点击"发布"时，另一用户已先发布 | 脏写 | 数据不一致 |
+
+### 防护策略
+
+**草稿层面：按需求 + 用户隔离**
+
+- 推荐排班生成的草稿记录增加 `createdBy` 字段（记录生成人）
+- 草稿查询按 `demandId + createdBy` 过滤，用户 A 看不到用户 B 的草稿
+- "清除本批草稿"仅清除当前用户自己的草稿
+- 其他用户的草稿不影响容量计算（仅已发布排班计入容量占用）
+
+**发布层面：乐观锁**
+
+- `Schedule` 表增加 `version` 字段（`@Version`）
+- 或使用 `updatedAt` 时间戳做乐观锁校验：发布时比对当前记录的 `updatedAt` 和请求中的 `updatedAt`，不一致则拒绝
+- 前端收到 409 Conflict 时提示"排班已被其他用户修改，请刷新后重试"
+
+**已发布修改层面：先到先得**
+
+- 两个用户同时修改同一条已发布排班 → 先提交的生效，后提交的收到冲突提示
+- 这与当前"待提交变更"的延迟提交模型兼容
+
+### 草稿生命周期
+
+| 问题 | 决策 |
+|------|------|
+| 草稿存多久？ | 永不过期。"清除"按钮由用户主动触发 |
+| 用户 A 的草稿对用户 B 可见吗？ | 不可见。草稿按 `createdBy` 隔离 |
+| 用户 B 在容量计算中看到用户 A 的草稿吗？ | 不。仅已发布排班计入容量占用 |
+| "清除本批草稿"的范围？ | 仅清除当前用户的本批需求草稿 |
+
+## 草稿持久化与页面离开防护
+
+### 问题
+
+当前工作台中，"待提交变更"（对已发布排班的拖拽/删除/编辑）仅保存在 React 组件内存中，页面刷新或关闭即丢失。本设计进一步引入了更多纯前端状态（需求勾选、人员固定/排除、第一步预估结果），同样需要防护。
+
+### 方案
+
+**第一层：beforeunload 拦截**
+
+当存在以下任一未保存状态时，拦截页面关闭/刷新：
+
+```typescript
+const hasUnsavedChanges = 
+  pendingChangeDemandIds.size > 0 ||     // 有待提交变更
+  selectedDemandIds.size > 0 ||          // 有已选但未生成草稿的需求
+  scheduleDrafts.length > 0;             // 有未保存的草稿编辑
+
+useEffect(() => {
+  const handler = (e: BeforeUnloadEvent) => {
+    if (hasUnsavedChanges) {
+      e.preventDefault();
+      e.returnValue = ''; // Chrome 需要
+    }
+  };
+  window.addEventListener('beforeunload', handler);
+  return () => window.removeEventListener('beforeunload', handler);
+}, [hasUnsavedChanges]);
+```
+
+**第二层：localStorage 自动保存**
+
+将关键 UI 状态序列化到 `localStorage`，页面加载时恢复：
+
+```typescript
+interface WorkbenchDraft {
+  selectedDemandIds: number[];
+  fixedStaffIds: number[];
+  excludedStaffIds: number[];
+  pendingChanges: Array<{
+    scheduleId: number;
+    changeType: 'delete' | 'modify' | 'transfer';
+    newValues?: Partial<ScheduleItem>;
+  }>;
+  lastSavedAt: string;
+}
+```
+
+- 每次状态变化后 2 秒（debounce）自动写入 localStorage
+- 页面加载时检查是否存在草稿，如有则弹窗询问"检测到未完成的排班操作，是否恢复？"
+- 用户选择"恢复"→ 恢复状态；"丢弃"→ 清除 localStorage 并重新加载
+- 用户成功发布后清除对应需求的 localStorage 条目
+
+**不需要后端草稿表**（至少第一阶段不）：localStorage + beforeunload 的轻量方案已覆盖主要风险。后续如果需要在多设备间同步排班进度，再评估后端草稿表。
+
+## 冲突检测硬阻断
+
+### 当前问题
+
+同一人同一天累计排班百分比超过 `coefficient × 100%` 时，系统仅给出视觉警告（红色高亮），不阻止保存和发布。
+
+### 硬阻断规则
+
+以下情况必须在**保存和发布前**做硬校验（前后端双重），阻止操作：
+
+| 规则 | 触发条件 | 阻断层级 |
+|------|---------|---------|
+| 单日累计超容 | `sum(percentage) > coefficient × 100` | 前端分配/编辑弹窗 + 后端 create/update |
+| 已发布排班直接删除 | `schedule.published === true && 未经 unpublish` | 前端隐藏删除按钮 + 后端 deleteByDemandId 过滤 |
+| 保密需求分配给无权限人员 | `demand.confidential && !staff.confidentialClearance` | 前端拖拽时拒绝 + 后端 create 校验 |
+| 样机数量超限 | 同需求同日并行人数 > `testDeviceCount` | 前端拖拽时拒绝 + 后端 create 校验（待定，见决策 4） |
+
+### 实现要点
+
+**前端硬阻断**：
+- 在 `handleAssignConfirm` 中：计算当前目标日期上目标人员的累计百分比 + 本次分配百分比，若超过 `coefficient × 100`，直接 `message.error` 并 return，不提交 API
+- 在拖拽的 `onDrop` 中：同样做累计检查，不满足的 drop 目标视觉上拒绝（灰显 + 禁止图标）
+
+**后端硬阻断**：
+- `ScheduleService.create()` 中查询同人同日已有排班，计算累计，超限则抛 `BusinessException`
+- `ScheduleService.createBatch()` 中逐条校验，收集所有失败原因后一次性返回
+
+**异常面板联动**：
+- 发布时如果检测到冲突，发布按钮提示"本批有 N 条排班存在冲突，无法发布"并禁用
+- 用户必须先在时间轴中解决冲突（降低百分比或删除草稿），确认冲突消除后才可发布
+
+## 错误处理与边界场景
+
+### 接口失败处理
+
+| 场景 | 处理策略 |
+|------|---------|
+| "生成推荐草稿"API 超时或失败 | 保留用户的需求勾选和人员池配置，弹窗提示"推荐排班生成失败：{错误信息}"，提供"重试"和"放弃"两个按钮 |
+| "生成推荐草稿"部分成功 | 根据响应中的 `unfulfilledDemands` 展示缺口，已成功生成的需求正常展示草稿 |
+| "发布本批"部分成功 | 逐个显示结果：成功 N 条、失败 M 条（含具体原因），用户可对失败的单独处理后重新发布 |
+| 数据加载失败（需求列表/人员列表等） | 各区域独立加载，失败的区域展示 Retry 按钮，不影响其他区域 |
+
+### 空状态设计
+
+| 区域 | 空状态 | 引导动作 |
+|------|--------|---------|
+| 需求队列（待排需求为空） | 插图 + "所有需求已排布完成" | 链接到"已分配"分组或仪表盘 |
+| 需求队列（筛选结果为空） | "当前筛选条件下无匹配需求" | "清除筛选"按钮 |
+| 匹配人员池 | 插图 + "未选择需求，请先在左侧选择需求"（初始态）；"本批需求无可匹配人员"（选了需求但无匹配） | 切换到"全部人员"或调整需求选择 |
+| 相关时间轴（未选择需求） | 展示本周和下周的全局容量概览（所有人员可用率） | 引导选择需求 |
+| 缺口与发布面板（无缺口） | 绿色勾 + "本批需求人力均可满足，可以发布" | 发布按钮高亮 |
+
+### 加载态设计
+
+- **初始加载**：页面级 Skeleton，四区各展示占位骨架
+- **切换需求批次**：仅受影响区域（人员池、时间轴、缺口面板）展示局部 loading 遮罩
+- **生成推荐草稿中**：时间轴和缺口面板展示 Skeleton + 进度提示"正在生成推荐排班..."
+- **发布中**：顶部按钮展示 loading spinner，禁止重复点击
+
+## 性能基准与降级策略
+
+### 性能目标
+
+| 指标 | 目标 | 测量方式 |
+|------|------|---------|
+| 页面首次可交互时间 | ≤ 3 秒 | Lighthouse TTI |
+| 选择需求后匹配人员池刷新 | ≤ 500ms | 前端 `useMemo` 计算时间 |
+| 可行性预估计算 | ≤ 300ms | 前端聚合计算时间 |
+| 推荐排班生成 | ≤ 8 秒 | 后端 API 响应时间 |
+| 时间轴渲染（50 人 × 14 天） | ≤ 1 秒 | React Profiler |
+
+### 数据量设计上限
+
+| 维度 | 上限 | 超出时策略 |
+|------|------|-----------|
+| 待排需求数量 | 200 条 | 超出后默认折叠已分配分组，仅展开待排 |
+| 匹配人员池展示 | 100 人 | 超出后默认只展示"推荐"和"可用"（过滤"低可用"和"不可用"） |
+| 时间轴日期跨度 | 4 周（28 天） | 超出后仅展示 2 周，支持左右翻页 |
+| 单需求排班条目 | 500 条 | 前端虚拟滚动 |
+
+### 降级策略
+
+| 降级场景 | 策略 |
+|---------|------|
+| 时间轴渲染卡顿（> 1 秒） | 启用虚拟滚动（仅渲染可视区域内的行），减少 DOM 节点 |
+| 匹配分计算耗时（> 500ms） | 使用 `requestIdleCallback` 或 Web Worker 延迟计算非关键排序 |
+| 后端推荐算法超时（> 10 秒） | 自动切换为异步模式：返回 taskId，前端轮询结果 |
+| 网络断开 | 优先展示已缓存数据，顶部 Banner 提示"网络连接异常" |
+
+## 分阶段实施路线
+
+为保证可交付性和风险可控，建议分三个阶段实施。
+
+### 第一阶段：布局重构 + 风险排序 + 集中异常（不改变排班逻辑）
+
+**目标**：将 2615 行的 `ScheduleWorkbench.tsx` 拆分为多个组件，同时不改动现有的排班创建、编辑、发布逻辑。
+
+**范围**：
+- 组件拆分（6 个子组件 + 2 个工具文件）
+- 顶部调度总览条（仅展示指标，主操作仍沿用当前按钮位置）
+- 左侧需求队列（风险排序、筛选、批量勾选）
+- 右侧保持当前时间轴矩阵
+- 缺口与发布面板（将原本散落的冲突提示集中展示）
+- localStorage 草稿保护（beforeunload + 自动保存）
+
+**不包含**：
+- 匹配人员池
+- 两步式生成草稿
+- 新的推荐排班 API
+- 批量发布 API
+
+**验收**：页面布局切换为四区结构，需求可按风险排序，冲突集中在面板展示，原有功能不受影响。
+
+### 第二阶段：匹配人员池 + 新推荐排班 API
+
+**目标**：实现人员匹配计算和新的批量推荐排班后端接口。
+
+**范围**：
+- `familiarModules` 和 `confidentialClearance` 字段持久化
+- 匹配人员池组件（匹配分计算、固定/排除人员）
+- `POST /api/schedules/recommend` 接口
+- `GET /api/staff/availability` 聚合接口
+- 相关时间轴升级为"按本批需求收束日期"模式
+- 累计百分比后端硬阻断校验
+
+**验收**：用户可选择一批需求 → 查看匹配人员 → 生成推荐草稿 → 在时间轴微调。
+
+### 第三阶段：批量发布 + 异步推荐 + 优化
+
+**目标**：实现稳健的批量操作和完善边界场景。
+
+**范围**：
+- `POST /api/schedules/batch-publish` 接口（部分成功/失败模式）
+- 推荐排班异步模式（超长计算不阻塞）
+- `DELETE /api/schedules/demand/{demandId}` 的 published 保护改造
+- 时间轴虚拟滚动
+- 并发乐观锁
+- 完整错误处理和重试机制
+
+**验收**：批量发布支持部分成功，推荐排班超时自动切换异步，所有已知问题的 memory 修复合并。
 
 1. 页面应更像运营调度台，而不是普通卡片列表。
 2. 使用紧凑但清晰的信息密度，避免大面积装饰。
@@ -383,13 +919,90 @@
 9. 已发布排班修改后进入待提交变更状态。
 10. 现有 PRD 中的人力百分比分配、新员工系数、保密权限、冲突检测规则继续有效。
 
-## 待用户确认的问题
+## 关键设计决策
 
-1. 缺口需求是否允许强制发布。
-2. “项目经理协调”是否需要在本次重设计中做成可点击流程入口。
-3. 人员熟悉模块是否足够可靠，可以作为匹配分的重要依据。
-4. 样机数量限制是否必须在首版重设计中参与自动推荐。
+以下问题已在补充方案中给出明确决策，不再作为待确认项。
+
+### 决策 1：缺口需求是否允许强制发布
+
+**结论：不允许。**
+
+理由：
+- 缺口意味着人力客观上无法满足需求周期内的测试工作
+- 允许”强制发布”等于允许”明知不可为而为之”，发布后测试经理看到的排班是虚假的满足状态
+- 正确路径是触发”项目经理协调”流程（延长周期或补充资源），然后重新生成草稿
+
+但如果用户选择保留草稿（不发布该缺口需求），允许发布本批中其他已满足的需求。发布面板会明确提示”N 条需求因存在缺口保留为草稿，仅发布 M 条已满足需求”。
+
+### 决策 2：”项目经理协调”是否做成可点击流程入口
+
+**结论：第一期做成邮件/通知链接，第二期做成可点击流程。**
+
+第一期在缺口与发布面板中展示”建议动作：触发项目经理协调”，点击后：
+1. 复制一段预填充的消息文本（包含需求名称、缺口人天、缺口测试类型、建议调整方向）
+2. 引导用户通过已有通讯渠道（企业微信/邮件）发送给项目经理
+3. 不创建新的审批流
+
+第二期若使用反馈良好，再做成系统内可点击的流程入口（在 TestDemand 上创建协调记录）。
+
+### 决策 3：人员熟悉模块是否足够可靠，作为匹配分的重要依据
+
+**结论：作为加分项而非决定性因素。**
+
+理由：
+- 当前 `familiarModules` 为 `@Transient` 无历史数据，初始数据质量不可控
+- 但只要有数据，就应该在匹配中体现
+
+匹配分设计中已体现此策略：熟悉模块占 0~20 分（总分 100~70 分），且低于 40 分才过滤。即使熟悉模块数据为空，仅靠测试类型匹配（0~40 分）和可用容量（0~20 分）仍可达到 60 分，不会被过滤。
+
+### 决策 4：样机数量限制是否在首版参与自动推荐
+
+**结论：首版作为软约束（警告），第二版作为硬约束。**
+
+理由：
+- 当前后端没有任何逻辑使用 `testDeviceCount` 字段，需要从零实现
+- 样机限制在排班场景中属于边缘约束（绝大多数需求不会同时安排超出样机数量的并行测试）
+
+首版实现：
+- 缺口与发布面板展示样机超限警告
+- 不阻止生成推荐草稿
+
+第二版实现：
+- 推荐算法中增加样机数约束
+- 前端拖拽时校验并硬阻断
 
 ## 设计结论
 
-本次重设计应采用“高风险优先 + 批量需求选择 + 匹配人员池 + 两步式生成草稿 + 异常集中发布”的工作流。它能把大规模排班从“在全量矩阵里找位置”转成“围绕一批需求进行调度”，更符合真实排班中的批量处理和异常优先处理方式。
+本次重设计应采用”高风险优先 + 批量需求选择 + 匹配人员池 + 两步式生成草稿 + 异常集中发布”的工作流。它能把大规模排班从”在全量矩阵里找位置”转成”围绕一批需求进行调度”，更符合真实排班中的批量处理和异常优先处理方式。
+
+### 补充方案要点总结
+
+1. **两步式明确定义**：第一步可行性预估（纯前端、即时、不写库），第二步生成草稿（调用后端推荐算法、写入数据库）。两步之间有明确的人为确认节点。
+
+2. **数据模型补齐**：`familiarModules`、`confidentialClearance` 从 `@Transient` 改为持久化字段。`demand_manpower_detail` 表如不存在则建表。这是匹配分计算和按测试类型缺口分析的前提。
+
+3. **后端 API**：新增 4 个接口（批量发布、推荐排班生成、人员容量聚合、安全的按需求删除），改造 1 个现有方法（`create` 增加累计百分比硬校验），修复 1 个现有方法（`deleteByDemandId` 增加 published 保护）。
+
+4. **并发防护**：草稿按用户隔离（`createdBy`），发布用乐观锁（`@Version`），已发布修改先到先得。
+
+5. **草稿持久化**：`beforeunload` 拦截 + `localStorage` 自动保存（2 秒 debounce），不引入后端草稿表。
+
+6. **硬阻断冲突检测**：单日累计超容、直接删除已发布排班、保密需求分配给无权限人员，均在前后端双重硬阻断。
+
+7. **边界场景完整覆盖**：5 类错误处理 + 4 类空状态设计 + 3 类加载态设计 + 性能基准 + 降级策略。
+
+8. **三阶段实施**：第一阶段布局重构（零风险，不改逻辑），第二阶段人员匹配 + 新推荐 API，第三阶段批量发布 + 异步 + 优化。
+
+9. **四个设计决策**：缺口不强制发布；项目经理协调首期做通知链接；熟悉模块作为加分项；样机限制首版软约束。
+
+### 实施前检查清单
+
+- [ ] `test_staff` 表增加 `familiar_modules`、`confidential_clearance` 字段
+- [ ] 检查 `demand_manpower_detail` 表是否存在，不存在则建表
+- [ ] `Schedule` 表增加 `version` 字段（乐观锁）
+- [ ] `ScheduleService.deleteByDemandId` 增加 published 保护
+- [ ] `ScheduleService.create` / `createBatch` 增加累计百分比硬校验
+- [ ] 前端 `ScheduleWorkbench.tsx` 拆分为 6 个子组件 + 2 个工具文件
+- [ ] 实现 `beforeunload` 拦截 + `localStorage` 草稿存储
+- [ ] 分配/编辑弹窗增加累计百分比前端硬阻断
+- [ ] 批量发布接口采用部分成功/失败模式（非 `@Transactional` 全量回滚）
