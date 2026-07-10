@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Card,
   Form,
@@ -12,8 +12,10 @@ import {
   Tag,
   Divider,
   Switch,
+  Modal,
 } from 'antd';
 import { SaveOutlined, ArrowLeftOutlined } from '@ant-design/icons';
+import { saveDraft, getDraft, clearDraft, formatDraftTime, getDraftTimestamp } from '../utils/draftStorage';
 import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
 import { TestDemand, DemandManpowerDetail } from '../types';
@@ -38,12 +40,14 @@ interface TestDemandSubmitProps {
   onBack?: () => void;
   initialValues?: TestDemand;
   isEdit?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
   onBack,
   initialValues,
   isEdit = false,
+  onDirtyChange,
 }) => {
   const [form] = Form.useForm();
   const navigate = useNavigate();
@@ -52,6 +56,8 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
   const [fieldConfigs, setFieldConfigs] = useState<FieldConfig[]>([]);
   const [manpowerInputs, setManpowerInputs] = useState<Record<string, number>>({});
   const [manpowerRemarks, setManpowerRemarks] = useState<Record<string, string>>({});
+  const draftId = useRef(isEdit ? `edit_${initialValues?.id}` : 'new').current;
+  const [hasShownDraftPrompt, setHasShownDraftPrompt] = useState(false);
 
   useEffect(() => {
     fetchFieldConfigs();
@@ -77,6 +83,64 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
     }
     return [];
   };
+
+  // 组件挂载时检查是否有草稿
+  useEffect(() => {
+    if (hasShownDraftPrompt) return;
+
+    const draft = getDraft(draftId);
+    if (!draft) {
+      setHasShownDraftPrompt(true);
+      return;
+    }
+
+    const draftTime = getDraftTimestamp(draftId);
+    const timeText = draftTime ? formatDraftTime(draftTime) : '';
+
+    Modal.confirm({
+      title: '恢复草稿',
+      content: `发现${timeText}保存的草稿，是否恢复？`,
+      okText: '恢复草稿',
+      cancelText: '放弃草稿',
+      onOk() {
+        form.setFieldsValue(draft.formData);
+        setManpowerInputs(draft.manpowerInputs);
+        setManpowerRemarks(draft.manpowerRemarks);
+        message.success('草稿已恢复');
+      },
+      onCancel() {
+        clearDraft(draftId);
+      },
+    });
+
+    setHasShownDraftPrompt(true);
+  }, [draftId, form, hasShownDraftPrompt]);
+
+  // 监听草稿保存/清除事件
+  useEffect(() => {
+    const handleSaveDraft = () => {
+      const formData = form.getFieldsValue();
+      saveDraft(draftId, {
+        formData,
+        manpowerInputs,
+        manpowerRemarks,
+      });
+      onDirtyChange?.(false);
+    };
+
+    const handleClearDraft = () => {
+      clearDraft(draftId);
+      onDirtyChange?.(false);
+    };
+
+    window.addEventListener('save-demand-draft', handleSaveDraft);
+    window.addEventListener('clear-demand-draft', handleClearDraft);
+
+    return () => {
+      window.removeEventListener('save-demand-draft', handleSaveDraft);
+      window.removeEventListener('clear-demand-draft', handleClearDraft);
+    };
+  }, [draftId, form, manpowerInputs, manpowerRemarks, onDirtyChange]);
 
   useEffect(() => {
     if (initialValues) {
@@ -146,6 +210,8 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         await api.createDemand(demandData);
         message.success('测试需求已成功提交，请等待项目经理审批！');
       }
+      clearDraft(draftId);
+      onDirtyChange?.(false);
       window.dispatchEvent(new CustomEvent('refresh-pending-counts'));
 
       setTimeout(() => {
@@ -193,6 +259,9 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
           initialValues={{ confidential: false, testDeviceCount: null }}
           style={{ maxWidth: 800, margin: '0 auto' }}
           className="demand-form"
+          onValuesChange={() => {
+            onDirtyChange?.(true);
+          }}
         >
           <Form.Item
             name="product"
