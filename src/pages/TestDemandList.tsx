@@ -491,9 +491,6 @@ const TestDemandList: React.FC = () => {
         maskClosable
         footer={
           <Space>
-            <Button onClick={() => setShowLeaveConfirm(false)}>
-              取消
-            </Button>
             <Button danger onClick={handleLeaveWithoutSaving}>
               直接离开
             </Button>
