@@ -300,7 +300,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                   const statusPercentage = getDailyStatusPercentage(dailyStatuses, staff.id, dateStr);
                   const maxCapacity = getMaxCapacity(staff, dateStr, dailyStatuses);
                   const hasConflict = totalPercent > maxCapacity;
-                  const isWeekendColumn = [5, 6].includes(dayIndex);
+                  const isWeekendColumn = [0, 6].includes(date.day());
                   const canAssign = isAvailableForAssignment(dailyStatuses, staff.id, dateStr);
 
                   const statusBgColor = dailyStatus && dailyStatus !== 'AVAILABLE'
