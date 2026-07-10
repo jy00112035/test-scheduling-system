@@ -283,7 +283,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                       </div>
                     }
                   >
-                    <span onClick={(e) => e.stopPropagation()}>
+                    <span>
                       姓名 {nameSearch
                         ? <FilterFilled style={{ fontSize: 10, color: '#1677ff' }} />
                         : <SearchOutlined style={{ fontSize: 10, color: '#bbb' }} />}
@@ -323,7 +323,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                       </div>
                     }
                   >
-                    <span onClick={(e) => e.stopPropagation()}>
+                    <span>
                       系数 {coefficientFilter.length > 0
                         ? <FilterFilled style={{ fontSize: 10, color: '#1677ff' }} />
                         : <FilterOutlined style={{ fontSize: 10, color: '#bbb' }} />}
@@ -372,7 +372,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                     </div>
                   }
                 >
-                  <span onClick={(e) => e.stopPropagation()}>
+                  <span>
                     保密权限 {clearanceFilter.length > 0
                       ? <FilterFilled style={{ fontSize: 10, color: '#1677ff', marginLeft: 2 }} />
                       : <FilterOutlined style={{ fontSize: 10, color: '#bbb', marginLeft: 2 }} />}
@@ -416,7 +416,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                     </div>
                   }
                 >
-                  <span onClick={(e) => e.stopPropagation()}>
+                  <span>
                     测试类型 {headerTestTypeFilter.length > 0
                       ? <FilterFilled style={{ fontSize: 10, color: '#1677ff', marginLeft: 2 }} />
                       : <FilterOutlined style={{ fontSize: 10, color: '#bbb', marginLeft: 2 }} />}
