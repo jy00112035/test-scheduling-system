@@ -44,6 +44,7 @@ const TestDemandList: React.FC = () => {
   const [exportDateRange, setExportDateRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
   const [formDirty, setFormDirty] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
   useEffect(() => {
     fetchDemands();
@@ -150,30 +151,26 @@ const TestDemandList: React.FC = () => {
 
   const handleModalClose = useCallback(() => {
     if (formDirty) {
-      Modal.confirm({
-        title: '确认离开',
-        icon: <ExclamationCircleOutlined />,
-        content: '您有未保存的更改，确定要离开吗？',
-        okText: '保存草稿并离开',
-        cancelText: '直接离开',
-        closable: true,
-        maskClosable: true,
-        onOk() {
-          window.dispatchEvent(new CustomEvent('save-demand-draft'));
-          setShowSubmitModal(false);
-          setFormDirty(false);
-          message.success('草稿已保存');
-        },
-        onCancel() {
-          window.dispatchEvent(new CustomEvent('clear-demand-draft'));
-          setShowSubmitModal(false);
-          setFormDirty(false);
-        },
-      });
+      setShowLeaveConfirm(true);
     } else {
       setShowSubmitModal(false);
     }
   }, [formDirty]);
+
+  const handleSaveDraftAndLeave = () => {
+    window.dispatchEvent(new CustomEvent('save-demand-draft'));
+    setShowSubmitModal(false);
+    setShowLeaveConfirm(false);
+    setFormDirty(false);
+    message.success('草稿已保存');
+  };
+
+  const handleLeaveWithoutSaving = () => {
+    window.dispatchEvent(new CustomEvent('clear-demand-draft'));
+    setShowSubmitModal(false);
+    setShowLeaveConfirm(false);
+    setFormDirty(false);
+  };
 
   const handleExport = async () => {
     if (!exportDateRange || exportDateRange.length !== 2) {
@@ -484,6 +481,33 @@ const TestDemandList: React.FC = () => {
           isEdit={!!editingDemand}
           onDirtyChange={setFormDirty}
         />
+      </Modal>
+
+      <Modal
+        title="确认离开"
+        open={showLeaveConfirm}
+        onCancel={() => setShowLeaveConfirm(false)}
+        closable
+        maskClosable
+        footer={
+          <Space>
+            <Button onClick={() => setShowLeaveConfirm(false)}>
+              取消
+            </Button>
+            <Button danger onClick={handleLeaveWithoutSaving}>
+              直接离开
+            </Button>
+            <Button type="primary" onClick={handleSaveDraftAndLeave}>
+              保存草稿并离开
+            </Button>
+          </Space>
+        }
+        width={420}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <ExclamationCircleOutlined style={{ fontSize: 24, color: '#faad14' }} />
+          <span>您有未保存的更改，确定要离开吗？</span>
+        </div>
       </Modal>
 
       <Modal
