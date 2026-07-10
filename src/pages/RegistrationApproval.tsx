@@ -86,12 +86,12 @@ const RegistrationApproval: React.FC = () => {
     }
   };
 
-  const isResourceManager = roles.includes('resourceManager' as any);
+  const isTestLead = roles.includes('testLead' as any);
   const isProjectManager = roles.includes('projectManager' as any);
   let title = '注册审批';
-  if (isResourceManager && !isProjectManager) {
+  if (isTestLead && !isProjectManager) {
     title = '注册审批 — 测试执行人员';
-  } else if (isProjectManager && !isResourceManager) {
+  } else if (isProjectManager && !isTestLead) {
     title = '注册审批 — 其他角色';
   }
 
