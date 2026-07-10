@@ -65,10 +65,11 @@ public class AuthController {
     public ApiResponse<List<User>> getPendingApprovals(HttpServletRequest httpRequest) {
         try {
             List<String> roles = (List<String>) httpRequest.getAttribute("roles");
+            String username = (String) httpRequest.getAttribute("username");
             if (roles == null || roles.isEmpty()) {
                 return ApiResponse.error(401, "未登录或登录已过期");
             }
-            List<User> pending = authService.getPendingApprovals(roles);
+            List<User> pending = authService.getPendingApprovals(roles, username);
             return ApiResponse.success(pending);
         } catch (Exception e) {
             return ApiResponse.error(e.getMessage());
