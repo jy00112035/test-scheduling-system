@@ -832,6 +832,52 @@ const ScheduleWorkbench: React.FC = () => {
     setDragOverTrash(false);
   }, []);
 
+  // ---- 样机数量校验 ----
+  const getDeviceOverloadDates = (
+    demandId: number | undefined,
+    staffId: number,
+    dates: string[],
+    excludeScheduleId?: number,
+  ): { date: string; currentCount: number }[] => {
+    if (!demandId) return [];
+    const demand = demands.find(d => d.id === demandId);
+    const deviceCount = demand?.testDeviceCount;
+    if (!deviceCount) return [];
+
+    return dates.reduce<{ date: string; currentCount: number }[]>((acc, date) => {
+      const staffSet = new Set<number>();
+      schedules.forEach(s => {
+        if (s.demandId === demandId && s.date === date && s.id !== excludeScheduleId) {
+          staffSet.add(s.staffId);
+        }
+      });
+      if (!staffSet.has(staffId) && staffSet.size >= deviceCount) {
+        acc.push({ date, currentCount: staffSet.size });
+      }
+      return acc;
+    }, []);
+  };
+
+  const confirmDeviceOverload = (productName: string, overloadDates: { date: string; currentCount: number }[], deviceCount: number): Promise<boolean> => {
+    const dateList = overloadDates.map(d => `${d.date}（已有${d.currentCount}人）`).join('、');
+    return new Promise(resolve => {
+      Modal.confirm({
+        title: '样机数量不足',
+        content: (
+          <div>
+            <p>「{productName}」以下日期安排人数将超过样机数量（{deviceCount} 台）：</p>
+            <p style={{ color: '#faad14', fontWeight: 500 }}>{dateList}</p>
+            <p>是否确定安排？</p>
+          </div>
+        ),
+        okText: '确定安排',
+        cancelText: '取消',
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      });
+    });
+  };
+
   // ---- 拖拽：排班转移 ----
   const handleScheduleTransfer = async (schedule: ScheduleItem, targetStaff: StaffItem, targetDate: string) => {
     if (schedule.staffId === targetStaff.id && schedule.date === targetDate) {
@@ -852,6 +898,19 @@ const ScheduleWorkbench: React.FC = () => {
     const statusFactor = status && status !== 'AVAILABLE' ? (1 - statusPct / 100) : 1;
     const maxPercentage = Math.round(coeff * 100 * statusFactor);
     const transferPercentage = Math.min(schedule.percentage, maxPercentage);
+
+    // 样机数量校验
+    const overloadDates = getDeviceOverloadDates(schedule.demandId, targetStaff.id, [targetDate], schedule.id);
+    if (overloadDates.length > 0) {
+      const demand = demands.find(d => d.id === schedule.demandId);
+      if (demand) {
+        const confirmed = await confirmDeviceOverload(demand.product, overloadDates, demand.testDeviceCount!);
+        if (!confirmed) {
+          setDraggedSchedule(null);
+          return;
+        }
+      }
+    }
 
     if (schedule.published) {
       const tempId = -(Date.now() + Math.random());
@@ -929,6 +988,16 @@ const ScheduleWorkbench: React.FC = () => {
     if (thisAllocation > remaining) {
       message.warning(`测试人力需求已满足，剩余可分配 ${remaining.toFixed(1)} 人/天，本次分配超出需求`);
       return;
+    }
+
+    // 样机数量校验
+    const assignDates = Array.from({ length: assignDays }, (_, i) =>
+      dayjs(assignTarget.date).add(i, 'day').format('YYYY-MM-DD'),
+    );
+    const overloadDates = getDeviceOverloadDates(selectedDemand.id, assignTarget.staff.id, assignDates);
+    if (overloadDates.length > 0) {
+      const confirmed = await confirmDeviceOverload(selectedDemand.product, overloadDates, selectedDemand.testDeviceCount!);
+      if (!confirmed) return;
     }
 
     setAssignLoading(true);
@@ -1544,27 +1613,62 @@ const ScheduleWorkbench: React.FC = () => {
             </Descriptions.Item>
             {detailDemand.manpowerDetails && detailDemand.manpowerDetails.length > 0 && (
               <Descriptions.Item label="测试类型明细" span={2}>
-                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-                  <colgroup>
-                    <col style={{ width: '13%' }} /><col style={{ width: '13%' }} /><col style={{ width: '74%' }} />
-                  </colgroup>
-                  <thead>
-                    <tr style={{ background: '#fafafa' }}>
-                      <th style={{ padding: '2px 6px', textAlign: 'left', borderBottom: '1px solid #f0f0f0' }}>测试类型</th>
-                      <th style={{ padding: '2px 6px', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>人力需求</th>
-                      <th style={{ padding: '2px 6px', textAlign: 'left', borderBottom: '1px solid #f0f0f0' }}>所需模块</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detailDemand.manpowerDetails.map((md: any, idx: number) => (
-                      <tr key={idx}>
-                        <td style={{ padding: '2px 6px', color: '#1890ff' }}>{md.testType}</td>
-                        <td style={{ padding: '2px 6px', textAlign: 'right' }}>{Number(md.manpowerDemand || 0).toFixed(1)} 人/天</td>
-                        <td style={{ padding: '2px 6px', color: '#888', wordBreak: 'break-word' }}>{md.remark || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                {(() => {
+                  const demandTestTypes = new Set(detailDemand.manpowerDetails.map((md: any) => md.testType));
+                  const demandSchedules = schedules.filter(s => s.demandId === detailDemand.id);
+                  // 协调人力：按非需求测试类型分组
+                  const coordMap = new Map<string, number>();
+                  demandSchedules.forEach(s => {
+                    const st = staffs.find(st => st.id === s.staffId);
+                    if (st?.testType && !demandTestTypes.has(st.testType)) {
+                      coordMap.set(st.testType, (coordMap.get(st.testType) || 0) + s.percentage / 100);
+                    }
+                  });
+                  const coordRows = Array.from(coordMap.entries());
+                  return (
+                    <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                      <colgroup>
+                        <col style={{ width: '12%' }} /><col style={{ width: '12%' }} /><col style={{ width: '12%' }} /><col style={{ width: '12%' }} /><col style={{ width: '52%' }} />
+                      </colgroup>
+                      <thead>
+                        <tr style={{ background: '#fafafa' }}>
+                          <th style={{ padding: '2px 6px', textAlign: 'left', borderBottom: '1px solid #f0f0f0' }}>测试类型</th>
+                          <th style={{ padding: '2px 6px', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>人力需求</th>
+                          <th style={{ padding: '2px 6px', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>需求缺口</th>
+                          <th style={{ padding: '2px 6px', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>协调人力</th>
+                          <th style={{ padding: '2px 6px', textAlign: 'left', borderBottom: '1px solid #f0f0f0' }}>所需模块</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detailDemand.manpowerDetails.map((md: any, idx: number) => {
+                          const typeAllocated = demandSchedules
+                            .filter(s => staffs.find(st => st.id === s.staffId)?.testType === md.testType)
+                            .reduce((sum, s) => sum + s.percentage / 100, 0);
+                          const gap = Number(md.manpowerDemand || 0) - typeAllocated;
+                          const coordVal = coordMap.get(md.testType) || 0;
+                          return (
+                            <tr key={idx}>
+                              <td style={{ padding: '2px 6px', color: '#1890ff' }}>{md.testType}</td>
+                              <td style={{ padding: '2px 6px', textAlign: 'right' }}>{Number(md.manpowerDemand || 0).toFixed(1)}</td>
+                              <td style={{ padding: '2px 6px', textAlign: 'right', color: gap > 0 ? '#faad14' : '#52c41a', fontWeight: 500 }}>{gap.toFixed(1)}</td>
+                              <td style={{ padding: '2px 6px', textAlign: 'right' }}>{coordVal > 0 ? coordVal.toFixed(1) : '-'}</td>
+                              <td style={{ padding: '2px 6px', color: '#888', wordBreak: 'break-word' }}>{md.remark || '-'}</td>
+                            </tr>
+                          );
+                        })}
+                        {coordRows.map(([testType, val], idx) => (
+                          <tr key={`coord-${idx}`}>
+                            <td style={{ padding: '2px 6px', color: '#ff4d4f', fontWeight: 500 }}>{testType}</td>
+                            <td style={{ padding: '2px 6px', textAlign: 'right' }}>-</td>
+                            <td style={{ padding: '2px 6px', textAlign: 'right' }}>-</td>
+                            <td style={{ padding: '2px 6px', textAlign: 'right', color: '#ff4d4f', fontWeight: 500 }}>{val.toFixed(1)}</td>
+                            <td style={{ padding: '2px 6px', color: '#888' }}>协调</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  );
+                })()}
               </Descriptions.Item>
             )}
             <Descriptions.Item label="备注说明" span={2}>{detailDemand.description || '-'}</Descriptions.Item>

@@ -262,78 +262,77 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
         <table className="kanban-table" style={{ minWidth: 1200 }}>
           <thead>
             <tr style={{ position: 'sticky', top: 0, zIndex: 5 }}>
-              {/* 姓名 — 搜索筛选 */}
-              <th style={{ minWidth: 45, position: 'sticky', left: 0, background: '#fafafa', zIndex: 6, cursor: 'pointer' }}>
-                <Popover
-                  trigger="click"
-                  open={headerPopover === 'name'}
-                  onOpenChange={(open) => setHeaderPopover(open ? 'name' : null)}
-                  placement="bottomLeft"
-                  content={
-                    <div style={{ width: 160 }}>
-                      <Input
-                        placeholder="搜索姓名"
-                        size="small"
-                        allowClear
-                        value={nameSearch}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNameSearch(e.target.value || '')}
-                        autoFocus
-                      />
-                    </div>
-                  }
-                >
-                  <span onClick={(e) => e.stopPropagation()}>
-                    姓名 {nameSearch
-                      ? <FilterFilled style={{ fontSize: 10, color: '#1677ff', marginLeft: 2 }} />
-                      : <SearchOutlined style={{ fontSize: 10, color: '#bbb', marginLeft: 2 }} />}
-                  </span>
-                </Popover>
-              </th>
-              {/* 系数 — 多选筛选 */}
-              <th style={{ minWidth: 10, position: 'sticky', left: 45, background: '#fafafa', zIndex: 6, cursor: 'pointer' }}>
-                <Popover
-                  trigger="click"
-                  open={headerPopover === 'coefficient'}
-                  onOpenChange={(open) => setHeaderPopover(open ? 'coefficient' : null)}
-                  placement="bottomLeft"
-                  content={
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      {allCoefficients.map(c => (
-                        <Checkbox
-                          key={c}
-                          checked={coefficientFilter.includes(c)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setCoefficientFilter(prev => [...prev, c]);
-                            } else {
-                              setCoefficientFilter(prev => prev.filter(x => x !== c));
-                            }
-                          }}
-                        >
-                          {c}
-                        </Checkbox>
-                      ))}
-                      {allCoefficients.length > 0 && (
-                        <>
-                          <Divider style={{ margin: '4px 0' }} />
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setCoefficientFilter([])}>全选</Button>
-                            <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setCoefficientFilter([...allCoefficients])}>全不选</Button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  }
-                >
-                  <span onClick={(e) => e.stopPropagation()}>
-                    系数 {coefficientFilter.length > 0
-                      ? <FilterFilled style={{ fontSize: 10, color: '#1677ff', marginLeft: 2 }} />
-                      : <FilterOutlined style={{ fontSize: 10, color: '#bbb', marginLeft: 2 }} />}
-                  </span>
-                </Popover>
+              {/* 姓名+系数 — 搜索+筛选 */}
+              <th style={{ minWidth: 75, position: 'sticky', left: 0, background: '#fafafa', zIndex: 6, cursor: 'pointer' }}>
+                <Space size={4}>
+                  <Popover
+                    trigger="click"
+                    open={headerPopover === 'name'}
+                    onOpenChange={(open) => setHeaderPopover(open ? 'name' : null)}
+                    placement="bottomLeft"
+                    content={
+                      <div style={{ width: 160 }}>
+                        <Input
+                          placeholder="搜索姓名"
+                          size="small"
+                          allowClear
+                          value={nameSearch}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNameSearch(e.target.value || '')}
+                          autoFocus
+                        />
+                      </div>
+                    }
+                  >
+                    <span onClick={(e) => e.stopPropagation()}>
+                      姓名 {nameSearch
+                        ? <FilterFilled style={{ fontSize: 10, color: '#1677ff' }} />
+                        : <SearchOutlined style={{ fontSize: 10, color: '#bbb' }} />}
+                    </span>
+                  </Popover>
+                  <Popover
+                    trigger="click"
+                    open={headerPopover === 'coefficient'}
+                    onOpenChange={(open) => setHeaderPopover(open ? 'coefficient' : null)}
+                    placement="bottomLeft"
+                    content={
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {allCoefficients.map(c => (
+                          <Checkbox
+                            key={c}
+                            checked={coefficientFilter.includes(c)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setCoefficientFilter(prev => [...prev, c]);
+                              } else {
+                                setCoefficientFilter(prev => prev.filter(x => x !== c));
+                              }
+                            }}
+                          >
+                            {c}
+                          </Checkbox>
+                        ))}
+                        {allCoefficients.length > 0 && (
+                          <>
+                            <Divider style={{ margin: '4px 0' }} />
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setCoefficientFilter([])}>全选</Button>
+                              <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setCoefficientFilter([...allCoefficients])}>全不选</Button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    }
+                  >
+                    <span onClick={(e) => e.stopPropagation()}>
+                      系数 {coefficientFilter.length > 0
+                        ? <FilterFilled style={{ fontSize: 10, color: '#1677ff' }} />
+                        : <FilterOutlined style={{ fontSize: 10, color: '#bbb' }} />}
+                    </span>
+                  </Popover>
+                </Space>
               </th>
               {/* 保密权限 — 多选筛选 */}
-              <th style={{ minWidth: 50, position: 'sticky', left: 55, background: '#fafafa', zIndex: 6, cursor: 'pointer' }}>
+              <th style={{ minWidth: 50, position: 'sticky', left: 75, background: '#fafafa', zIndex: 6, cursor: 'pointer' }}>
                 <Popover
                   trigger="click"
                   open={headerPopover === 'clearance'}
@@ -381,7 +380,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                 </Popover>
               </th>
               {/* 测试类型 — 多选筛选 */}
-              <th style={{ minWidth: 45, position: 'sticky', left: 105, background: '#fafafa', zIndex: 6, cursor: 'pointer' }}>
+              <th style={{ minWidth: 45, position: 'sticky', left: 125, background: '#fafafa', zIndex: 6, cursor: 'pointer' }}>
                 <Popover
                   trigger="click"
                   open={headerPopover === 'testType'}
@@ -424,7 +423,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                   </span>
                 </Popover>
               </th>
-              <th style={{ minWidth: 140, position: 'sticky', left: 150, background: '#fafafa', zIndex: 6 }}>熟悉模块</th>
+              <th style={{ minWidth: 140, position: 'sticky', left: 170, background: '#fafafa', zIndex: 6 }}>熟悉模块</th>
               {weekDates.map((date) => {
                 const isWeekend = [0, 6].includes(date.day());
                 return (
@@ -447,25 +446,23 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
             {filteredStaffs.map(staff => (
               <tr key={staff.id}>
                 {/* Sticky columns */}
-                <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 12 }}>
+                <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 12, whiteSpace: 'nowrap' }}>
                   <strong>{staff.name}</strong>
-                </td>
-                <td style={{ position: 'sticky', left: 45, background: '#fff', zIndex: 1, padding: '4px 2px' }}>
-                  <Tag color={staff.currentCoefficient === 1.0 ? 'green' : 'orange'} style={{ fontSize: 10, padding: '0 2px' }}>
+                  <Tag color={staff.currentCoefficient === 1.0 ? 'green' : 'orange'} style={{ fontSize: 10, padding: '0 2px', marginLeft: 2 }}>
                     {staff.currentCoefficient?.toFixed(1) || '1.0'}
                   </Tag>
                 </td>
-                <td style={{ position: 'sticky', left: 55, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, textAlign: 'center' }}>
+                <td style={{ position: 'sticky', left: 75, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, textAlign: 'center' }}>
                   {staff.confidentialClearance ? (
                     <Tag color="red" style={{ fontSize: 10, padding: '0 4px' }}>保密</Tag>
                   ) : (
                     <span style={{ color: '#ccc' }}>-</span>
                   )}
                 </td>
-                <td style={{ position: 'sticky', left: 105, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
+                <td style={{ position: 'sticky', left: 125, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
                   {staff.testType || '-'}
                 </td>
-                <td style={{ position: 'sticky', left: 150, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
+                <td style={{ position: 'sticky', left: 170, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
                   {staff.familiarModules ? (
                     <Tooltip title={staff.familiarModules}>
                       <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>
@@ -711,7 +708,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
             ))}
             {/* 空闲可用工作量汇总行 — 固定在底部 */}
             <tr style={{ position: 'sticky', bottom: 0, zIndex: 3, background: '#f0f5ff', fontWeight: 500, boxShadow: '0 -2px 4px rgba(0,0,0,0.08)' }}>
-              <td colSpan={5} style={{ position: 'sticky', left: 0, background: '#f0f5ff', zIndex: 4, padding: '6px 8px', fontSize: 12, whiteSpace: 'nowrap', borderTop: '2px solid #1677ff' }}>
+              <td colSpan={4} style={{ position: 'sticky', left: 0, background: '#f0f5ff', zIndex: 4, padding: '6px 8px', fontSize: 12, whiteSpace: 'nowrap', borderTop: '2px solid #1677ff' }}>
                 <span
                   style={{ cursor: 'pointer', userSelect: 'none' }}
                   onClick={() => setFilterModalOpen(true)}
