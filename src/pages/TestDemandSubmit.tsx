@@ -103,9 +103,11 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
       okText: '恢复草稿',
       cancelText: '放弃草稿',
       onOk() {
+        clearDraft(draftId);
         form.setFieldsValue(draft.formData);
         setManpowerInputs(draft.manpowerInputs);
         setManpowerRemarks(draft.manpowerRemarks);
+        onDirtyChange?.(true);
         message.success('草稿已恢复');
       },
       onCancel() {
