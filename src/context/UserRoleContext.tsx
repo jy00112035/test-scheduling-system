@@ -68,7 +68,7 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
       'submitSupplementRequest',
       'viewReports',
       'manageStaff',
-      'approveRegistration',
+      // 'approveRegistration',  // 已移除：测试执行人员改由测试组长审批
       'personalCenter',
     ],
     projectManager: [
@@ -124,6 +124,7 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
       'viewReports',
       'manageDailyAvailability',
       'manageStaff',
+      'approveRegistration',  // 新增：测试组长可以审批测试执行人员
       'personalCenter',
     ],
   };
