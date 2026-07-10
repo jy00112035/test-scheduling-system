@@ -76,6 +76,12 @@ public class AuthService {
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setDisplayName(request.getDisplayName());
         user.setFamiliarModules(request.getFamiliarModules());
+
+        // 设置所属测试组
+        if (request.getTestGroup() != null && !request.getTestGroup().isEmpty()) {
+            user.setTestGroup(request.getTestGroup());
+        }
+
         if (request.getRoles() != null && !request.getRoles().isEmpty()) {
             user.setRoles(request.getRoles());
         } else {
@@ -86,9 +92,9 @@ public class AuthService {
     }
 
     public List<User> getPendingApprovals(List<String> approverRoles) {
-        if (approverRoles.contains("resourceManager") && approverRoles.contains("projectManager")) {
+        if (approverRoles.contains("testLead") && approverRoles.contains("projectManager")) {
             return userRepository.findByEnabledFalse();
-        } else if (approverRoles.contains("resourceManager")) {
+        } else if (approverRoles.contains("testLead")) {
             return userRepository.findPendingByRole("testExecutor");
         } else if (approverRoles.contains("projectManager")) {
             List<User> all = userRepository.findByEnabledFalse();
