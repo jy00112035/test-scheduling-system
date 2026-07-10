@@ -176,8 +176,8 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
           style={{ width: 130 }}
         />
       }
-      style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}
-      bodyStyle={{ padding: 0, overflow: 'auto', height: '100%', overscrollBehavior: 'contain' }}
+      style={{ flex: 1, overflow: 'hidden', minWidth: 0, display: 'flex', flexDirection: 'column' }}
+      bodyStyle={{ padding: 0, overflow: 'auto', flex: 1, minHeight: 0, overscrollBehavior: 'contain' }}
     >
       {/* 筛选控件 */}
       <div style={{
