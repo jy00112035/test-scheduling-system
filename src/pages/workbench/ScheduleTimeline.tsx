@@ -3,9 +3,9 @@
 // Phase 1: 保留现有拖拽分配、编辑、删除、状态管理等全部功能
 // ============================================================
 
-import React from 'react';
-import { Card, Space, DatePicker, Select, InputNumber, Tag, Button, Popconfirm, Popover, Divider, Tooltip } from 'antd';
-import { DeleteOutlined } from '@ant-design/icons';
+import React, { useState, useEffect } from 'react';
+import { Card, Space, DatePicker, Select, InputNumber, Tag, Button, Popconfirm, Popover, Divider, Tooltip, Checkbox, Modal, Input } from 'antd';
+import { DeleteOutlined, FilterFilled, FilterOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { ScheduleItem, DemandItem, StaffItem, DailyStatusEntry } from './workbenchTypes';
 import {
@@ -13,6 +13,7 @@ import {
   DAY_LABELS,
   getSchedulesForStaffAndDate,
   getTotalPercentage,
+  calculateDailyFreeWorkload,
   getDailyStatus,
   getDailyStatusPercentage,
   isAvailableForAssignment,
@@ -33,7 +34,6 @@ interface ScheduleTimelineProps {
   dragOverTrash: boolean;
 
   // 筛选
-  filterTestTypes: string[];
   filterProducts: string[];
 
   // 用户权限
@@ -48,7 +48,6 @@ interface ScheduleTimelineProps {
 
   // 事件处理
   onWeekChange: (date: dayjs.Dayjs) => void;
-  onFilterTestTypesChange: (types: string[]) => void;
   onFilterProductsChange: (products: string[]) => void;
   onDrop: (staff: StaffItem, date: string) => void;
   onScheduleTransfer: (schedule: ScheduleItem, targetStaff: StaffItem, targetDate: string) => void;
@@ -74,7 +73,6 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
   draggedSchedule,
   dragOverCell,
   dragOverTrash,
-  filterTestTypes,
   filterProducts,
   canManageDailyAvailability,
   userTestType,
@@ -83,7 +81,6 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
   statusDraft,
   statusPctDraft,
   onWeekChange,
-  onFilterTestTypesChange,
   onFilterProductsChange,
   onDrop,
   onScheduleTransfer,
@@ -101,12 +98,44 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
 }) => {
   const weekDates = getWeekDates(weekViewDate);
 
-  // 筛选后的员工
-  const filteredStaffs = staffs.filter(s => {
+  // 空闲工作量筛选：排除的测试类型（持久化到 localStorage）
+  const STORAGE_KEY = 'schedule_workbench_excludedTestTypes';
+  const [excludedTestTypes, setExcludedTestTypes] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [filterModalOpen, setFilterModalOpen] = useState(false);
+
+  // 表头筛选状态
+  const [nameSearch, setNameSearch] = useState('');
+  const [coefficientFilter, setCoefficientFilter] = useState<string[]>([]);
+  const [clearanceFilter, setClearanceFilter] = useState<string[]>([]); // 'confidential' | 'normal'
+  const [headerTestTypeFilter, setHeaderTestTypeFilter] = useState<string[]>([]);
+  const [headerPopover, setHeaderPopover] = useState<string | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(excludedTestTypes));
+  }, [excludedTestTypes]);
+
+  // 表头筛选选项（基于全量 active 员工）
+  const activeStaffs = staffs.filter(s => s.status === 'active');
+  const allCoefficients = [...new Set(activeStaffs.map(s => s.currentCoefficient?.toFixed(1) || '1.0'))].sort();
+  const allHeaderTestTypes = [...new Set(activeStaffs.map(s => s.testType).filter(Boolean))] as string[];
+
+  // 基础员工列表（仅测试组长权限限制，用于空闲工作量计算）
+  const baseStaffs = staffs.filter(s => {
     if (s.status !== 'active') return false;
-    // 测试组长只看本组
     if (userRoles?.includes('testLead') && userTestType && s.testType !== userTestType) return false;
-    if (filterTestTypes.length > 0 && s.testType && !filterTestTypes.includes(s.testType)) return false;
+    return true;
+  });
+
+  // 筛选后的员工（表头筛选 + 产品筛选，用于表格显示）
+  const filteredStaffs = baseStaffs.filter(s => {
+    // 顶部产品筛选
     if (filterProducts.length > 0) {
       const weekDateStrs = weekDates.map(d => d.format('YYYY-MM-DD'));
       const hasMatchingSchedule = schedules.some(
@@ -114,8 +143,31 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
       );
       if (!hasMatchingSchedule) return false;
     }
+    // 表头：姓名搜索
+    if (nameSearch && !s.name?.toLowerCase().includes(nameSearch.toLowerCase())) return false;
+    // 表头：系数筛选
+    if (coefficientFilter.length > 0 && !coefficientFilter.includes(s.currentCoefficient?.toFixed(1) || '1.0')) return false;
+    // 表头：保密权限筛选
+    if (clearanceFilter.length > 0) {
+      if (clearanceFilter.includes('confidential') && !clearanceFilter.includes('normal')) {
+        if (!s.confidentialClearance) return false;
+      }
+      if (clearanceFilter.includes('normal') && !clearanceFilter.includes('confidential')) {
+        if (s.confidentialClearance) return false;
+      }
+    }
+    // 表头：测试类型筛选
+    if (headerTestTypeFilter.length > 0 && s.testType && !headerTestTypeFilter.includes(s.testType)) return false;
     return true;
   });
+
+  // 所有测试类型（去重，基于全量员工用于弹窗选项）
+  const allTestTypes = [...new Set(baseStaffs.map(s => s.testType).filter(Boolean))] as string[];
+
+  // 用于空闲工作量计算的员工（仅受空闲工作量弹窗筛选影响，不受表头筛选影响）
+  const workloadStaffs = excludedTestTypes.length > 0
+    ? baseStaffs.filter(s => !s.testType || !excludedTestTypes.includes(s.testType))
+    : baseStaffs;
 
   return (
     <Card
@@ -168,56 +220,30 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
         </Space>
       }
       extra={
-        <DatePicker
-          picker="week"
-          value={weekViewDate}
-          onChange={(date) => date && onWeekChange(date)}
-          allowClear={false}
-          style={{ width: 130 }}
-        />
+        <Space size={8}>
+          <DatePicker
+            picker="week"
+            value={weekViewDate}
+            onChange={(date) => date && onWeekChange(date)}
+            allowClear={false}
+            style={{ width: 130 }}
+          />
+          <Select
+            mode="multiple"
+            placeholder="全部产品"
+            style={{ minWidth: 200 }}
+            value={filterProducts}
+            onChange={onFilterProductsChange}
+            allowClear
+            maxTagCount={2}
+            options={[...new Set(schedules.map(s => s.product).filter(Boolean))]
+              .map(p => ({ label: p, value: p }))}
+          />
+        </Space>
       }
       style={{ flex: 1, overflow: 'hidden', minWidth: 0, display: 'flex', flexDirection: 'column' }}
       bodyStyle={{ padding: 0, overflow: 'auto', flex: 1, minHeight: 0, overscrollBehavior: 'contain' }}
     >
-      {/* 筛选控件 */}
-      <div style={{
-        padding: '8px 12px',
-        display: 'flex',
-        gap: 12,
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        borderBottom: '1px solid #f0f0f0',
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
-        background: '#fff',
-      }}>
-        <span style={{ fontSize: 13, color: '#666' }}>筛选:</span>
-        <Select
-          mode="multiple"
-          placeholder="测试类型"
-          style={{ minWidth: 180 }}
-          value={filterTestTypes}
-          onChange={onFilterTestTypesChange}
-          allowClear
-          maxTagCount={2}
-          options={[...new Set(staffs.filter(s => s.status === 'active').map(s => s.testType).filter(Boolean))]
-            .map(t => ({ label: t, value: t }))}
-        />
-        <span style={{ fontSize: 13, color: '#666', marginLeft: 12 }}>产品:</span>
-        <Select
-          mode="multiple"
-          placeholder="全部产品"
-          style={{ minWidth: 200 }}
-          value={filterProducts}
-          onChange={onFilterProductsChange}
-          allowClear
-          maxTagCount={2}
-          options={[...new Set(schedules.map(s => s.product).filter(Boolean))]
-            .map(p => ({ label: p, value: p }))}
-        />
-      </div>
-
       {/* 表格 */}
       <style>{`
         .drop-active {
@@ -235,11 +261,169 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
       <div onDragLeave={() => onCellDragOver(null)}>
         <table className="kanban-table" style={{ minWidth: 1200 }}>
           <thead>
-            <tr style={{ position: 'sticky', top: 40, zIndex: 5 }}>
-              <th style={{ minWidth: 45, position: 'sticky', left: 0, background: '#fafafa', zIndex: 6 }}>姓名</th>
-              <th style={{ minWidth: 10, position: 'sticky', left: 45, background: '#fafafa', zIndex: 6 }}>系数</th>
-              <th style={{ minWidth: 50, position: 'sticky', left: 55, background: '#fafafa', zIndex: 6 }}>保密权限</th>
-              <th style={{ minWidth: 45, position: 'sticky', left: 105, background: '#fafafa', zIndex: 6 }}>测试类型</th>
+            <tr style={{ position: 'sticky', top: 0, zIndex: 5 }}>
+              {/* 姓名 — 搜索筛选 */}
+              <th style={{ minWidth: 45, position: 'sticky', left: 0, background: '#fafafa', zIndex: 6, cursor: 'pointer' }}>
+                <Popover
+                  trigger="click"
+                  open={headerPopover === 'name'}
+                  onOpenChange={(open) => setHeaderPopover(open ? 'name' : null)}
+                  placement="bottomLeft"
+                  content={
+                    <div style={{ width: 160 }}>
+                      <Input
+                        placeholder="搜索姓名"
+                        size="small"
+                        allowClear
+                        value={nameSearch}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNameSearch(e.target.value || '')}
+                        autoFocus
+                      />
+                    </div>
+                  }
+                >
+                  <span onClick={(e) => e.stopPropagation()}>
+                    姓名 {nameSearch
+                      ? <FilterFilled style={{ fontSize: 10, color: '#1677ff', marginLeft: 2 }} />
+                      : <SearchOutlined style={{ fontSize: 10, color: '#bbb', marginLeft: 2 }} />}
+                  </span>
+                </Popover>
+              </th>
+              {/* 系数 — 多选筛选 */}
+              <th style={{ minWidth: 10, position: 'sticky', left: 45, background: '#fafafa', zIndex: 6, cursor: 'pointer' }}>
+                <Popover
+                  trigger="click"
+                  open={headerPopover === 'coefficient'}
+                  onOpenChange={(open) => setHeaderPopover(open ? 'coefficient' : null)}
+                  placement="bottomLeft"
+                  content={
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {allCoefficients.map(c => (
+                        <Checkbox
+                          key={c}
+                          checked={coefficientFilter.includes(c)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setCoefficientFilter(prev => [...prev, c]);
+                            } else {
+                              setCoefficientFilter(prev => prev.filter(x => x !== c));
+                            }
+                          }}
+                        >
+                          {c}
+                        </Checkbox>
+                      ))}
+                      {allCoefficients.length > 0 && (
+                        <>
+                          <Divider style={{ margin: '4px 0' }} />
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setCoefficientFilter([])}>全选</Button>
+                            <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setCoefficientFilter([...allCoefficients])}>全不选</Button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  }
+                >
+                  <span onClick={(e) => e.stopPropagation()}>
+                    系数 {coefficientFilter.length > 0
+                      ? <FilterFilled style={{ fontSize: 10, color: '#1677ff', marginLeft: 2 }} />
+                      : <FilterOutlined style={{ fontSize: 10, color: '#bbb', marginLeft: 2 }} />}
+                  </span>
+                </Popover>
+              </th>
+              {/* 保密权限 — 多选筛选 */}
+              <th style={{ minWidth: 50, position: 'sticky', left: 55, background: '#fafafa', zIndex: 6, cursor: 'pointer' }}>
+                <Popover
+                  trigger="click"
+                  open={headerPopover === 'clearance'}
+                  onOpenChange={(open) => setHeaderPopover(open ? 'clearance' : null)}
+                  placement="bottomLeft"
+                  content={
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <Checkbox
+                        checked={clearanceFilter.includes('confidential')}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setClearanceFilter(prev => [...prev, 'confidential']);
+                          } else {
+                            setClearanceFilter(prev => prev.filter(x => x !== 'confidential'));
+                          }
+                        }}
+                      >
+                        <Tag color="red" style={{ fontSize: 10, padding: '0 4px', margin: 0 }}>保密</Tag>
+                      </Checkbox>
+                      <Checkbox
+                        checked={clearanceFilter.includes('normal')}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setClearanceFilter(prev => [...prev, 'normal']);
+                          } else {
+                            setClearanceFilter(prev => prev.filter(x => x !== 'normal'));
+                          }
+                        }}
+                      >
+                        普通
+                      </Checkbox>
+                      <Divider style={{ margin: '4px 0' }} />
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setClearanceFilter([])}>全选</Button>
+                        <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setClearanceFilter(['confidential', 'normal'])}>全不选</Button>
+                      </div>
+                    </div>
+                  }
+                >
+                  <span onClick={(e) => e.stopPropagation()}>
+                    保密权限 {clearanceFilter.length > 0
+                      ? <FilterFilled style={{ fontSize: 10, color: '#1677ff', marginLeft: 2 }} />
+                      : <FilterOutlined style={{ fontSize: 10, color: '#bbb', marginLeft: 2 }} />}
+                  </span>
+                </Popover>
+              </th>
+              {/* 测试类型 — 多选筛选 */}
+              <th style={{ minWidth: 45, position: 'sticky', left: 105, background: '#fafafa', zIndex: 6, cursor: 'pointer' }}>
+                <Popover
+                  trigger="click"
+                  open={headerPopover === 'testType'}
+                  onOpenChange={(open) => setHeaderPopover(open ? 'testType' : null)}
+                  placement="bottomLeft"
+                  content={
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 240, overflow: 'auto' }}>
+                      {allHeaderTestTypes.length === 0 && <span style={{ color: '#999', fontSize: 12 }}>暂无测试类型</span>}
+                      {allHeaderTestTypes.map(t => (
+                        <Checkbox
+                          key={t}
+                          checked={headerTestTypeFilter.includes(t)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setHeaderTestTypeFilter(prev => [...prev, t]);
+                            } else {
+                              setHeaderTestTypeFilter(prev => prev.filter(x => x !== t));
+                            }
+                          }}
+                        >
+                          {t}
+                        </Checkbox>
+                      ))}
+                      {allHeaderTestTypes.length > 0 && (
+                        <>
+                          <Divider style={{ margin: '4px 0' }} />
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setHeaderTestTypeFilter([])}>全选</Button>
+                            <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setHeaderTestTypeFilter([...allHeaderTestTypes])}>全不选</Button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  }
+                >
+                  <span onClick={(e) => e.stopPropagation()}>
+                    测试类型 {headerTestTypeFilter.length > 0
+                      ? <FilterFilled style={{ fontSize: 10, color: '#1677ff', marginLeft: 2 }} />
+                      : <FilterOutlined style={{ fontSize: 10, color: '#bbb', marginLeft: 2 }} />}
+                  </span>
+                </Popover>
+              </th>
               <th style={{ minWidth: 140, position: 'sticky', left: 150, background: '#fafafa', zIndex: 6 }}>熟悉模块</th>
               {weekDates.map((date) => {
                 const isWeekend = [0, 6].includes(date.day());
@@ -292,7 +476,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                 </td>
 
                 {/* Date columns */}
-                {weekDates.map((date, dayIndex) => {
+                {weekDates.map((date) => {
                   const dateStr = date.format('YYYY-MM-DD');
                   const daySchedules = getSchedulesForStaffAndDate(schedules, staff.id, dateStr);
                   const totalPercent = getTotalPercentage(schedules, staff.id, dateStr);
@@ -525,6 +709,81 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                 })}
               </tr>
             ))}
+            {/* 空闲可用工作量汇总行 — 固定在底部 */}
+            <tr style={{ position: 'sticky', bottom: 0, zIndex: 3, background: '#f0f5ff', fontWeight: 500, boxShadow: '0 -2px 4px rgba(0,0,0,0.08)' }}>
+              <td colSpan={5} style={{ position: 'sticky', left: 0, background: '#f0f5ff', zIndex: 4, padding: '6px 8px', fontSize: 12, whiteSpace: 'nowrap', borderTop: '2px solid #1677ff' }}>
+                <span
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => setFilterModalOpen(true)}
+                >
+                  空闲可用工作量
+                  {excludedTestTypes.length > 0 && (
+                    <Tag color="orange" style={{ fontSize: 10, marginLeft: 4, lineHeight: '14px', padding: '0 3px' }}>
+                      已排除{excludedTestTypes.length}类
+                    </Tag>
+                  )}
+                </span>
+                <Modal
+                  title="空闲工作量统计范围"
+                  open={filterModalOpen}
+                  onCancel={() => setFilterModalOpen(false)}
+                  onOk={() => setFilterModalOpen(false)}
+                  width={360}
+                  destroyOnClose={false}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ fontSize: 12, color: '#999' }}>取消勾选的测试类型不计入空闲工作量统计：</div>
+                    {allTestTypes.length === 0 && <span style={{ color: '#999', fontSize: 12 }}>暂无测试类型</span>}
+                    {allTestTypes.map(t => (
+                      <Checkbox
+                        key={t}
+                        checked={!excludedTestTypes.includes(t)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setExcludedTestTypes(prev => prev.filter(x => x !== t));
+                          } else {
+                            setExcludedTestTypes(prev => [...prev, t]);
+                          }
+                        }}
+                      >
+                        {t}
+                      </Checkbox>
+                    ))}
+                    {allTestTypes.length > 0 && (
+                      <>
+                        <Divider style={{ margin: '4px 0' }} />
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setExcludedTestTypes([])}>全选</Button>
+                          <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setExcludedTestTypes([...allTestTypes])}>全不选</Button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </Modal>
+              </td>
+              {weekDates.map(date => {
+                const dateStr = date.format('YYYY-MM-DD');
+                const freeWorkload = calculateDailyFreeWorkload(workloadStaffs, schedules, dateStr, dailyStatuses);
+                const isWeekend = [0, 6].includes(date.day());
+                return (
+                  <td
+                    key={dateStr}
+                    style={{
+                      padding: '6px 2px',
+                      fontSize: 13,
+                      textAlign: 'center',
+                      fontWeight: 600,
+                      background: isWeekend ? '#e6f4ff' : '#f0f5ff',
+                      borderTop: '2px solid #1677ff',
+                    }}
+                  >
+                    <span style={{ color: freeWorkload > 0 ? '#1677ff' : '#999' }}>
+                      {freeWorkload.toFixed(1)}
+                    </span>
+                  </td>
+                );
+              })}
+            </tr>
           </tbody>
         </table>
       </div>

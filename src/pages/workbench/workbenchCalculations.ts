@@ -118,6 +118,25 @@ export function getMaxCapacity(
   return rawMax * statusFactor;
 }
 
+/**
+ * 计算每天的空闲可用工作量
+ * 空闲工作量 = Σ(每人空闲人天 × 系数)
+ * 每人空闲人天 = (maxCapacity% - 已排百分比%) / 100
+ */
+export function calculateDailyFreeWorkload(
+  staffs: StaffItem[],
+  schedules: ScheduleItem[],
+  date: string,
+  dailyStatuses: Map<string, DailyStatusEntry>
+): number {
+  return staffs.reduce((total, staff) => {
+    const maxCap = getMaxCapacity(staff, date, dailyStatuses);
+    const used = getTotalPercentage(schedules, staff.id, date);
+    const freePct = Math.max(0, maxCap - used);
+    return total + (freePct / 100) * (staff.currentCoefficient || 1);
+  }, 0);
+}
+
 // ---- 风险排序 ----
 
 /**

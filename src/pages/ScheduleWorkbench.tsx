@@ -89,7 +89,6 @@ const ScheduleWorkbench: React.FC = () => {
   const [statusDraft, setStatusDraft] = useState<DailyAvailabilityStatus>('AVAILABLE');
 
   // 筛选
-  const [filterTestTypes, setFilterTestTypes] = useState<string[]>([]);
   const [filterDemandTestTypes, setFilterDemandTestTypes] = useState<string[]>([]);
   const [filterProducts, setFilterProducts] = useState<string[]>([]);
 
@@ -1220,7 +1219,6 @@ const ScheduleWorkbench: React.FC = () => {
           draggedSchedule={draggedSchedule}
           dragOverCell={dragOverCell}
           dragOverTrash={dragOverTrash}
-          filterTestTypes={filterTestTypes}
           filterProducts={filterProducts}
           canManageDailyAvailability={hasPermission('manageDailyAvailability')}
           userTestType={user?.testType}
@@ -1229,7 +1227,6 @@ const ScheduleWorkbench: React.FC = () => {
           statusDraft={statusDraft}
           statusPctDraft={statusPctDraft}
           onWeekChange={setWeekViewDate}
-          onFilterTestTypesChange={setFilterTestTypes}
           onFilterProductsChange={setFilterProducts}
           onDrop={handleDrop}
           onScheduleTransfer={handleScheduleTransfer}
