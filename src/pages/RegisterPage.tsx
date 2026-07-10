@@ -13,6 +13,7 @@ interface RegisterPageProps {
 const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateLogin }) => {
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
 
   const handleSubmit = async (values: {
     username: string;
@@ -20,6 +21,7 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateLogin }) => {
     password: string;
     confirmPassword: string;
     roles: string[];
+    testGroup?: string;
   }) => {
     setLoading(true);
     try {
@@ -27,10 +29,12 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateLogin }) => {
         ...values,
         role: values.roles[0],
         roles: values.roles,
+        testGroup: values.testGroup,
       } as any);
       message.success('注册成功！请等待管理员审批后登录。');
       window.dispatchEvent(new CustomEvent('refresh-pending-counts'));
       form.resetFields();
+      setSelectedRoles([]);
     } catch (error: any) {
       message.error(error.message || '注册失败');
     } finally {
@@ -106,8 +110,12 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateLogin }) => {
             label="角色"
             rules={[{ required: true, message: '请选择至少一个角色' }]}
           >
-            <Select mode="multiple" placeholder="请选择角色（可多选）">
-              <Option value="testExecutor">测试执行人员（资源主管审批）</Option>
+            <Select
+              mode="multiple"
+              placeholder="请选择角色（可多选）"
+              onChange={(values) => setSelectedRoles(values)}
+            >
+              <Option value="testExecutor">测试执行人员（测试组长审批）</Option>
               <Option value="testManager">测试经理（项目经理审批）</Option>
               <Option value="resourceManager">资源主管（项目经理审批）</Option>
               <Option value="projectManager">项目经理（项目经理审批）</Option>
@@ -115,6 +123,20 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateLogin }) => {
               <Option value="testLead">测试组长（项目经理审批）</Option>
             </Select>
           </Form.Item>
+
+          {selectedRoles.includes('testExecutor') && (
+            <Form.Item
+              name="testGroup"
+              label="所属测试组"
+              rules={[{ required: true, message: '测试执行人员必须选择所属测试组' }]}
+            >
+              <Select placeholder="请选择所属测试组">
+                <Option value="功能测试组">功能测试组</Option>
+                <Option value="自动化测试组">自动化测试组</Option>
+                <Option value="性能测试组">性能测试组</Option>
+              </Select>
+            </Form.Item>
+          )}
 
           <Form.Item
             name="familiarModules"
