@@ -27,8 +27,7 @@ public class RegisterRequest {
     private String familiarModules;
 
     /**
-     * 所属测试组（测试执行人员必填）
-     * 可选值：功能测试组、自动化测试组、性能测试组
+     * 测试类型（测试执行人员必填）
      */
-    private String testGroup;
+    private String testType;
 }

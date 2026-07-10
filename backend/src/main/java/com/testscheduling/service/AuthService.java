@@ -77,9 +77,9 @@ public class AuthService {
         user.setDisplayName(request.getDisplayName());
         user.setFamiliarModules(request.getFamiliarModules());
 
-        // 设置所属测试组
-        if (request.getTestGroup() != null && !request.getTestGroup().isEmpty()) {
-            user.setTestGroup(request.getTestGroup());
+        // 设置测试类型
+        if (request.getTestType() != null && !request.getTestType().isEmpty()) {
+            user.setTestType(request.getTestType());
         }
 
         if (request.getRoles() != null && !request.getRoles().isEmpty()) {
@@ -100,12 +100,12 @@ public class AuthService {
             // 同时是测试组长和项目经理，可以看到所有待审批
             return userRepository.findByEnabledFalse();
         } else if (approverRoles.contains("testLead")) {
-            // 测试组长：只能看到自己负责的测试组的测试执行人员
-            String approverTestGroup = approver.getTestGroup();
-            if (approverTestGroup == null || approverTestGroup.isEmpty()) {
+            // 测试组长：只能看到自己负责的测试类型的测试执行人员
+            String approverTestType = approver.getTestType();
+            if (approverTestType == null || approverTestType.isEmpty()) {
                 return new ArrayList<>();
             }
-            return userRepository.findPendingTestExecutorsByTestGroup(approverTestGroup);
+            return userRepository.findPendingTestExecutorsByTestType(approverTestType);
         } else if (approverRoles.contains("projectManager")) {
             // 项目经理：可以看到除测试执行人员外的所有待审批
             List<User> all = userRepository.findByEnabledFalse();

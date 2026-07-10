@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, Form, Input, Button, Select, message, Typography } from 'antd';
 import { UserOutlined, LockOutlined, IdcardOutlined } from '@ant-design/icons';
 import { api } from '../services/api';
@@ -14,6 +14,22 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateLogin }) => {
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  const [testTypeOptions, setTestTypeOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    const fetchTestTypeConfig = async () => {
+      try {
+        const configs = await api.getFieldConfigs();
+        const testTypeConfig = configs.find((c: any) => c.fieldName === 'testType');
+        if (testTypeConfig && testTypeConfig.options) {
+          setTestTypeOptions(testTypeConfig.options.split(',').map((s: string) => s.trim()));
+        }
+      } catch (error) {
+        console.error('获取测试类型配置失败:', error);
+      }
+    };
+    fetchTestTypeConfig();
+  }, []);
 
   const handleSubmit = async (values: {
     username: string;
@@ -21,7 +37,7 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateLogin }) => {
     password: string;
     confirmPassword: string;
     roles: string[];
-    testGroup?: string;
+    testType?: string;
   }) => {
     setLoading(true);
     try {
@@ -29,7 +45,7 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateLogin }) => {
         ...values,
         role: values.roles[0],
         roles: values.roles,
-        testGroup: values.testGroup,
+        testType: values.testType,
       } as any);
       message.success('注册成功！请等待管理员审批后登录。');
       window.dispatchEvent(new CustomEvent('refresh-pending-counts'));
@@ -126,14 +142,14 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateLogin }) => {
 
           {selectedRoles.includes('testExecutor') && (
             <Form.Item
-              name="testGroup"
-              label="所属测试组"
-              rules={[{ required: true, message: '测试执行人员必须选择所属测试组' }]}
+              name="testType"
+              label="测试类型"
+              rules={[{ required: true, message: '测试执行人员必须选择测试类型' }]}
             >
-              <Select placeholder="请选择所属测试组">
-                <Option value="功能测试组">功能测试组</Option>
-                <Option value="自动化测试组">自动化测试组</Option>
-                <Option value="性能测试组">性能测试组</Option>
+              <Select placeholder="请选择测试类型">
+                {testTypeOptions.map(option => (
+                  <Option key={option} value={option}>{option}</Option>
+                ))}
               </Select>
             </Form.Item>
           )}

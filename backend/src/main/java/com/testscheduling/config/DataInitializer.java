@@ -81,7 +81,6 @@ public class DataInitializer implements CommandLineRunner {
             testLead.setRoles(List.of("testLead"));
             testLead.setDisplayName("测试组长");
             testLead.setTestType("功能测试");
-            testLead.setTestGroup("功能测试组");
             testLead.setEnabled(true);
             userRepository.save(testLead);
         }
