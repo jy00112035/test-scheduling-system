@@ -10,7 +10,7 @@ import dayjs from 'dayjs';
 import type { ScheduleItem, DemandItem, StaffItem, DailyStatusEntry } from './workbenchTypes';
 import {
   getWeekDates,
-  getWeekDayLabels,
+  DAY_LABELS,
   getSchedulesForStaffAndDate,
   getTotalPercentage,
   getDailyStatus,
@@ -100,7 +100,6 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
   onStatusPctDraftChange,
 }) => {
   const weekDates = getWeekDates(weekViewDate);
-  const weekDays = getWeekDayLabels(weekDates);
 
   // 筛选后的员工
   const filteredStaffs = staffs.filter(s => {
@@ -250,7 +249,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                     background: isWeekend ? '#fff7e6' : '#fafafa',
                   }}>
                     <div style={{ color: isWeekend ? '#fa8c16' : undefined }}>
-                      {weekDays[date.day()]}
+                      {DAY_LABELS[date.day()]}
                     </div>
                     <div style={{ fontSize: 10, color: isWeekend ? '#fa8c16' : '#666' }}>
                       {date.format('MM-DD')}

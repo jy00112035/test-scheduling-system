@@ -24,10 +24,6 @@ export function getWeekDates(weekViewDate: dayjs.Dayjs): dayjs.Dayjs[] {
   return Array.from({ length: 7 }, (_, i) => weekViewDate.clone().add(i, 'day'));
 }
 
-export function getWeekDayLabels(weekDates: dayjs.Dayjs[]): string[] {
-  return weekDates.map(d => DAY_LABELS[d.day()]);
-}
-
 export function getDemandDateRange(demandStart: dayjs.Dayjs, demandEnd: dayjs.Dayjs): dayjs.Dayjs[] {
   const dates: dayjs.Dayjs[] = [];
   let current = demandStart;
