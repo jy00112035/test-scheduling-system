@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   Table,
@@ -19,6 +19,7 @@ import {
   DeleteOutlined,
   CheckCircleOutlined,
   DownloadOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import dayjs, { Dayjs } from 'dayjs';
 import { TestDemand } from '../types';
@@ -42,6 +43,7 @@ const TestDemandList: React.FC = () => {
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [exportDateRange, setExportDateRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
+  const [formDirty, setFormDirty] = useState(false);
 
   useEffect(() => {
     fetchDemands();
@@ -141,9 +143,37 @@ const TestDemandList: React.FC = () => {
   const handleSubmitSuccess = () => {
     setShowSubmitModal(false);
     setEditingDemand(null);
+    setFormDirty(false);
     fetchDemands();
     message.success('操作成功！');
   };
+
+  const handleModalClose = useCallback(() => {
+    if (formDirty) {
+      Modal.confirm({
+        title: '确认离开',
+        icon: <ExclamationCircleOutlined />,
+        content: '您有未保存的更改，确定要离开吗？',
+        okText: '保存草稿并离开',
+        cancelText: '直接离开',
+        closable: true,
+        maskClosable: true,
+        onOk() {
+          window.dispatchEvent(new CustomEvent('save-demand-draft'));
+          setShowSubmitModal(false);
+          setFormDirty(false);
+          message.success('草稿已保存');
+        },
+        onCancel() {
+          window.dispatchEvent(new CustomEvent('clear-demand-draft'));
+          setShowSubmitModal(false);
+          setFormDirty(false);
+        },
+      });
+    } else {
+      setShowSubmitModal(false);
+    }
+  }, [formDirty]);
 
   const handleExport = async () => {
     if (!exportDateRange || exportDateRange.length !== 2) {
@@ -443,7 +473,7 @@ const TestDemandList: React.FC = () => {
       <Modal
         title={editingDemand ? '编辑测试需求' : '提交测试需求'}
         open={showSubmitModal}
-        onCancel={() => setShowSubmitModal(false)}
+        onCancel={handleModalClose}
         footer={null}
         width={800}
         destroyOnClose
@@ -452,6 +482,7 @@ const TestDemandList: React.FC = () => {
           onBack={handleSubmitSuccess}
           initialValues={editingDemand || undefined}
           isEdit={!!editingDemand}
+          onDirtyChange={setFormDirty}
         />
       </Modal>
 
