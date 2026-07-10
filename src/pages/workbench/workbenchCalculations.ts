@@ -21,11 +21,7 @@ export const PRIORITY_COLORS = ['red', 'orange', 'green', 'blue', 'purple', 'cya
 // ---- 日期工具 ----
 
 export function getWeekDates(weekViewDate: dayjs.Dayjs): dayjs.Dayjs[] {
-  // 标准化到当周周一（day() 返回 0=周日,1=周一,...6=周六）
-  const day = weekViewDate.day();
-  const mondayOffset = day === 0 ? -6 : 1 - day; // 周日回退6天，其他天回退到周一
-  const startOfWeek = weekViewDate.clone().add(mondayOffset, 'day');
-  return Array.from({ length: 7 }, (_, i) => startOfWeek.clone().add(i, 'day'));
+  return Array.from({ length: 7 }, (_, i) => weekViewDate.clone().add(i, 'day'));
 }
 
 export function getWeekDayLabels(weekDates: dayjs.Dayjs[]): string[] {
