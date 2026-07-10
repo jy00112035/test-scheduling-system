@@ -57,7 +57,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
   const [manpowerInputs, setManpowerInputs] = useState<Record<string, number>>({});
   const [manpowerRemarks, setManpowerRemarks] = useState<Record<string, string>>({});
   const draftId = useRef(isEdit ? `edit_${initialValues?.id}` : 'new').current;
-  const [hasShownDraftPrompt, setHasShownDraftPrompt] = useState(false);
+  const hasShownDraftPrompt = useRef(false);
 
   useEffect(() => {
     fetchFieldConfigs();
@@ -86,13 +86,11 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
 
   // 组件挂载时检查是否有草稿
   useEffect(() => {
-    if (hasShownDraftPrompt) return;
+    if (hasShownDraftPrompt.current) return;
+    hasShownDraftPrompt.current = true;
 
     const draft = getDraft(draftId);
-    if (!draft) {
-      setHasShownDraftPrompt(true);
-      return;
-    }
+    if (!draft) return;
 
     const draftTime = getDraftTimestamp(draftId);
     const timeText = draftTime ? formatDraftTime(draftTime) : '';
@@ -114,9 +112,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         clearDraft(draftId);
       },
     });
-
-    setHasShownDraftPrompt(true);
-  }, [draftId, form, hasShownDraftPrompt]);
+  }, [draftId, form]);
 
   // 监听草稿保存/清除事件
   useEffect(() => {
