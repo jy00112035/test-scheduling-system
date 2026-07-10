@@ -37,6 +37,9 @@ public class User {
     @Column(length = 500)
     private String familiarModules;
 
+    @Column(length = 50)
+    private String testGroup;
+
     @Column
     private Boolean confidentialClearance = false;
 
