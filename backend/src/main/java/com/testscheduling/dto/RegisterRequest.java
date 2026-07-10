@@ -25,4 +25,10 @@ public class RegisterRequest {
     private List<String> roles;
 
     private String familiarModules;
+
+    /**
+     * 所属测试组（测试执行人员必填）
+     * 可选值：功能测试组、自动化测试组、性能测试组
+     */
+    private String testGroup;
 }
