@@ -71,6 +71,8 @@ export interface UnfulfilledDetail {
   shortage: number;
   details: Array<{ testType: string; shortage: number }>;
   reasons: string[];
+  overdueDays?: number;       // 超出 endDate 的天数
+  overdueDates?: string[];    // 超出 endDate 的具体日期列表
 }
 
 export interface ConflictDetail {

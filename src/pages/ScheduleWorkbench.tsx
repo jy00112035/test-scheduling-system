@@ -8,6 +8,7 @@ import {
   Button, Tag, Space, Modal, message, InputNumber, Descriptions, Divider,
   DatePicker, Checkbox,
 } from 'antd';
+import { ExclamationCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '../services/api';
 import { useUserRole } from '../context/UserRoleContext';
@@ -361,20 +362,22 @@ const ScheduleWorkbench: React.FC = () => {
 
     for (const dateStr of dateStrings) {
       const date = dayjs(dateStr);
-      for (const demand of sortedDemands) {
-        if (completedDemands.has(demand.id)) continue;
-        if (date.isBefore(dayjs(demand.startDate), 'day')) continue;
 
-        const neededTypes = demandNeededTypes.get(demand.id) || [];
-        const allAvailable = getAvailableStaffForDate(dateStr, loadMap, activeStaffs, demand.confidential);
-        const deviceCount = demand.testDeviceCount;
+      // 人员优先：每个人员的容量按需求优先级依次分配，剩余容量自动流转给下一个需求
+      const hasConfidential = sortedDemands.some(d => !completedDemands.has(d.id) && d.confidential);
+      const allAvailable = getAvailableStaffForDate(dateStr, loadMap, activeStaffs, hasConfidential);
 
-        for (const staff of allAvailable) {
-          if (staff.capacity < 5) {
-            capacityBlockedCount.set(demand.id, (capacityBlockedCount.get(demand.id) || 0) + 1);
-            continue;
-          }
+      for (const staff of allAvailable) {
+        if (staff.capacity < 5) continue;
 
+        for (const demand of sortedDemands) {
+          if (completedDemands.has(demand.id)) continue;
+          if (date.isBefore(dayjs(demand.startDate), 'day')) continue;
+
+          const neededTypes = demandNeededTypes.get(demand.id) || [];
+          const deviceCount = demand.testDeviceCount;
+
+          // 样机限制检查
           if (deviceCount && deviceCount > 0) {
             const dcKey = `${demand.id}-${dateStr}`;
             const assignedSet = deviceStaffMap.get(dcKey);
@@ -385,6 +388,7 @@ const ScheduleWorkbench: React.FC = () => {
             }
           }
 
+          // 测试类型匹配
           const staffTestType = staff.testType;
           const matched = neededTypes.find((tt: string) => {
             if (tt === '__ALL__') return true;
@@ -425,12 +429,19 @@ const ScheduleWorkbench: React.FC = () => {
           const dcKey = `${demand.id}-${dateStr}`;
           if (!deviceStaffMap.has(dcKey)) deviceStaffMap.set(dcKey, new Set());
           deviceStaffMap.get(dcKey)!.add(staff.id);
-        }
 
-        const allDone = neededTypes.every((tt: string) =>
-          (remainingByType.get(`${demand.id}-${tt}`) || 0) <= 0.001
-        );
-        if (allDone) completedDemands.add(demand.id);
+          // 更新人员剩余容量，以便分配给下一个需求
+          staff.capacity -= alloc;
+
+          // 检查需求是否完成
+          const allDone = neededTypes.every((tt: string) =>
+            (remainingByType.get(`${demand.id}-${tt}`) || 0) <= 0.001
+          );
+          if (allDone) completedDemands.add(demand.id);
+
+          // 人员容量用尽，跳过剩余需求
+          if (staff.capacity < 5) break;
+        }
       }
       if (completedDemands.size === sortedDemands.length) break;
     }
@@ -442,7 +453,29 @@ const ScheduleWorkbench: React.FC = () => {
       const totalRemaining = neededTypes.reduce((sum, tt) =>
         sum + Math.max(0, remainingByType.get(`${demand.id}-${tt}`) || 0), 0
       );
-      if (totalRemaining <= 0.001) continue;
+      if (totalRemaining <= 0.001) {
+        // 即使人力已满足，仍检测是否超出期限
+        const demandSchedules = newSchedules.filter(s => s.demandId === demand.id);
+        const endDate = dayjs(demand.endDate);
+        const overdueDates = demandSchedules
+          .filter(s => dayjs(s.date).isAfter(endDate, 'day'))
+          .map(s => s.date);
+        const uniqueOverdueDates = [...new Set(overdueDates)].sort();
+        const overdueDays = uniqueOverdueDates.length;
+
+        if (overdueDays > 0) {
+          unfulfilledDetailsList.push({
+            product: demand.product,
+            shortage: 0,
+            details: [],
+            reasons: [`排班超出完成期限 ${overdueDays} 天（最晚至 ${uniqueOverdueDates[uniqueOverdueDates.length - 1]}）`],
+            overdueDays,
+            overdueDates: uniqueOverdueDates,
+          });
+          unfulfilledSet.add(demand.id);
+        }
+        continue;
+      }
 
       unfulfilledSet.add(demand.id);
       const reasons: string[] = [];
@@ -480,11 +513,26 @@ const ScheduleWorkbench: React.FC = () => {
         reasons.push('人力需求超出可用资源总量');
       }
 
+      // 检测排班是否超出需求期限
+      const demandSchedules = newSchedules.filter(s => s.demandId === demand.id);
+      const endDate = dayjs(demand.endDate);
+      const overdueDates = demandSchedules
+        .filter(s => dayjs(s.date).isAfter(endDate, 'day'))
+        .map(s => s.date);
+      const uniqueOverdueDates = [...new Set(overdueDates)].sort();
+      const overdueDays = uniqueOverdueDates.length;
+
+      if (overdueDays > 0) {
+        reasons.push(`排班超出完成期限 ${overdueDays} 天（最晚至 ${uniqueOverdueDates[uniqueOverdueDates.length - 1]}）`);
+      }
+
       unfulfilledDetailsList.push({
         product: demand.product,
         shortage: Math.round(totalRemaining * 10) / 10,
         details: perTypeDetails,
         reasons,
+        overdueDays: overdueDays > 0 ? overdueDays : undefined,
+        overdueDates: uniqueOverdueDates.length > 0 ? uniqueOverdueDates : undefined,
       });
     }
 
@@ -559,6 +607,40 @@ const ScheduleWorkbench: React.FC = () => {
     setUnfulfilledDemands(unfulfilledSet);
     setUnfulfilledDetails(unfulfilledDetailsList);
 
+    // 超期预警
+    const overdueList = unfulfilledDetailsList.filter(u => u.overdueDays && u.overdueDays > 0);
+    if (overdueList.length > 0) {
+      const overdueInfo = overdueList
+        .map(u => `• ${u.product}：超出期限 ${u.overdueDays} 天`)
+        .join('\n');
+
+      const confirmed = await new Promise<boolean>((resolve) => {
+        Modal.confirm({
+          title: '排班超出完成期限预警',
+          icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
+          content: (
+            <div>
+              <p>以下需求的排班日期已超出完成期限：</p>
+              <pre style={{ whiteSpace: 'pre-wrap', background: '#fffbe6', padding: 8, borderRadius: 4, fontSize: 13 }}>
+                {overdueInfo}
+              </pre>
+              <p style={{ marginTop: 8, color: '#666' }}>是否仍要保存排班方案？</p>
+            </div>
+          ),
+          okText: '继续保存',
+          cancelText: '取消',
+          onOk: () => resolve(true),
+          onCancel: () => resolve(false),
+        });
+      });
+
+      if (!confirmed) {
+        loadingMsg();
+        message.info('已取消排班');
+        return;
+      }
+    }
+
     try {
       await persistRecommendation(newSchedules, activeStaffs);
     } catch (err: any) {
@@ -616,6 +698,40 @@ const ScheduleWorkbench: React.FC = () => {
 
     setUnfulfilledDemands(unfulfilledSet);
     setUnfulfilledDetails(unfulfilledDetailsList);
+
+    // 超期预警
+    const overdueList = unfulfilledDetailsList.filter(u => u.overdueDays && u.overdueDays > 0);
+    if (overdueList.length > 0) {
+      const overdueInfo = overdueList
+        .map(u => `• ${u.product}：超出期限 ${u.overdueDays} 天`)
+        .join('\n');
+
+      const confirmed = await new Promise<boolean>((resolve) => {
+        Modal.confirm({
+          title: '排班超出完成期限预警',
+          icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
+          content: (
+            <div>
+              <p>以下需求的排班日期已超出完成期限：</p>
+              <pre style={{ whiteSpace: 'pre-wrap', background: '#fffbe6', padding: 8, borderRadius: 4, fontSize: 13 }}>
+                {overdueInfo}
+              </pre>
+              <p style={{ marginTop: 8, color: '#666' }}>是否仍要保存排班方案？</p>
+            </div>
+          ),
+          okText: '继续保存',
+          cancelText: '取消',
+          onOk: () => resolve(true),
+          onCancel: () => resolve(false),
+        });
+      });
+
+      if (!confirmed) {
+        loadingMsg();
+        message.info('已取消排班');
+        return;
+      }
+    }
 
     try {
       await persistRecommendation(newSchedules, activeStaffs);
@@ -1563,7 +1679,7 @@ const ScheduleWorkbench: React.FC = () => {
         <div style={{ fontWeight: 500, marginBottom: 8 }}>选择待排期需求（{selectedDemandIds.size} 个已选）</div>
         {renderDemandSelectionList()}
         <div style={{ marginTop: 16, color: '#666', fontSize: 13 }}>
-          将持续分配（最长90天）直到满足全部需求人力。已发布排班不受影响，新排班为草稿需手动发布。
+          将持续分配（最长90天）直到满足全部需求人力。若排班日期超出需求完成期限，将弹出预警提示。已发布排班不受影响，新排班为草稿需手动发布。
         </div>
       </Modal>
 
