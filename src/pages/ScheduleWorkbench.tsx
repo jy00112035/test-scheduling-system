@@ -913,7 +913,7 @@ const ScheduleWorkbench: React.FC = () => {
     }
 
     if (schedule.published) {
-      const tempId = -(Date.now() + Math.random());
+      const tempId = -(Date.now() + Math.floor(Math.random() * 1000));
       const newSchedule: ScheduleItem = {
         id: tempId, staffId: targetStaff.id, demandId: schedule.demandId,
         date: targetDate, percentage: transferPercentage, product: schedule.product,
@@ -1059,7 +1059,7 @@ const ScheduleWorkbench: React.FC = () => {
     setEditLoading(true);
 
     if (editingSchedule.published) {
-      const tempId = -(Date.now() + Math.random());
+      const tempId = -(Date.now() + Math.floor(Math.random() * 1000));
       setSchedules(prev => [
         ...prev.filter(s => s.id !== editingSchedule.id),
         {
