@@ -24,6 +24,7 @@ interface WorkbenchSummaryBarProps {
   onConflictCheck: () => void;
   onClearAllDrafts: () => void;
   onHighRiskClick?: () => void;
+  onGapClick?: () => void;
 }
 
 const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
@@ -34,8 +35,10 @@ const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
   onConflictCheck,
   onClearAllDrafts,
   onHighRiskClick,
+  onGapClick,
 }) => {
   const [highRiskHovered, setHighRiskHovered] = useState(false);
+  const [gapHovered, setGapHovered] = useState(false);
 
   return (
     <Card style={{ marginBottom: 16 }} bodyStyle={{ padding: '12px 16px' }}>
@@ -99,13 +102,28 @@ const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
           </Tooltip>
         </Col>
         <Col>
-          <Tooltip title="当前批次预计无法满足的人天总数">
-            <Statistic
-              title="预计缺口"
-              value={metrics.estimatedGapDays}
-              suffix="人天"
-              valueStyle={{ fontSize: 20, color: metrics.estimatedGapDays > 0 ? '#ff4d4f' : '#52c41a' }}
-            />
+          <Tooltip title="点击查看缺口详情">
+            <div
+              onClick={onGapClick}
+              onMouseEnter={() => setGapHovered(true)}
+              onMouseLeave={() => setGapHovered(false)}
+              style={{
+                cursor: onGapClick ? 'pointer' : 'default',
+                borderRadius: 8,
+                padding: '4px 8px',
+                margin: '-4px -8px',
+                transition: 'background 0.25s ease, box-shadow 0.25s ease',
+                background: gapHovered ? 'rgba(255, 77, 79, 0.06)' : 'transparent',
+                boxShadow: gapHovered ? 'inset 0 0 0 1px rgba(255, 77, 79, 0.15)' : 'none',
+              }}
+            >
+              <Statistic
+                title="预计缺口"
+                value={metrics.estimatedGapDays}
+                suffix="人天"
+                valueStyle={{ fontSize: 20, color: metrics.estimatedGapDays > 0 ? '#ff4d4f' : '#52c41a' }}
+              />
+            </div>
           </Tooltip>
         </Col>
         <Col>
