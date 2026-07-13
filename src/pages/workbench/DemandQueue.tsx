@@ -214,9 +214,6 @@ const DemandQueue: React.FC<DemandQueueProps> = ({
             {demand.confidential && (
               <Tag color="red" style={{ margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 3px' }}>保密</Tag>
             )}
-            {hasChanges && (
-              <Tag color="processing" style={{ margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 3px' }}>待提交</Tag>
-            )}
             <Button
               size="small"
               type="link"
