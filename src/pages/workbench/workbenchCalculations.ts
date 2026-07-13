@@ -301,9 +301,9 @@ export function calculateBatchMetrics(
   // 草稿排班数量
   const draftCount = schedules.filter(s => !s.published).length;
 
-  // 可发布需求：已选 + 草稿已生成 + 无冲突 + 已满足
-  const selectedDemands = demands.filter(d => selectedDemandIds.has(d.id));
-  const publishableCount = selectedDemands.filter(d =>
+  // 可发布需求：有草稿排班 + 无冲突 + 已满足（不依赖 selectedDemandIds，覆盖手动拖动场景）
+  const publishableCount = demands.filter(d =>
+    schedules.some(s => s.demandId === d.id && !s.published) &&
     !unfulfilledDemands.has(d.id) &&
     !conflictDetails.some(c =>
       schedules.some(s => s.demandId === d.id && s.staffId === c.staffId && s.date === c.date)

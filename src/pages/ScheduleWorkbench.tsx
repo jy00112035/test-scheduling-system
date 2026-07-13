@@ -840,7 +840,7 @@ const ScheduleWorkbench: React.FC = () => {
 
   const handlePublishBatch = () => {
     const publishableDemands = demands.filter(d =>
-      selectedDemandIds.has(d.id) && !unfulfilledDemands.has(d.id)
+      schedules.some(s => s.demandId === d.id && !s.published) && !unfulfilledDemands.has(d.id)
     );
     if (publishableDemands.length === 0) {
       message.warning('本批没有可发布的需求');
