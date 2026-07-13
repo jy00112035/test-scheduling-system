@@ -295,10 +295,22 @@ export function calculateBatchMetrics(
   const pendingDemands = filterPendingDemands(demands, schedules, staffIds, []);
   const sortedByRisk = sortDemandsByRisk(pendingDemands, schedules, staffIds, priorityOptions);
 
-  // 高风险：风险分排序前 20% 或已过期的需求
+  // 高风险：风险分排序前 20%、已过期需求、排布超期需求（去重）
   const highRiskThreshold = Math.max(1, Math.ceil(sortedByRisk.length * 0.2));
-  const highRiskDemands = sortedByRisk.slice(0, highRiskThreshold).length +
-    pendingDemands.filter(d => dayjs(d.endDate).isBefore(dayjs(), 'day')).length;
+  const highRiskSet = new Set<number>();
+  sortedByRisk.slice(0, highRiskThreshold).forEach(d => highRiskSet.add(d.id));
+  pendingDemands.filter(d => dayjs(d.endDate).isBefore(dayjs(), 'day')).forEach(d => highRiskSet.add(d.id));
+  // 排布超期：已有排班但排班日期超出需求完成期限
+  for (const demand of demands) {
+    if (demand.status === 'completed' || highRiskSet.has(demand.id)) continue;
+    const hasOverdueSchedule = schedules.some(s =>
+      s.demandId === demand.id &&
+      staffIds.includes(s.staffId) &&
+      dayjs(s.date).isAfter(dayjs(demand.endDate), 'day')
+    );
+    if (hasOverdueSchedule) highRiskSet.add(demand.id);
+  }
+  const highRiskDemands = highRiskSet.size;
 
   // 草稿排班数量
   const draftCount = schedules.filter(s => !s.published).length;
