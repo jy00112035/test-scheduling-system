@@ -39,6 +39,15 @@ const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
 
   return (
     <Card style={{ marginBottom: 16 }} bodyStyle={{ padding: '12px 16px' }}>
+      <style>{`
+        @keyframes highRiskPulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.7; transform: scale(1.15); }
+        }
+        .high-risk-icon-pulse {
+          animation: highRiskPulse 0.8s ease-in-out infinite;
+        }
+      `}</style>
       {/* 指标行 */}
       <Row gutter={16} style={{ marginBottom: 12 }}>
         <Col>
@@ -62,15 +71,19 @@ const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
                 borderRadius: 8,
                 padding: '4px 8px',
                 margin: '-4px -8px',
-                transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-                transform: highRiskHovered ? 'scale(1.08)' : 'scale(1)',
-                boxShadow: highRiskHovered ? '0 4px 12px rgba(255, 77, 79, 0.25)' : 'none',
+                transition: 'background 0.25s ease, box-shadow 0.25s ease',
+                background: highRiskHovered ? 'rgba(255, 77, 79, 0.06)' : 'transparent',
+                boxShadow: highRiskHovered ? 'inset 0 0 0 1px rgba(255, 77, 79, 0.15)' : 'none',
               }}
             >
               <Statistic
                 title="高风险"
                 value={metrics.highRiskDemands}
-                prefix={<WarningOutlined />}
+                prefix={
+                  <WarningOutlined
+                    className={highRiskHovered ? 'high-risk-icon-pulse' : ''}
+                  />
+                }
                 valueStyle={{ fontSize: 20, color: metrics.highRiskDemands > 0 ? '#ff4d4f' : '#52c41a' }}
               />
             </div>
