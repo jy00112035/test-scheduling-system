@@ -1438,9 +1438,7 @@ const ScheduleWorkbench: React.FC = () => {
             totalPercent: c.totalPercent,
             maxCapacityPercent: c.maxCapacityPercent,
           }))}
-          unfulfilledDetails={unfulfilledDetails}
           onDismissConflicts={() => {}}
-          onDismissUnfulfilled={() => setUnfulfilledDetails([])}
         />
       </div>
 
