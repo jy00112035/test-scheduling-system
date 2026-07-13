@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Button, Tag, Space, Modal, message, InputNumber, Descriptions, Divider,
-  DatePicker, Checkbox,
+  DatePicker, Checkbox, Card,
 } from 'antd';
 import { ExclamationCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -33,6 +33,7 @@ import {
   detectConflicts,
   calculateBatchMetrics,
   sortDemandsByRisk,
+  getHighRiskDemandDetails,
   saveDraftToLocalStorage,
   loadDraftFromLocalStorage,
   clearDraftFromLocalStorage,
@@ -105,6 +106,9 @@ const ScheduleWorkbench: React.FC = () => {
   const [selectedDemandIds, setSelectedDemandIds] = useState<Set<number>>(new Set());
   const [unfulfilledDemands, setUnfulfilledDemands] = useState<Set<number>>(new Set());
   const [unfulfilledDetails, setUnfulfilledDetails] = useState<UnfulfilledDetail[]>([]);
+
+  // 风险详情弹窗
+  const [riskModalOpen, setRiskModalOpen] = useState(false);
 
   // 优先级编辑
   const [editingPriorityId, setEditingPriorityId] = useState<number | null>(null);
@@ -245,6 +249,10 @@ const ScheduleWorkbench: React.FC = () => {
     unfulfilledDemands, conflictDetails, unfulfilledDetails]);
 
   const hasDraftSchedules = schedules.some(s => !s.published);
+
+  const highRiskDetails = useMemo(() => {
+    return getHighRiskDemandDetails(demands, schedules, staffIds, priorityOptions);
+  }, [demands, schedules, staffIds, priorityOptions]);
 
   // ---- 每日状态操作 ----
   const handleStatusChange = async (staff: StaffItem, date: string, newStatus: string, percentage?: number) => {
@@ -1345,6 +1353,7 @@ const ScheduleWorkbench: React.FC = () => {
           onFullAllocateRecommend={handleFullAllocateRecommend}
           onConflictCheck={handleConflictCheck}
           onClearAllDrafts={handleClearAllUnpublished}
+          onHighRiskClick={() => setRiskModalOpen(true)}
         />
         <IssuePublishPanel
           conflicts={conflictDetails.map(c => ({
@@ -1673,6 +1682,76 @@ const ScheduleWorkbench: React.FC = () => {
         <div style={{ marginTop: 16, color: '#666', fontSize: 13 }}>
           将持续分配（最长90天）直到满足全部需求人力。若排班日期超出需求完成期限，将弹出预警提示。已发布排班不受影响，新排班为草稿需手动发布。
         </div>
+      </Modal>
+
+      {/* 风险详情弹窗 */}
+      <Modal
+        title={
+          <span>
+            <ExclamationCircleOutlined style={{ color: '#ff4d4f', marginRight: 8 }} />
+            高风险需求详情（{highRiskDetails.length} 个）
+          </span>
+        }
+        open={riskModalOpen}
+        onCancel={() => setRiskModalOpen(false)}
+        footer={null}
+        width={800}
+      >
+        {highRiskDetails.length === 0 ? (
+          <div style={{ textAlign: 'center', color: '#999', padding: 24 }}>暂无高风险需求</div>
+        ) : (
+          <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+            {highRiskDetails.map((item) => (
+              <Card
+                key={item.demandId}
+                size="small"
+                style={{ marginBottom: 12 }}
+                title={
+                  <span>
+                    {item.product}
+                    {item.confidential && <Tag color="red" style={{ marginLeft: 8 }}>保密</Tag>}
+                  </span>
+                }
+                extra={
+                  <span style={{ fontSize: 13, color: '#ff4d4f', fontWeight: 600 }}>
+                    风险分：{item.riskScore}
+                  </span>
+                }
+              >
+                <Descriptions column={3} size="small" bordered>
+                  <Descriptions.Item label="版本类型">
+                    <Tag color="blue">{item.versionType}</Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="优先级">
+                    {item.priority ? (
+                      <Tag color={getPriorityColor(item.priority, priorityOptions)}>{item.priority}</Tag>
+                    ) : '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="完成期限">
+                    <span style={{ color: item.daysToEnd <= 0 ? '#ff4d4f' : item.daysToEnd <= 3 ? '#faad14' : undefined }}>
+                      {dayjs(item.endDate).format('YYYY-MM-DD')}
+                      {item.daysToEnd <= 0
+                        ? `（已过期 ${Math.abs(item.daysToEnd)} 天）`
+                        : `（剩余 ${item.daysToEnd} 天）`}
+                    </span>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="总人力">{item.manpowerDemand.toFixed(1)} 人/天</Descriptions.Item>
+                  <Descriptions.Item label="已排人力">{item.allocatedDays.toFixed(1)} 人/天</Descriptions.Item>
+                  <Descriptions.Item label="剩余缺口">
+                    <span style={{ color: item.remainingDays > 0 ? '#ff4d4f' : '#52c41a', fontWeight: 600 }}>
+                      {item.remainingDays.toFixed(1)} 人/天
+                    </span>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="风险因素" span={3}>
+                    {item.riskFactors.map((factor, idx) => (
+                      <Tag key={idx} color="error" style={{ marginBottom: 4 }}>{factor}</Tag>
+                    ))}
+                  </Descriptions.Item>
+                </Descriptions>
+              </Card>
+            ))}
+          </div>
+        )}
       </Modal>
 
       {/* 需求详情弹窗 */}

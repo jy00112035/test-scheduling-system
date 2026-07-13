@@ -85,6 +85,22 @@ export interface ConflictDetail {
 
 // ---- 批次指标（顶部总览条） ----
 
+export interface HighRiskDemandDetail {
+  demandId: number;
+  product: string;
+  versionType: string;
+  startDate: string;
+  endDate: string;
+  manpowerDemand: number;
+  allocatedDays: number;
+  remainingDays: number;
+  daysToEnd: number;
+  priority: string;
+  confidential: boolean;
+  riskScore: number;
+  riskFactors: string[];
+}
+
 export interface BatchMetrics {
   totalPendingDemands: number;
   highRiskDemands: number;

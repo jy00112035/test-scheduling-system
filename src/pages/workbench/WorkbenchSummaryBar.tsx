@@ -23,6 +23,7 @@ interface WorkbenchSummaryBarProps {
   onFullAllocateRecommend: () => void;
   onConflictCheck: () => void;
   onClearAllDrafts: () => void;
+  onHighRiskClick?: () => void;
 }
 
 const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
@@ -32,6 +33,7 @@ const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
   onFullAllocateRecommend,
   onConflictCheck,
   onClearAllDrafts,
+  onHighRiskClick,
 }) => {
   return (
     <Card style={{ marginBottom: 16 }} bodyStyle={{ padding: '12px 16px' }}>
@@ -48,13 +50,18 @@ const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
           </Tooltip>
         </Col>
         <Col>
-          <Tooltip title="截止日期临近或已过期的需求">
-            <Statistic
-              title="高风险"
-              value={metrics.highRiskDemands}
-              prefix={<WarningOutlined />}
-              valueStyle={{ fontSize: 20, color: metrics.highRiskDemands > 0 ? '#ff4d4f' : '#52c41a' }}
-            />
+          <Tooltip title="点击查看高风险需求详情">
+            <div
+              onClick={onHighRiskClick}
+              style={{ cursor: onHighRiskClick ? 'pointer' : 'default' }}
+            >
+              <Statistic
+                title="高风险"
+                value={metrics.highRiskDemands}
+                prefix={<WarningOutlined />}
+                valueStyle={{ fontSize: 20, color: metrics.highRiskDemands > 0 ? '#ff4d4f' : '#52c41a' }}
+              />
+            </div>
           </Tooltip>
         </Col>
         <Col>

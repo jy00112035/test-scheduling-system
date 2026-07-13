@@ -4,7 +4,7 @@
 // ============================================================
 
 import dayjs from 'dayjs';
-import type { DemandItem, ScheduleItem, StaffItem, BatchMetrics, ConflictDetail, DailyStatusEntry, UnfulfilledDetail } from './workbenchTypes';
+import type { DemandItem, ScheduleItem, StaffItem, BatchMetrics, ConflictDetail, DailyStatusEntry, UnfulfilledDetail, HighRiskDemandDetail } from './workbenchTypes';
 
 // ---- 常量 ----
 
@@ -323,6 +323,60 @@ export function calculateBatchMetrics(
     conflictCount: conflictDetails.length,
     unfulfilledCount: unfulfilledDetails.length,
   };
+}
+
+// ---- 高风险需求详情 ----
+
+export function getHighRiskDemandDetails(
+  demands: DemandItem[],
+  schedules: ScheduleItem[],
+  staffIds: number[],
+  priorityOptions: string[]
+): HighRiskDemandDetail[] {
+  const pendingDemands = filterPendingDemands(demands, schedules, staffIds, []);
+  const sortedByRisk = sortDemandsByRisk(pendingDemands, schedules, staffIds, priorityOptions);
+  const highRiskThreshold = Math.max(1, Math.ceil(sortedByRisk.length * 0.2));
+  const topRiskIds = new Set(sortedByRisk.slice(0, highRiskThreshold).map(d => d.id));
+
+  const overdueDemands = pendingDemands.filter(d => dayjs(d.endDate).isBefore(dayjs(), 'day'));
+
+  const highRiskSet = new Set<number>();
+  topRiskIds.forEach(id => highRiskSet.add(id));
+  overdueDemands.forEach(d => highRiskSet.add(d.id));
+
+  return pendingDemands
+    .filter(d => highRiskSet.has(d.id))
+    .map(d => {
+      const allocated = getDemandAllocatedDays(schedules, d.id, staffIds, true);
+      const remaining = Math.max(0, Number(d.manpowerDemand || 0) - allocated);
+      const daysToEnd = dayjs(d.endDate).diff(dayjs(), 'day');
+      const score = calculateRiskScore(d, schedules, staffIds, priorityOptions);
+
+      const factors: string[] = [];
+      if (daysToEnd <= 0) factors.push('已过完成期限');
+      else if (daysToEnd <= 3) factors.push(`距完成期限仅 ${daysToEnd} 天`);
+      else if (daysToEnd <= 7) factors.push(`完成期限临近（${daysToEnd} 天）`);
+      if (remaining > 0) factors.push(`剩余人力缺口 ${remaining.toFixed(1)} 人/天`);
+      if (d.priority === '高') factors.push('高优先级需求');
+      if (d.confidential) factors.push('保密项目');
+
+      return {
+        demandId: d.id,
+        product: d.product,
+        versionType: d.versionType,
+        startDate: d.startDate,
+        endDate: d.endDate,
+        manpowerDemand: Number(d.manpowerDemand || 0),
+        allocatedDays: Math.round(allocated * 10) / 10,
+        remainingDays: Math.round(remaining * 10) / 10,
+        daysToEnd,
+        priority: d.priority || '',
+        confidential: d.confidential || false,
+        riskScore: score,
+        riskFactors: factors,
+      };
+    })
+    .sort((a, b) => b.riskScore - a.riskScore);
 }
 
 // ---- 人员匹配分计算（Phase 1 仅占位，Phase 2 完善） ----
