@@ -335,19 +335,36 @@ export function getHighRiskDemandDetails(
   staffIds: number[],
   priorityOptions: string[]
 ): HighRiskDemandDetail[] {
+  // 1. 待排期需求中按风险分排序取前 20%
   const pendingDemands = filterPendingDemands(demands, schedules, staffIds, []);
   const sortedByRisk = sortDemandsByRisk(pendingDemands, schedules, staffIds, priorityOptions);
   const highRiskThreshold = Math.max(1, Math.ceil(sortedByRisk.length * 0.2));
   const topRiskIds = new Set(sortedByRisk.slice(0, highRiskThreshold).map(d => d.id));
 
+  // 2. 已过完成期限的待排期需求
   const overdueDemands = pendingDemands.filter(d => dayjs(d.endDate).isBefore(dayjs(), 'day'));
 
   const highRiskSet = new Set<number>();
   topRiskIds.forEach(id => highRiskSet.add(id));
   overdueDemands.forEach(d => highRiskSet.add(d.id));
 
-  return pendingDemands
-    .filter(d => highRiskSet.has(d.id))
+  // 3. 排布超期：已有排班但排班日期超出需求完成期限（含已关闭之外的所有需求）
+  for (const demand of demands) {
+    if (demand.status === 'completed') continue;
+    if (highRiskSet.has(demand.id)) continue; // 已命中跳过
+    const hasOverdueSchedule = schedules.some(s =>
+      s.demandId === demand.id &&
+      staffIds.includes(s.staffId) &&
+      dayjs(s.date).isAfter(dayjs(demand.endDate), 'day')
+    );
+    if (hasOverdueSchedule) {
+      highRiskSet.add(demand.id);
+    }
+  }
+
+  // 从全部需求中提取高风险项（不仅限于 pendingDemands）
+  return demands
+    .filter(d => highRiskSet.has(d.id) && d.status !== 'completed')
     .map(d => {
       const allocated = getDemandAllocatedDays(schedules, d.id, staffIds, true);
       const remaining = Math.max(0, Number(d.manpowerDemand || 0) - allocated);
@@ -361,6 +378,19 @@ export function getHighRiskDemandDetails(
       if (remaining > 0) factors.push(`剩余人力缺口 ${remaining.toFixed(1)} 人/天`);
       if (d.priority === '高') factors.push('高优先级需求');
       if (d.confidential) factors.push('保密项目');
+
+      // 检测排班是否超出完成期限
+      const overdueSchedules = schedules.filter(s =>
+        s.demandId === d.id &&
+        staffIds.includes(s.staffId) &&
+        dayjs(s.date).isAfter(dayjs(d.endDate), 'day')
+      );
+      if (overdueSchedules.length > 0) {
+        const maxOverdueDate = overdueSchedules.reduce((max, s) =>
+          dayjs(s.date).isAfter(dayjs(max)) ? s.date : max, overdueSchedules[0].date
+        );
+        factors.push(`排班超出完成期限（最晚至 ${maxOverdueDate}）`);
+      }
 
       return {
         demandId: d.id,
