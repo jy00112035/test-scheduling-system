@@ -110,6 +110,9 @@ const ScheduleWorkbench: React.FC = () => {
   // 风险详情弹窗
   const [riskModalOpen, setRiskModalOpen] = useState(false);
 
+  // 缺口详情弹窗
+  const [gapModalOpen, setGapModalOpen] = useState(false);
+
   // 优先级编辑
   const [editingPriorityId, setEditingPriorityId] = useState<number | null>(null);
   const [priorityOptions, setPriorityOptions] = useState<string[]>([]);
@@ -1354,6 +1357,7 @@ const ScheduleWorkbench: React.FC = () => {
           onConflictCheck={handleConflictCheck}
           onClearAllDrafts={handleClearAllUnpublished}
           onHighRiskClick={() => setRiskModalOpen(true)}
+          onGapClick={() => setGapModalOpen(true)}
         />
         <IssuePublishPanel
           conflicts={conflictDetails.map(c => ({
@@ -1747,6 +1751,68 @@ const ScheduleWorkbench: React.FC = () => {
                       <Tag key={idx} color="error" style={{ marginBottom: 4 }}>{factor}</Tag>
                     ))}
                   </Descriptions.Item>
+                </Descriptions>
+              </Card>
+            ))}
+          </div>
+        )}
+      </Modal>
+
+      {/* 缺口详情弹窗 */}
+      <Modal
+        title={
+          <span>
+            <ExclamationCircleOutlined style={{ color: '#ff4d4f', marginRight: 8 }} />
+            预计缺口详情（{unfulfilledDetails.length} 个项目）
+          </span>
+        }
+        open={gapModalOpen}
+        onCancel={() => setGapModalOpen(false)}
+        footer={null}
+        width={800}
+      >
+        {unfulfilledDetails.length === 0 ? (
+          <div style={{ textAlign: 'center', color: '#999', padding: 24 }}>暂无预计缺口</div>
+        ) : (
+          <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+            {unfulfilledDetails.map((item, idx) => (
+              <Card
+                key={idx}
+                size="small"
+                style={{ marginBottom: 12 }}
+                title={
+                  <span>
+                    {item.product}
+                    <Tag color="error" style={{ marginLeft: 8 }}>缺口 {item.shortage} 人/天</Tag>
+                    {item.overdueDays && item.overdueDays > 0 && (
+                      <Tag color="volcano" style={{ marginLeft: 4 }}>超期 {item.overdueDays} 天</Tag>
+                    )}
+                  </span>
+                }
+              >
+                <Descriptions column={2} size="small" bordered>
+                  {item.details.length > 0 && item.details.map((d, i) => (
+                    <Descriptions.Item key={i} label={`${d.testType} 缺口`}>
+                      <span style={{ color: '#ff4d4f', fontWeight: 600 }}>{d.shortage} 人/天</span>
+                    </Descriptions.Item>
+                  ))}
+                  {item.details.length === 0 && (
+                    <Descriptions.Item label="缺口" span={2}>
+                      <span style={{ color: '#ff4d4f', fontWeight: 600 }}>{item.shortage} 人/天（人力已满足但排班超期）</span>
+                    </Descriptions.Item>
+                  )}
+                  <Descriptions.Item label="缺口原因" span={2}>
+                    {item.reasons.map((reason, i) => (
+                      <Tag key={i} color="warning" style={{ marginBottom: 4 }}>{reason}</Tag>
+                    ))}
+                  </Descriptions.Item>
+                  {item.overdueDates && item.overdueDates.length > 0 && (
+                    <Descriptions.Item label="超期日期" span={2}>
+                      {item.overdueDates.map((d, i) => (
+                        <Tag key={i} color="volcano" style={{ marginBottom: 4 }}>{d}</Tag>
+                      ))}
+                    </Descriptions.Item>
+                  )}
                 </Descriptions>
               </Card>
             ))}
