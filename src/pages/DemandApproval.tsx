@@ -271,6 +271,7 @@ const DemandApproval: React.FC = () => {
         loading={loading}
         bordered
         sticky={{ offsetHeader: 48 }}
+        scroll={{ x: 1600 }}
         rowSelection={{
           selectedRowKeys,
           onChange: (keys) => setSelectedRowKeys(keys),
