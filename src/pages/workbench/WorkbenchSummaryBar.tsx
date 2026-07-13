@@ -3,7 +3,7 @@
 // Phase 1: 展示指标 + 保留现有操作按钮
 // ============================================================
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, Button, Space, Statistic, Row, Col, Tooltip } from 'antd';
 import {
   CalendarOutlined,
@@ -35,6 +35,8 @@ const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
   onClearAllDrafts,
   onHighRiskClick,
 }) => {
+  const [highRiskHovered, setHighRiskHovered] = useState(false);
+
   return (
     <Card style={{ marginBottom: 16 }} bodyStyle={{ padding: '12px 16px' }}>
       {/* 指标行 */}
@@ -53,7 +55,17 @@ const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
           <Tooltip title="点击查看高风险需求详情">
             <div
               onClick={onHighRiskClick}
-              style={{ cursor: onHighRiskClick ? 'pointer' : 'default' }}
+              onMouseEnter={() => setHighRiskHovered(true)}
+              onMouseLeave={() => setHighRiskHovered(false)}
+              style={{
+                cursor: onHighRiskClick ? 'pointer' : 'default',
+                borderRadius: 8,
+                padding: '4px 8px',
+                margin: '-4px -8px',
+                transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                transform: highRiskHovered ? 'scale(1.08)' : 'scale(1)',
+                boxShadow: highRiskHovered ? '0 4px 12px rgba(255, 77, 79, 0.25)' : 'none',
+              }}
             >
               <Statistic
                 title="高风险"
