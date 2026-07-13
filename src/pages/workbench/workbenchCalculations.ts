@@ -196,8 +196,11 @@ export function filterPendingDemands(
   filterTestTypes: string[]
 ): DemandItem[] {
   return demands.filter(d => {
-    const publishedDays = getDemandAllocatedDays(schedules, d.id, staffIds, true);
-    const hasRemaining = publishedDays < Number(d.manpowerDemand || 0);
+    // 需求没有任何排班记录（草稿或已发布）才算待排期
+    const hasAnySchedule = schedules.some(s =>
+      s.demandId === d.id && staffIds.includes(s.staffId)
+    );
+    const isUnscheduled = !hasAnySchedule;
 
     let matchesTestType = true;
     if (filterTestTypes.length > 0) {
@@ -206,7 +209,7 @@ export function filterPendingDemands(
       );
     }
 
-    return hasRemaining && matchesTestType;
+    return isUnscheduled && matchesTestType;
   });
 }
 
@@ -217,12 +220,11 @@ export function filterAssignedDemands(
   filterTestTypes: string[]
 ): DemandItem[] {
   return demands.filter(d => {
-    const demandSchedules = schedules.filter(s =>
+    // 有任何排班记录（草稿或已发布）且需求未关闭，则属于已分配
+    const hasAnySchedule = schedules.some(s =>
       s.demandId === d.id && staffIds.includes(s.staffId)
     );
-    const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
-    const isPublished = demandSchedules.length > 0 && demandSchedules.every(s => s.published);
-    const notExpired = dayjs().isBefore(dayjs(d.endDate).add(1, 'day'), 'day');
+    const isNotClosed = d.status !== 'completed';
 
     let matchesTestType = true;
     if (filterTestTypes.length > 0) {
@@ -231,7 +233,7 @@ export function filterAssignedDemands(
       );
     }
 
-    return allocatedDays >= Number(d.manpowerDemand || 0) && isPublished && notExpired && matchesTestType;
+    return hasAnySchedule && isNotClosed && matchesTestType;
   });
 }
 
