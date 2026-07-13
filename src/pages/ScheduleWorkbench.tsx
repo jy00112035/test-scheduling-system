@@ -607,6 +607,13 @@ const ScheduleWorkbench: React.FC = () => {
     setUnfulfilledDemands(unfulfilledSet);
     setUnfulfilledDetails(unfulfilledDetailsList);
 
+    // 剔除不可发布的需求，使"发布本批"按钮准确反映可发布数量
+    setSelectedDemandIds(prev => {
+      const next = new Set(prev);
+      unfulfilledSet.forEach(id => next.delete(id));
+      return next;
+    });
+
     // 超期预警
     const overdueList = unfulfilledDetailsList.filter(u => u.overdueDays && u.overdueDays > 0);
     if (overdueList.length > 0) {
@@ -698,6 +705,13 @@ const ScheduleWorkbench: React.FC = () => {
 
     setUnfulfilledDemands(unfulfilledSet);
     setUnfulfilledDetails(unfulfilledDetailsList);
+
+    // 剔除不可发布的需求，使"发布本批"按钮准确反映可发布数量
+    setSelectedDemandIds(prev => {
+      const next = new Set(prev);
+      unfulfilledSet.forEach(id => next.delete(id));
+      return next;
+    });
 
     // 超期预警
     const overdueList = unfulfilledDetailsList.filter(u => u.overdueDays && u.overdueDays > 0);
@@ -1008,6 +1022,17 @@ const ScheduleWorkbench: React.FC = () => {
       return;
     }
 
+    // 保密权限校验
+    const transferDemand = demands.find(d => d.id === schedule.demandId);
+    if (transferDemand?.confidential && !targetStaff.confidentialClearance) {
+      Modal.warning({
+        title: '无法转移保密需求',
+        content: `${targetStaff.name} 不具备保密权限，无法参与保密项目「${transferDemand.product}」的测试。`,
+      });
+      setDraggedSchedule(null);
+      return;
+    }
+
     const coeff = targetStaff.currentCoefficient || 1;
     const statusPct = getDailyStatusPercentage(dailyStatuses, targetStaff.id, targetDate);
     const status = getDailyStatus(dailyStatuses, targetStaff.id, targetDate);
@@ -1075,6 +1100,15 @@ const ScheduleWorkbench: React.FC = () => {
       return;
     }
 
+    // 保密权限校验
+    if (selectedDemand.confidential && !staff.confidentialClearance) {
+      Modal.warning({
+        title: '无法分配保密需求',
+        content: `${staff.name} 不具备保密权限，无法参与保密项目「${selectedDemand.product}」的测试。`,
+      });
+      return;
+    }
+
     const demandSchedules = schedules.filter(s => s.demandId === selectedDemand.id);
     const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
     if (allocatedDays >= Number(selectedDemand.manpowerDemand || 0)) {
@@ -1095,6 +1129,15 @@ const ScheduleWorkbench: React.FC = () => {
   // ---- 分配确认 ----
   const handleAssignConfirm = async () => {
     if (!assignTarget || !selectedDemand) return;
+
+    // 保密权限校验
+    if (selectedDemand.confidential && !assignTarget.staff.confidentialClearance) {
+      Modal.warning({
+        title: '无法分配保密需求',
+        content: `${assignTarget.staff.name} 不具备保密权限，无法参与保密项目「${selectedDemand.product}」的测试。`,
+      });
+      return;
+    }
 
     const demandSchedules = schedules.filter(s => s.demandId === selectedDemand.id);
     const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
