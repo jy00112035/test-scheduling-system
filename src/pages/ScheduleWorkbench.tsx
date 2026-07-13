@@ -573,7 +573,7 @@ const ScheduleWorkbench: React.FC = () => {
       testManager: s.testManager,
       versionType: s.versionType,
       version: s.version,
-      published: s.published,
+      published: s.published ?? false,
     }));
 
     setSchedules([...preservedSchedules, ...mappedSchedules]);
