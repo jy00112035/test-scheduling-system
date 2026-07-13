@@ -213,6 +213,7 @@ const ScheduleWorkbench: React.FC = () => {
         versionType: s.versionType,
         demandId: s.demandId,
         testManager: s.testManager,
+        published: s.published ?? false,
       })));
       setStaffs(staffData);
 
