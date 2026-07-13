@@ -137,8 +137,8 @@ const DemandApproval: React.FC = () => {
     setEditLoading(true);
     try {
       await api.approveDemandWithChanges(editingDemand.id, {
-        startDate: editDateRange[0].format('YYYY-MM-DD'),
-        endDate: editDateRange[1].format('YYYY-MM-DD'),
+        startDate: editDateRange[0].format('YYYY-MM-DDTHH:mm:ss'),
+        endDate: editDateRange[1].format('YYYY-MM-DDTHH:mm:ss'),
         manpowerDetails,
         priority: editPriority,
       });
