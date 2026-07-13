@@ -269,7 +269,7 @@ const AppContent: React.FC = () => {
           {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
         </div>
       </Sider>
-      <Layout>
+      <Layout style={{ overflow: 'hidden', minHeight: 0 }}>
         <Header style={{
           background: '#fff',
           padding: '0 24px',

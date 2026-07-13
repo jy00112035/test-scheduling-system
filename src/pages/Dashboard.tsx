@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Row, Col, Card, Statistic, Table } from 'antd';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Row, Col, Card, Statistic, Table, DatePicker } from 'antd';
 import {
   LineChart,
   Line,
@@ -21,17 +21,17 @@ const COLORS = ['#1890ff', '#52c41a', '#ff4d4f', '#faad14', '#722ed1', '#13c2c2'
 
 const dayLabels = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
+const { RangePicker } = DatePicker;
+
 const Dashboard: React.FC = () => {
   const [stats, setStats] = useState({
     parallelProducts: 0,
     totalStaff: 0,
     workingStaff: 0,
     idleStaff: 0,
-    utilizationRate: 0,
     versionTypeStats: [] as Array<{ id: number; name: string; avgManpower: number; count: number }>,
   });
   const [trendData, setTrendData] = useState<Array<{ date: string; count: number }>>([]);
-  const [utilizationData, setUtilizationData] = useState<Array<{ date: string; rate: number }>>([]);
   const [pieData, setPieData] = useState<Array<{ name: string; value: number }>>([]);
   const [demandCount, setDemandCount] = useState(0);
   const [testTypeStats, setTestTypeStats] = useState<Array<{
@@ -43,6 +43,19 @@ const Dashboard: React.FC = () => {
     remark: string;
   }>>([]);
   const [loading, setLoading] = useState(true);
+
+  // --- 并行测试趋势日期段 ---
+  const [trendDateRange, setTrendDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs().subtract(6, 'day'), dayjs()]);
+  const [cachedDemands, setCachedDemands] = useState<any[]>([]);
+  const [cachedSchedules, setCachedSchedules] = useState<any[]>([]);
+
+  // --- 利用率日期段 ---
+  const [utilDateRange, setUtilDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs(), dayjs()]);
+  const [rangeUtilData, setRangeUtilData] = useState<Array<{ date: string; rate: number }>>([]);
+  const [rangeLoading, setRangeLoading] = useState(false);
+  const [cachedActiveStaff, setCachedActiveStaff] = useState<any[]>([]);
+  const [cachedDailyStatuses, setCachedDailyStatuses] = useState<any[]>([]);
+  const [cachedExcludedTestTypes, setCachedExcludedTestTypes] = useState<string[]>([]);
 
   useEffect(() => {
     fetchData();
@@ -68,12 +81,52 @@ const Dashboard: React.FC = () => {
       const demandMap = new Map<number, any>();
       demands.forEach((d: any) => demandMap.set(d.id, d));
 
-      // Today's working/idle staff from schedules
+      // Today's schedules
       const todaySchedules = schedules.filter((s: any) => s.date === todayStr);
       const workingStaffIds = new Set(todaySchedules.map((s: any) => s.staffId));
       const workingStaff = workingStaffIds.size;
-      const idleStaff = Math.max(0, totalActiveStaff - workingStaff);
-      const utilizationRate = totalActiveStaff > 0 ? workingStaff / totalActiveStaff : 0;
+
+      // Cache for trend recalculation
+      setCachedDemands(demands);
+      setCachedSchedules(schedules);
+
+      // Cache for utilization recalculation
+      setCachedActiveStaff(activeStaff);
+      setCachedDailyStatuses(dailyStatuses);
+      let excludedTestTypes: string[] = [];
+      try {
+        const saved = localStorage.getItem('schedule_workbench_excludedTestTypes');
+        excludedTestTypes = saved ? JSON.parse(saved) : [];
+      } catch { /* ignore */ }
+      setCachedExcludedTestTypes(excludedTestTypes);
+
+      // Build dailyStatus map
+      const dailyStatusMap = new Map<string, any>();
+      dailyStatuses.forEach((ds: any) => {
+        dailyStatusMap.set(`${ds.staffId}-${ds.date}`, ds);
+      });
+
+      // Filter by excludedTestTypes (same as workbench)
+      const workloadStaffs = excludedTestTypes.length > 0
+        ? activeStaff.filter((s: any) => !s.testType || !excludedTestTypes.includes(s.testType))
+        : activeStaff;
+      const totalWorkload = workloadStaffs.reduce((t: number, s: any) => t + (s.currentCoefficient || 1), 0);
+      const freeWorkload = workloadStaffs.reduce((total: number, s: any) => {
+        const rawMax = (s.currentCoefficient || 1) * 100;
+        const ds = dailyStatusMap.get(`${s.id}-${todayStr}`);
+        const statusFactor = ds && ds.status !== 'AVAILABLE' ? (1 - (ds.percentage ?? 100) / 100) : 1;
+        const maxCap = rawMax * statusFactor;
+        const used = todaySchedules
+          .filter((sch: any) => sch.staffId === s.id)
+          .reduce((sum: number, sch: any) => sum + sch.percentage, 0);
+        const freePct = Math.max(0, maxCap - used);
+        return total + (freePct / 100) * (s.currentCoefficient || 1);
+      }, 0);
+      const utilRate = totalWorkload > 0 ? Math.round(((totalWorkload - freeWorkload) / totalWorkload) * 1000) / 10 : 0;
+      setRangeUtilData([{ date: todayStr, rate: utilRate }]);
+
+      // Idle workload = free workload (filtered by excludedTestTypes), rounded to 0.1
+      const idleStaff = Math.round(freeWorkload * 10) / 10;
 
       // Products with schedules
       const productsWithSchedules = new Set<string>();
@@ -82,7 +135,7 @@ const Dashboard: React.FC = () => {
         if (demand?.product) productsWithSchedules.add(demand.product);
       });
 
-      // Trend: last 7 days
+      // Trend: default 7 days
       const last7Days = Array.from({ length: 7 }, (_, i) => dayjs().subtract(6 - i, 'day'));
       const trend = last7Days.map(date => {
         const dateStr = date.format('YYYY-MM-DD');
@@ -92,15 +145,7 @@ const Dashboard: React.FC = () => {
           const d = demandMap.get(s.demandId);
           if (d?.product) products.add(d.product);
         });
-        return { date: dayLabels[date.day()], count: products.size };
-      });
-
-      const utilization = last7Days.map(date => {
-        const dateStr = date.format('YYYY-MM-DD');
-        const daySchedules = schedules.filter((s: any) => s.date === dateStr);
-        const staffIds = new Set(daySchedules.map((s: any) => s.staffId));
-        const rate = totalActiveStaff > 0 ? Math.round((staffIds.size / totalActiveStaff) * 100) : 0;
-        return { date: dayLabels[date.day()], rate };
+        return { date: dateStr, count: products.size };
       });
 
       // Pie: manpower by version type
@@ -135,11 +180,9 @@ const Dashboard: React.FC = () => {
         totalStaff: totalActiveStaff,
         workingStaff,
         idleStaff,
-        utilizationRate,
         versionTypeStats: vtStats,
       });
       setTrendData(trend);
-      setUtilizationData(utilization);
       setPieData(pie.length > 0 ? pie : [{ name: '暂无数据', value: 1 }]);
       setDemandCount(demands.length);
 
@@ -273,6 +316,96 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  // --- 并行测试趋势日期段重算 ---
+  useEffect(() => {
+    if (cachedDemands.length === 0 && cachedSchedules.length === 0) return;
+    const [start, end] = trendDateRange;
+    const dMap = new Map<number, any>();
+    cachedDemands.forEach((d: any) => dMap.set(d.id, d));
+
+    const days: dayjs.Dayjs[] = [];
+    let cur = start;
+    while (cur.isBefore(end, 'day') || cur.isSame(end, 'day')) {
+      days.push(cur);
+      cur = cur.add(1, 'day');
+    }
+
+    const trend = days.map(d => {
+      const dateStr = d.format('YYYY-MM-DD');
+      const daySch = cachedSchedules.filter((s: any) => s.date === dateStr);
+      const products = new Set<string>();
+      daySch.forEach((s: any) => {
+        const dem = dMap.get(s.demandId);
+        if (dem?.product) products.add(dem.product);
+      });
+      return { date: dateStr, count: products.size };
+    });
+    setTrendData(trend);
+  }, [trendDateRange, cachedDemands, cachedSchedules]);
+
+  // --- 利用率日期段重算 ---
+  const recalcUtilization = useCallback(async () => {
+    if (cachedActiveStaff.length === 0) return;
+    const [start, end] = utilDateRange;
+    const startStr = start.format('YYYY-MM-DD');
+    const endStr = end.format('YYYY-MM-DD');
+
+    // 单日且是今天 → 直接用 fetchData 的结果
+    if (startStr === endStr && startStr === dayjs().format('YYYY-MM-DD')) return;
+
+    setRangeLoading(true);
+    try {
+      const ds = await api.getDailyStatuses(startStr, endStr);
+      const statusMap = new Map<string, any>();
+      ds.forEach((d: any) => statusMap.set(`${d.staffId}-${d.date}`, d));
+
+      const workloadStaffs = cachedExcludedTestTypes.length > 0
+        ? cachedActiveStaff.filter((s: any) => !s.testType || !cachedExcludedTestTypes.includes(s.testType))
+        : cachedActiveStaff;
+      const totalWorkload = workloadStaffs.reduce((t: number, s: any) => t + (s.currentCoefficient || 1), 0);
+
+      const days: dayjs.Dayjs[] = [];
+      let cur = start;
+      while (cur.isBefore(end, 'day') || cur.isSame(end, 'day')) {
+        days.push(cur);
+        cur = cur.add(1, 'day');
+      }
+
+      const result = days.map(d => {
+        const dateStr = d.format('YYYY-MM-DD');
+        const daySch = cachedSchedules.filter((sch: any) => sch.date === dateStr);
+        const freeWorkload = workloadStaffs.reduce((total: number, s: any) => {
+          const rawMax = (s.currentCoefficient || 1) * 100;
+          const status = statusMap.get(`${s.id}-${dateStr}`);
+          const statusFactor = status && status.status !== 'AVAILABLE' ? (1 - (status.percentage ?? 100) / 100) : 1;
+          const maxCap = rawMax * statusFactor;
+          const used = daySch
+            .filter((sch: any) => sch.staffId === s.id)
+            .reduce((sum: number, sch: any) => sum + sch.percentage, 0);
+          const freePct = Math.max(0, maxCap - used);
+          return total + (freePct / 100) * (s.currentCoefficient || 1);
+        }, 0);
+        const rate = totalWorkload > 0 ? Math.round(((totalWorkload - freeWorkload) / totalWorkload) * 1000) / 10 : 0;
+        return { date: dateStr, rate };
+      });
+
+      setRangeUtilData(result);
+    } catch (e) {
+      console.error('利用率日期段计算失败', e);
+    } finally {
+      setRangeLoading(false);
+    }
+  }, [utilDateRange, cachedActiveStaff, cachedSchedules, cachedExcludedTestTypes]);
+
+  useEffect(() => {
+    recalcUtilization();
+  }, [recalcUtilization]);
+
+  // 利用率汇总
+  const avgUtilRate = rangeUtilData.length > 0
+    ? Math.round(rangeUtilData.reduce((s, d) => s + d.rate, 0) / rangeUtilData.length * 10) / 10
+    : 0;
+
   return (
     <div>
       <Row gutter={16} style={{ marginBottom: 24 }}>
@@ -307,8 +440,9 @@ const Dashboard: React.FC = () => {
         <Col span={6}>
           <Card loading={loading}>
             <Statistic
-              title="今日空闲人数"
+              title="今日空闲工作量（人天）"
               value={stats.idleStaff}
+              precision={1}
               valueStyle={{ color: '#faad14' }}
             />
           </Card>
@@ -317,14 +451,62 @@ const Dashboard: React.FC = () => {
 
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={24}>
-          <Card loading={loading}>
-            <Statistic
-              title="人力利用率"
-              value={stats.utilizationRate * 100}
-              suffix="%"
-              precision={1}
-              valueStyle={{ fontSize: '36px' }}
-            />
+          <Card
+            loading={loading}
+            title={
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>人力利用率</span>
+                <RangePicker
+                  size="small"
+                  value={utilDateRange}
+                  onChange={(dates) => {
+                    if (dates && dates[0] && dates[1]) {
+                      setUtilDateRange([dates[0], dates[1]]);
+                    }
+                  }}
+                  allowClear={false}
+                  disabledDate={(d) => d.isAfter(dayjs(), 'day')}
+                />
+              </div>
+            }
+          >
+            {rangeLoading ? (
+              <Statistic title="计算中…" value={0} suffix="%" valueStyle={{ fontSize: '36px', color: '#999' }} />
+            ) : (
+              <Statistic
+                title={rangeUtilData.length > 1 ? `${utilDateRange[0].format('MM/DD')}–${utilDateRange[1].format('MM/DD')} 平均利用率` : '当日利用率'}
+                value={avgUtilRate}
+                suffix="%"
+                precision={1}
+                valueStyle={{ fontSize: '36px' }}
+              />
+            )}
+            {rangeUtilData.length > 1 && !rangeLoading && (
+              <div style={{ marginTop: 16 }}>
+                <ResponsiveContainer width="100%" height={160}>
+                  <LineChart data={rangeUtilData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis
+                      dataKey="date"
+                      tickFormatter={(v: string) => {
+                        const d = dayjs(v);
+                        return `${d.month() + 1}/${d.date()}`;
+                      }}
+                      fontSize={11}
+                    />
+                    <YAxis domain={[0, 100]} fontSize={11} />
+                    <Tooltip
+                      formatter={(value: number) => [`${value}%`, '利用率']}
+                      labelFormatter={(label: string) => {
+                        const d = dayjs(label);
+                        return `${d.month() + 1}月${d.date()}日 ${dayLabels[d.day()]}`;
+                      }}
+                    />
+                    <Line type="monotone" dataKey="rate" stroke="#1677ff" strokeWidth={2} dot={{ r: 3 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </Card>
         </Col>
       </Row>
@@ -352,28 +534,44 @@ const Dashboard: React.FC = () => {
       </Row>
 
       <Row gutter={16}>
-        <Col span={12}>
-          <Card title="并行测试数量趋势（近7天）" loading={loading}>
+        <Col span={24}>
+          <Card
+            loading={loading}
+            title={
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>并行测试数量趋势</span>
+                <RangePicker
+                  size="small"
+                  value={trendDateRange}
+                  onChange={(dates) => {
+                    if (dates && dates[0] && dates[1]) {
+                      setTrendDateRange([dates[0], dates[1]]);
+                    }
+                  }}
+                  allowClear={false}
+                  disabledDate={(d) => d.isAfter(dayjs(), 'day')}
+                />
+              </div>
+            }
+          >
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={trendData}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={(v: string) => {
+                    const d = dayjs(v);
+                    return `${d.month() + 1}/${d.date()}`;
+                  }}
+                />
                 <YAxis allowDecimals={false} />
-                <Tooltip />
+                <Tooltip
+                  labelFormatter={(label: string) => {
+                    const d = dayjs(label);
+                    return `${d.month() + 1}月${d.date()}日 ${dayLabels[d.day()]}`;
+                  }}
+                />
                 <Line type="monotone" dataKey="count" stroke="#1890ff" strokeWidth={2} />
-              </LineChart>
-            </ResponsiveContainer>
-          </Card>
-        </Col>
-        <Col span={12}>
-          <Card title="人力利用率走势（近7天）" loading={loading}>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={utilizationData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis domain={[0, 100]} />
-                <Tooltip formatter={(value) => [`${value}%`, '利用率']} />
-                <Line type="monotone" dataKey="rate" stroke="#52c41a" strokeWidth={2} />
               </LineChart>
             </ResponsiveContainer>
           </Card>

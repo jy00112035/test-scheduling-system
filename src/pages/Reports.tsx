@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Select, Button, Space, Tag, message } from 'antd';
+import { Card, Table, Button, Space, Tag, message } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
+import { DatePicker } from 'antd';
 import dayjs from 'dayjs';
+import * as XLSX from 'xlsx';
 import { api } from '../services/api';
 
-const { Option } = Select;
+const { RangePicker } = DatePicker;
 
 interface ReportItem {
   product: string;
@@ -16,13 +18,16 @@ interface ReportItem {
 }
 
 const Reports: React.FC = () => {
-  const [timePeriod, setTimePeriod] = useState<string>('month');
+  const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([
+    dayjs().startOf('month'),
+    dayjs().endOf('month'),
+  ]);
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     fetchReports();
-  }, [timePeriod]);
+  }, [dateRange]);
 
   const fetchReports = async () => {
     setLoading(true);
@@ -32,12 +37,25 @@ const Reports: React.FC = () => {
         api.getPublishedSchedules()
       ]);
 
+      const rangeStart = dateRange[0].startOf('day');
+      const rangeEnd = dateRange[1].endOf('day');
+
+      // 按日期范围过滤需求：需求的开始日期或结束日期与选择范围有交集
+      const filteredDemands = demands.filter((d: any) => {
+        if (!d.startDate || !d.endDate) return true; // 无日期的需求保留
+        const start = dayjs(d.startDate);
+        const end = dayjs(d.endDate);
+        return start.isBefore(rangeEnd) && end.isAfter(rangeStart);
+      });
+
+      const filteredDemandIds = new Set(filteredDemands.map((d: any) => d.id));
+
       const demandMap = new Map<number, any>();
-      demands.forEach((d: any) => demandMap.set(d.id, d));
+      filteredDemands.forEach((d: any) => demandMap.set(d.id, d));
 
       const productMap = new Map<string, ReportItem & { totalCycleDays: number; cycleCount: number }>();
 
-      demands.forEach((demand: any) => {
+      filteredDemands.forEach((demand: any) => {
         const product = demand.product || '未知产品';
         if (productMap.has(product)) {
           const item = productMap.get(product)!;
@@ -68,6 +86,7 @@ const Reports: React.FC = () => {
       });
 
       schedules.forEach((schedule: any) => {
+        if (!filteredDemandIds.has(schedule.demandId)) return;
         const demand = demandMap.get(schedule.demandId);
         if (demand) {
           const product = demand.product || '未知产品';
@@ -113,6 +132,27 @@ const Reports: React.FC = () => {
   const getRateText = (rate: number) => {
     const sign = rate > 0 ? '+' : '';
     return `${sign}${(rate * 100).toFixed(1)}%`;
+  };
+
+  const handleExport = () => {
+    if (reports.length === 0) {
+      message.warning('暂无数据可导出');
+      return;
+    }
+    const rows = reports.map(item => ({
+      '产品名称': item.product,
+      '测试需求数': item.demandCount,
+      '计划人力总需求（人/天）': item.plannedManpower,
+      '实际人力总投入（人/天）': item.actualManpower,
+      '差异率': getRateText(item.differenceRate),
+      '平均测试周期（天）': item.avgCycle,
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, '统计报表');
+    const startDate = dateRange[0].format('YYYYMMDD');
+    const endDate = dateRange[1].format('YYYYMMDD');
+    XLSX.writeFile(workbook, `统计报表_${startDate}_${endDate}.xlsx`);
   };
 
   const columns = [
@@ -171,14 +211,17 @@ const Reports: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Space>
             <span>时间范围：</span>
-            <Select value={timePeriod} onChange={setTimePeriod} style={{ width: 120 }}>
-              <Option value="week">本周</Option>
-              <Option value="month">本月</Option>
-              <Option value="quarter">本季度</Option>
-              <Option value="year">本年</Option>
-            </Select>
+            <RangePicker
+              value={dateRange}
+              onChange={(dates) => {
+                if (dates && dates[0] && dates[1]) {
+                  setDateRange([dates[0], dates[1]]);
+                }
+              }}
+              allowClear={false}
+            />
           </Space>
-          <Button icon={<DownloadOutlined />}>导出报表</Button>
+          <Button icon={<DownloadOutlined />} onClick={handleExport}>导出报表</Button>
         </div>
       </Card>
 
