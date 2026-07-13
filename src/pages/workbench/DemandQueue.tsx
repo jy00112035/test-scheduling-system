@@ -226,14 +226,16 @@ const DemandQueue: React.FC<DemandQueueProps> = ({
             >
               清除
             </Button>
-            <Button
-              size="small"
-              type="link"
-              style={{ fontSize: 10, padding: 0, height: 16 }}
-              onClick={(e) => { e.stopPropagation(); onPublishDemand(demand.id); }}
-            >
-              发布
-            </Button>
+            {hasChanges && (
+              <Button
+                size="small"
+                type="link"
+                style={{ fontSize: 10, padding: 0, height: 16 }}
+                onClick={(e) => { e.stopPropagation(); onPublishDemand(demand.id); }}
+              >
+                发布
+              </Button>
+            )}
           </span>
         </div>
       </div>
