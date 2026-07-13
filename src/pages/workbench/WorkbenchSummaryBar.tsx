@@ -13,6 +13,7 @@ import {
   UnorderedListOutlined,
   WarningOutlined,
   FileTextOutlined,
+  SendOutlined,
 } from '@ant-design/icons';
 import type { BatchMetrics } from './workbenchTypes';
 
@@ -25,6 +26,8 @@ interface WorkbenchSummaryBarProps {
   onClearAllDrafts: () => void;
   onHighRiskClick?: () => void;
   onGapClick?: () => void;
+  onPublishAll?: () => void;
+  publishLoading?: boolean;
 }
 
 const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
@@ -36,6 +39,8 @@ const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
   onClearAllDrafts,
   onHighRiskClick,
   onGapClick,
+  onPublishAll,
+  publishLoading,
 }) => {
   const [highRiskHovered, setHighRiskHovered] = useState(false);
   const [gapHovered, setGapHovered] = useState(false);
@@ -173,6 +178,17 @@ const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
         >
           清除未发布排班
         </Button>
+        <Tooltip title="将所有已满足且无冲突的草稿排班一键发布">
+          <Button
+            type="primary"
+            icon={<SendOutlined />}
+            onClick={onPublishAll}
+            loading={publishLoading}
+            disabled={!hasDrafts}
+          >
+            发布全部待发布排班
+          </Button>
+        </Tooltip>
       </Space>
     </Card>
   );
