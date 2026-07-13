@@ -113,6 +113,9 @@ const ScheduleWorkbench: React.FC = () => {
   // 缺口详情弹窗
   const [gapModalOpen, setGapModalOpen] = useState(false);
 
+  // 发布全部
+  const [publishAllLoading, setPublishAllLoading] = useState(false);
+
   // 优先级编辑
   const [editingPriorityId, setEditingPriorityId] = useState<number | null>(null);
   const [priorityOptions, setPriorityOptions] = useState<string[]>([]);
@@ -814,6 +817,74 @@ const ScheduleWorkbench: React.FC = () => {
     });
   };
 
+  // ---- 发布全部 ----
+  const handlePublishAll = () => {
+    // 筛选可发布需求：有草稿排班 + 人力已满足 + 无冲突
+    const publishableDemands = demands.filter(d => {
+      const hasDraft = schedules.some(s => s.demandId === d.id && !s.published);
+      if (!hasDraft) return false;
+      if (unfulfilledDemands.has(d.id)) return false;
+      const hasConflict = conflictDetails.some(c =>
+        schedules.some(s => s.demandId === d.id && s.staffId === c.staffId && s.date === c.date)
+      );
+      return !hasConflict;
+    });
+
+    if (publishableDemands.length === 0) {
+      message.info('没有可发布的排班（需有草稿排班、人力已满足且无冲突）');
+      return;
+    }
+
+    confirm({
+      title: '确认发布',
+      content: `确定要发布全部 ${publishableDemands.length} 个需求的草稿排班吗？`,
+      okText: '确定',
+      cancelText: '取消',
+      onOk: async () => {
+        setPublishAllLoading(true);
+        let successCount = 0;
+        let failCount = 0;
+        try {
+          for (const demand of publishableDemands) {
+            try {
+              const hasPendingChanges = pendingChangeDemandIds.has(demand.id);
+              if (hasPendingChanges) {
+                await api.deleteSchedulesByDemand(demand.id);
+                const currentSchedules = schedules.filter(s => s.demandId === demand.id);
+                if (currentSchedules.length > 0) {
+                  await api.createSchedulesBatch(currentSchedules.map(s => ({
+                    staffId: s.staffId, demandId: s.demandId, date: s.date,
+                    percentage: s.percentage, product: s.product,
+                    testManager: s.testManager || '测试经理', versionType: s.versionType,
+                  })));
+                }
+              }
+              await api.publishSchedules(demand.id);
+              successCount++;
+            } catch {
+              failCount++;
+            }
+          }
+          // 清除所有状态
+          setPendingChangeDemandIds(new Set());
+          setSelectedDemandIds(new Set());
+          setConflictDetails([]);
+          clearDraftFromLocalStorage();
+          if (failCount === 0) {
+            message.success(`已成功发布 ${successCount} 个需求的排班`);
+          } else {
+            message.warning(`发布完成：${successCount} 成功，${failCount} 失败`);
+          }
+          fetchData();
+        } catch (err: any) {
+          message.error(err.message || '发布失败');
+        } finally {
+          setPublishAllLoading(false);
+        }
+      },
+    });
+  };
+
   // ---- 发布 ----
   const handlePublishDemand = async (demandId: number) => {
     const demandSchedules = schedules.filter(s => s.demandId === demandId);
@@ -1356,6 +1427,8 @@ const ScheduleWorkbench: React.FC = () => {
           onFullAllocateRecommend={handleFullAllocateRecommend}
           onConflictCheck={handleConflictCheck}
           onClearAllDrafts={handleClearAllUnpublished}
+          onPublishAll={handlePublishAll}
+          publishLoading={publishAllLoading}
           onHighRiskClick={() => setRiskModalOpen(true)}
           onGapClick={() => setGapModalOpen(true)}
         />
