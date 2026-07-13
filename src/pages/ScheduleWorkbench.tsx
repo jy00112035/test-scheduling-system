@@ -59,7 +59,6 @@ const ScheduleWorkbench: React.FC = () => {
   const [staffs, setStaffs] = useState<StaffItem[]>([]);
   const [selectedDemand, setSelectedDemand] = useState<DemandItem | null>(null);
   const [conflictDetails, setConflictDetails] = useState<ConflictDetail[]>([]);
-  const [hasConflicts, setHasConflicts] = useState(false);
   const [weekViewDate, setWeekViewDate] = useState<dayjs.Dayjs>(dayjs());
 
   // 分配弹窗
@@ -246,7 +245,6 @@ const ScheduleWorkbench: React.FC = () => {
     unfulfilledDemands, conflictDetails, unfulfilledDetails]);
 
   const hasDraftSchedules = schedules.some(s => !s.published);
-  const canPublish = batchMetrics.publishableDemandCount > 0;
 
   // ---- 每日状态操作 ----
   const handleStatusChange = async (staff: StaffItem, date: string, newStatus: string, percentage?: number) => {
@@ -581,7 +579,6 @@ const ScheduleWorkbench: React.FC = () => {
     // 冲突检测
     const conflicts: ConflictDetail[] = detectConflicts(newSchedules, activeStaffs, dailyStatuses);
     setConflictDetails(conflicts);
-    setHasConflicts(conflicts.length > 0);
   }, [schedules, selectedDemandIds, dailyStatuses]);
 
   const runDateRecommendation = async () => {
@@ -774,7 +771,6 @@ const ScheduleWorkbench: React.FC = () => {
     if (conflicts.length === 0) {
       message.success('排班无冲突！');
     } else {
-      setHasConflicts(true);
       setConflictDetails(conflicts);
       message.warning(`检测到 ${conflicts.length} 个排班冲突！`);
     }
@@ -797,7 +793,6 @@ const ScheduleWorkbench: React.FC = () => {
           }
           setSchedules(prev => prev.filter(s => s.published));
           setPendingChangeDemandIds(new Set());
-          setHasConflicts(false);
           setConflictDetails([]);
           clearDraftFromLocalStorage();
           message.success(`已清除 ${unpublishdSchedules.length} 条未发布排班`);
@@ -836,50 +831,6 @@ const ScheduleWorkbench: React.FC = () => {
     } catch (err: any) {
       message.error(err.message || '发布失败');
     }
-  };
-
-  const handlePublishBatch = () => {
-    const publishableDemands = demands.filter(d =>
-      schedules.some(s => s.demandId === d.id && !s.published) && !unfulfilledDemands.has(d.id)
-    );
-    if (publishableDemands.length === 0) {
-      message.warning('本批没有可发布的需求');
-      return;
-    }
-    confirm({
-      title: '批量发布确认',
-      content: `将发布 ${publishableDemands.length} 个需求的排班。${unfulfilledDetails.length > 0 ? `另有 ${unfulfilledDetails.length} 个需求因存在缺口将被跳过。` : ''}`,
-      okText: '确认发布',
-      cancelText: '取消',
-      onOk: async () => {
-        let successCount = 0;
-        const failures: string[] = [];
-        for (const d of publishableDemands) {
-          try {
-            await api.publishSchedules(d.id);
-            successCount++;
-          } catch (err: any) {
-            failures.push(`${d.product}: ${err.message}`);
-          }
-        }
-        setPendingChangeDemandIds(prev => {
-          const next = new Set(prev);
-          publishableDemands.forEach(d => next.delete(d.id));
-          return next;
-        });
-        setSelectedDemandIds(prev => {
-          const next = new Set(prev);
-          publishableDemands.forEach(d => next.delete(d.id));
-          return next;
-        });
-        if (failures.length === 0) {
-          message.success(`成功发布 ${successCount} 个需求的排班`);
-        } else {
-          message.warning(`发布完成：${successCount} 个成功，${failures.length} 个失败（${failures.join('；')}）`);
-        }
-        fetchData();
-      },
-    });
   };
 
   // ---- 清除 ----
@@ -1390,13 +1341,10 @@ const ScheduleWorkbench: React.FC = () => {
         <WorkbenchSummaryBar
           metrics={batchMetrics}
           hasDrafts={hasDraftSchedules}
-          hasConflicts={hasConflicts}
-          canPublish={canPublish}
           onDateRecommend={handleDateRecommend}
           onFullAllocateRecommend={handleFullAllocateRecommend}
           onConflictCheck={handleConflictCheck}
           onClearAllDrafts={handleClearAllUnpublished}
-          onPublishBatch={handlePublishBatch}
         />
         <IssuePublishPanel
           conflicts={conflictDetails.map(c => ({
@@ -1405,7 +1353,7 @@ const ScheduleWorkbench: React.FC = () => {
             maxCapacityPercent: c.maxCapacityPercent,
           }))}
           unfulfilledDetails={unfulfilledDetails}
-          onDismissConflicts={() => setHasConflicts(false)}
+          onDismissConflicts={() => {}}
           onDismissUnfulfilled={() => setUnfulfilledDetails([])}
         />
       </div>

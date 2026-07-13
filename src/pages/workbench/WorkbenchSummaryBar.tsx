@@ -10,7 +10,6 @@ import {
   RobotOutlined,
   ExclamationCircleOutlined,
   DeleteOutlined,
-  SendOutlined,
   UnorderedListOutlined,
   WarningOutlined,
   FileTextOutlined,
@@ -20,25 +19,19 @@ import type { BatchMetrics } from './workbenchTypes';
 interface WorkbenchSummaryBarProps {
   metrics: BatchMetrics;
   hasDrafts: boolean;
-  hasConflicts: boolean;
-  canPublish: boolean;
   onDateRecommend: () => void;
   onFullAllocateRecommend: () => void;
   onConflictCheck: () => void;
   onClearAllDrafts: () => void;
-  onPublishBatch: () => void;
 }
 
 const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
   metrics,
   hasDrafts,
-  hasConflicts,
-  canPublish,
   onDateRecommend,
   onFullAllocateRecommend,
   onConflictCheck,
   onClearAllDrafts,
-  onPublishBatch,
 }) => {
   return (
     <Card style={{ marginBottom: 16 }} bodyStyle={{ padding: '12px 16px' }}>
@@ -94,14 +87,6 @@ const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
           </Tooltip>
         </Col>
         <Col>
-          <Tooltip title="当前批次中可发布的需求数量">
-            <Statistic
-              title="可发布"
-              value={metrics.publishableDemandCount}
-              prefix={<SendOutlined />}
-              valueStyle={{ fontSize: 20, color: metrics.publishableDemandCount > 0 ? '#52c41a' : '#999' }}
-            />
-          </Tooltip>
         </Col>
       </Row>
 
@@ -138,17 +123,6 @@ const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
         >
           清除未发布排班
         </Button>
-        <Tooltip title="发布本批次所有已满足且无冲突的需求；有缺口的需求将保留为草稿">
-          <Button
-            type="primary"
-            icon={<SendOutlined />}
-            onClick={onPublishBatch}
-            disabled={!canPublish}
-            style={{ background: hasConflicts ? undefined : '#52c41a', borderColor: hasConflicts ? undefined : '#52c41a' }}
-          >
-            发布本批（{metrics.publishableDemandCount}）
-          </Button>
-        </Tooltip>
       </Space>
     </Card>
   );
