@@ -861,7 +861,8 @@ const ScheduleWorkbench: React.FC = () => {
               }
               await api.publishSchedules(demand.id);
               successCount++;
-            } catch {
+            } catch (err: any) {
+              console.error(`发布需求 ${demand.id} (${demand.product}) 失败:`, err);
               failCount++;
             }
           }

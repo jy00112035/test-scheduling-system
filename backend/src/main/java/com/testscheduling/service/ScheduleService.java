@@ -3,9 +3,11 @@ package com.testscheduling.service;
 import com.testscheduling.entity.Schedule;
 import com.testscheduling.entity.TestDemand;
 import com.testscheduling.entity.TestStaff;
+import com.testscheduling.entity.User;
 import com.testscheduling.repository.ScheduleRepository;
 import com.testscheduling.repository.TestDemandRepository;
 import com.testscheduling.repository.TestStaffRepository;
+import com.testscheduling.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +26,9 @@ public class ScheduleService {
 
     @Autowired
     private TestStaffRepository testStaffRepository;
+
+    @Autowired
+    private UserRepository userRepository;
 
     public List<Schedule> findAll() {
         return scheduleRepository.findAll();
@@ -90,12 +95,7 @@ public class ScheduleService {
         if (demand != null && Boolean.TRUE.equals(demand.getConfidential())) {
             List<Schedule> schedules = scheduleRepository.findByDemandId(demandId);
             for (Schedule s : schedules) {
-                TestStaff staff = testStaffRepository.findById(s.getStaffId()).orElse(null);
-                if (staff == null || !Boolean.TRUE.equals(staff.getConfidentialClearance())) {
-                    throw new RuntimeException(staff != null ?
-                        staff.getName() + " 不具备保密权限，无法发布保密项目排班" :
-                        "人员不存在");
-                }
+                validateStaffConfidentialClearance(s.getStaffId(), "无法发布保密项目排班");
             }
         }
         scheduleRepository.findByDemandId(demandId)
@@ -108,12 +108,19 @@ public class ScheduleService {
     private void validateConfidentialClearance(Long demandId, Long staffId) {
         TestDemand demand = demandRepository.findById(demandId).orElse(null);
         if (demand != null && Boolean.TRUE.equals(demand.getConfidential())) {
-            TestStaff staff = testStaffRepository.findById(staffId).orElse(null);
-            if (staff == null || !Boolean.TRUE.equals(staff.getConfidentialClearance())) {
-                throw new RuntimeException(staff != null ?
-                    staff.getName() + " 不具备保密权限，无法参与保密项目测试" :
-                    "人员不存在");
-            }
+            validateStaffConfidentialClearance(staffId, "无法参与保密项目测试");
+        }
+    }
+
+    private void validateStaffConfidentialClearance(Long staffId, String actionMessage) {
+        TestStaff staff = testStaffRepository.findById(staffId).orElse(null);
+        if (staff == null) {
+            throw new RuntimeException("人员不存在");
+        }
+
+        User user = userRepository.findByUsername(staff.getEmpNo()).orElse(null);
+        if (user == null || !Boolean.TRUE.equals(user.getConfidentialClearance())) {
+            throw new RuntimeException(staff.getName() + " 不具备保密权限，" + actionMessage);
         }
     }
 
