@@ -63,6 +63,9 @@ public class ScheduleService {
 
     @Transactional
     public List<Schedule> createBatch(List<Schedule> schedules) {
+        for (Schedule schedule : schedules) {
+            validateConfidentialClearance(schedule.getDemandId(), schedule.getStaffId());
+        }
         return scheduleRepository.saveAll(schedules);
     }
 
