@@ -54,7 +54,7 @@ const Dashboard: React.FC = () => {
   const [rangeUtilData, setRangeUtilData] = useState<Array<{ date: string; rate: number }>>([]);
   const [rangeLoading, setRangeLoading] = useState(false);
   const [cachedActiveStaff, setCachedActiveStaff] = useState<any[]>([]);
-  const [cachedDailyStatuses, setCachedDailyStatuses] = useState<any[]>([]);
+  const [_cachedDailyStatuses, setCachedDailyStatuses] = useState<any[]>([]);
   const [cachedExcludedTestTypes, setCachedExcludedTestTypes] = useState<string[]>([]);
 
   useEffect(() => {

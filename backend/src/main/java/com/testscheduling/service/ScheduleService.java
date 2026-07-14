@@ -1,5 +1,6 @@
 package com.testscheduling.service;
 
+import com.testscheduling.dto.GanttViewItem;
 import com.testscheduling.entity.Schedule;
 import com.testscheduling.entity.TestDemand;
 import com.testscheduling.entity.TestStaff;
@@ -13,7 +14,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class ScheduleService {
@@ -134,5 +139,155 @@ public class ScheduleService {
                 s.setPublished(false);
                 scheduleRepository.save(s);
             });
+    }
+
+    /**
+     * 获取甘特图视图数据
+     * 包含进度计算和风险评估
+     */
+    public List<GanttViewItem> getGanttView() {
+        // 获取所有有排班记录的需求
+        List<Long> scheduledDemandIds = scheduleRepository.findAll().stream()
+            .map(Schedule::getDemandId)
+            .distinct()
+            .collect(Collectors.toList());
+
+        List<TestDemand> demands = demandRepository.findAll().stream()
+            .filter(d -> scheduledDemandIds.contains(d.getId()))
+            .collect(Collectors.toList());
+
+        List<GanttViewItem> ganttItems = new ArrayList<>();
+        LocalDateTime now = LocalDateTime.now();
+
+        for (TestDemand demand : demands) {
+            GanttViewItem item = new GanttViewItem();
+            item.setDemandId(demand.getId());
+            item.setProduct(demand.getProduct());
+            item.setVersion(demand.getVersion());
+            item.setVersionType(demand.getVersionType());
+            item.setVersionPhase(demand.getVersionPhase());
+            item.setStartDate(demand.getStartDate());
+            item.setEndDate(demand.getEndDate());
+            item.setStatus(demand.getStatus().name());
+            item.setManpowerDemand(demand.getManpowerDemand());
+            item.setPriority(demand.getPriority());
+            item.setConfidential(demand.getConfidential());
+
+            // 计算已分配人力
+            List<Schedule> schedules = scheduleRepository.findByDemandId(demand.getId());
+            double allocatedDays = schedules.stream()
+                .mapToDouble(s -> s.getPercentage() / 100.0)
+                .sum();
+            item.setAllocatedDays(allocatedDays);
+
+            // 计算剩余缺口
+            double remainingDays = demand.getManpowerDemand().doubleValue() - allocatedDays;
+            item.setRemainingDays(Math.max(0, remainingDays));
+
+            // 计算距离结束日期的天数
+            long daysToEnd = ChronoUnit.DAYS.between(now, demand.getEndDate());
+            item.setDaysToEnd(daysToEnd);
+
+            // 计算进度百分比（基于时间）
+            double progressPercentage = calculateProgressPercentage(demand, now);
+            item.setProgressPercentage(progressPercentage);
+
+            // 计算风险分数和风险因素
+            RiskAssessment risk = assessRisk(demand, allocatedDays, daysToEnd, remainingDays);
+            item.setRiskScore(risk.score);
+            item.setRiskFactors(risk.factors);
+
+            ganttItems.add(item);
+        }
+
+        return ganttItems;
+    }
+
+    /**
+     * 计算进度百分比（基于时间）
+     */
+    private double calculateProgressPercentage(TestDemand demand, LocalDateTime now) {
+        if (demand.getStartDate() == null || demand.getEndDate() == null) {
+            return 0.0;
+        }
+
+        // 如果已完成，返回 100%
+        if ("completed".equals(demand.getStatus())) {
+            return 100.0;
+        }
+
+        long totalDays = ChronoUnit.DAYS.between(demand.getStartDate(), demand.getEndDate());
+        if (totalDays <= 0) {
+            return 0.0;
+        }
+
+        long elapsedDays = ChronoUnit.DAYS.between(demand.getStartDate(), now);
+
+        // 限制在 0-100 之间
+        double percentage = (elapsedDays * 100.0) / totalDays;
+        return Math.max(0.0, Math.min(100.0, percentage));
+    }
+
+    /**
+     * 风险评估
+     */
+    private RiskAssessment assessRisk(TestDemand demand, double allocatedDays, long daysToEnd, double remainingDays) {
+        RiskAssessment risk = new RiskAssessment();
+        risk.score = 0;
+        risk.factors = new ArrayList<>();
+
+        // 1. 超期风险（40分）
+        if (daysToEnd < 0) {
+            risk.score += 40;
+            risk.factors.add("已超期 " + Math.abs(daysToEnd) + " 天");
+        } else if (daysToEnd <= 3) {
+            risk.score += 30;
+            risk.factors.add("剩余时间不足（" + daysToEnd + " 天）");
+        }
+
+        // 2. 人力缺口风险（30分）
+        if (remainingDays > 0) {
+            double gapRatio = remainingDays / demand.getManpowerDemand().doubleValue();
+            if (gapRatio > 0.3) {
+                risk.score += 30;
+                risk.factors.add("人力缺口 " + String.format("%.1f", remainingDays) + " 人/天（严重）");
+            } else if (gapRatio > 0.1) {
+                risk.score += 20;
+                risk.factors.add("人力缺口 " + String.format("%.1f", remainingDays) + " 人/天");
+            } else {
+                risk.score += 10;
+                risk.factors.add("人力缺口较小（" + String.format("%.1f", remainingDays) + " 人/天）");
+            }
+        }
+
+        // 3. 优先级风险（20分）
+        if ("P0".equals(demand.getPriority()) || "紧急".equals(demand.getPriority())) {
+            risk.score += 20;
+            risk.factors.add("高优先级需求（" + demand.getPriority() + "）");
+        } else if ("P1".equals(demand.getPriority()) || "高".equals(demand.getPriority())) {
+            risk.score += 10;
+            risk.factors.add("中高优先级（" + demand.getPriority() + "）");
+        }
+
+        // 4. 进度滞后风险（10分）
+        double expectedProgress = calculateProgressPercentage(demand, LocalDateTime.now());
+        double actualProgress = demand.getManpowerDemand().doubleValue() > 0
+            ? (allocatedDays / demand.getManpowerDemand().doubleValue()) * 100.0
+            : 0.0;
+
+        if (expectedProgress > actualProgress + 20) {
+            risk.score += 10;
+            risk.factors.add("进度滞后（预期 " + String.format("%.0f", expectedProgress) + "%，实际 " + String.format("%.0f", actualProgress) + "%）");
+        }
+
+        return risk;
+    }
+
+    /**
+     * 内部类：风险评估结果
+     */
+    private static class RiskAssessment {
+        int score;
+        List<String> factors;
     }
 }

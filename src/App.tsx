@@ -19,6 +19,7 @@ import Home from './pages/Home';
 import TaskKanban from './pages/TaskKanban';
 import StaffManagement from './pages/StaffManagement';
 import ScheduleWorkbench from './pages/ScheduleWorkbench';
+import ScheduleGantt from './pages/ScheduleGantt';
 import Reports from './pages/Reports';
 import TestDemandList from './pages/TestDemandList';
 import BaseConfig from './pages/BaseConfig';
@@ -110,8 +111,18 @@ const AppContent: React.FC = () => {
     {
       key: 'schedule',
       icon: <ScheduleOutlined />,
-      label: '人力排布工作台',
+      label: '人力排布',
       permissions: ['scheduleManpower', 'aiRecommendSchedule', 'manageDailyAvailability'],
+      children: [
+        {
+          key: 'schedule',
+          label: '排班工作台',
+        },
+        {
+          key: 'schedule-gantt',
+          label: '排期看板',
+        },
+      ],
     },
     {
       key: 'staff',
@@ -172,6 +183,8 @@ const AppContent: React.FC = () => {
         return <TaskKanban />;
       case 'schedule':
         return <ScheduleWorkbench />;
+      case 'schedule-gantt':
+        return <ScheduleGantt />;
       case 'staff':
         return <StaffManagement />;
       case 'reports':
@@ -278,7 +291,16 @@ const AppContent: React.FC = () => {
           justifyContent: 'space-between',
         }}>
           <span style={{ fontSize: '18px', fontWeight: '500' }}>
-            {menuItems.find(item => item.key === selectedKey)?.label}
+            {(() => {
+              for (const item of menuItems) {
+                if (item.key === selectedKey) return item.label;
+                if (item.children) {
+                  const child = item.children.find((c: any) => c.key === selectedKey);
+                  if (child) return child.label;
+                }
+              }
+              return '';
+            })()}
           </span>
           <UserRoleSelector
             currentRoles={roles}

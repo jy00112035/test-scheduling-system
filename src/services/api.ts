@@ -242,6 +242,10 @@ class ApiService {
     });
   }
 
+  async getGanttView() {
+    return this.request<any[]>('/schedules/gantt-view');
+  }
+
   async deleteSchedulesByDemand(demandId: number) {
     return this.request<void>(`/schedules/demand/${demandId}`, {
       method: 'DELETE',

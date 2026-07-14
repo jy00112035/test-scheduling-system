@@ -1,6 +1,7 @@
 package com.testscheduling.controller;
 
 import com.testscheduling.dto.ApiResponse;
+import com.testscheduling.dto.GanttViewItem;
 import com.testscheduling.entity.Schedule;
 import com.testscheduling.service.ScheduleService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -111,5 +112,10 @@ public class ScheduleController {
         } catch (Exception e) {
             return ApiResponse.error(e.getMessage());
         }
+    }
+
+    @GetMapping("/gantt-view")
+    public ApiResponse<List<GanttViewItem>> getGanttView() {
+        return ApiResponse.success(scheduleService.getGanttView());
     }
 }
