@@ -98,15 +98,6 @@ const WorkbenchSummaryBar: React.FC<WorkbenchSummaryBarProps> = ({
           </Tooltip>
         </Col>
         <Col>
-          <Tooltip title="当前批次已勾选的需求数量（在推荐排班弹窗中选择）">
-            <Statistic
-              title="本批已选"
-              value={metrics.selectedDemands}
-              valueStyle={{ fontSize: 20, color: metrics.selectedDemands > 0 ? '#1890ff' : '#999' }}
-            />
-          </Tooltip>
-        </Col>
-        <Col>
           <Tooltip title="点击查看缺口详情">
             <div
               onClick={onGapClick}
