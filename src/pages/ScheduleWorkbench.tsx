@@ -844,6 +844,7 @@ const ScheduleWorkbench: React.FC = () => {
         setPublishAllLoading(true);
         let successCount = 0;
         let failCount = 0;
+        const failedDetails: Array<{ demandId: number; product: string; reason: string }> = [];
         try {
           for (const demand of publishableDemands) {
             try {
@@ -862,7 +863,9 @@ const ScheduleWorkbench: React.FC = () => {
               await api.publishSchedules(demand.id);
               successCount++;
             } catch (err: any) {
+              const errMsg = err?.message || err?.response?.data?.message || String(err);
               console.error(`发布需求 ${demand.id} (${demand.product}) 失败:`, err);
+              failedDetails.push({ demandId: demand.id, product: demand.product, reason: errMsg });
               failCount++;
             }
           }
@@ -874,7 +877,24 @@ const ScheduleWorkbench: React.FC = () => {
           if (failCount === 0) {
             message.success(`已成功发布 ${successCount} 个需求的排班`);
           } else {
-            message.warning(`发布完成：${successCount} 成功，${failCount} 失败`);
+            Modal.warning({
+              title: '发布结果',
+              content: (
+                <div>
+                  <p>发布完成：{successCount} 成功，{failCount} 失败</p>
+                  {failedDetails.length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <p><strong>失败详情：</strong></p>
+                      {failedDetails.map((f, i) => (
+                        <p key={i} style={{ color: '#ff4d4f', margin: '4px 0' }}>
+                          「{f.product}」(ID: {f.demandId})：{f.reason}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ),
+            });
           }
           fetchData();
         } catch (err: any) {
