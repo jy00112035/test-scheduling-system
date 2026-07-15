@@ -6,6 +6,12 @@ import { api } from '../services/api';
 
 const { RangePicker } = DatePicker;
 
+interface DailySchedule {
+  date: string;
+  totalPercentage: number;
+  staffCount: number;
+}
+
 interface GanttViewItem {
   demandId: number;
   product: string;
@@ -24,7 +30,18 @@ interface GanttViewItem {
   riskScore: number;
   riskFactors: string[];
   progressPercentage: number;
+  scheduleStartDate: string | null;
+  scheduleEndDate: string | null;
+  scheduleExceedsDemand: boolean;
+  dailySchedules: DailySchedule[];
 }
+
+// 解析日期为本地时间（避免时区偏移）
+const parseLocalDate = (dateStr: string): Dayjs => {
+  // 提取日期部分 YYYY-MM-DD，忽略时间部分
+  const datePart = dateStr.substring(0, 10);
+  return dayjs(datePart);
+};
 
 const ScheduleGantt: React.FC = () => {
   const [loading, setLoading] = useState(false);
@@ -72,22 +89,14 @@ const ScheduleGantt: React.FC = () => {
     if (dateRange) {
       const [start, end] = dateRange;
       filtered = filtered.filter(item => {
-        const itemStart = dayjs(item.startDate);
-        const itemEnd = dayjs(item.endDate);
+        const itemStart = parseLocalDate(item.startDate);
+        const itemEnd = parseLocalDate(item.endDate);
         return itemEnd.isAfter(start) && itemStart.isBefore(end);
       });
     }
 
     setFilteredData(filtered);
   }, [ganttData, productFilter, statusFilter, dateRange]);
-
-  // 获取状态颜色
-  const getStatusColor = (item: GanttViewItem) => {
-    if (item.status === 'completed') return '#52c41a'; // 绿色：已完成
-    if (item.daysToEnd < 0) return '#ff4d4f'; // 红色：已超期
-    if (item.daysToEnd <= 3) return '#faad14'; // 黄色：即将到期
-    return '#1890ff'; // 蓝色：正常
-  };
 
   // 获取状态标签
   const getStatusTag = (item: GanttViewItem) => {
@@ -116,10 +125,15 @@ const ScheduleGantt: React.FC = () => {
   const getTimelineRange = () => {
     if (filteredData.length === 0) return { start: dayjs(), end: dayjs().add(30, 'day') };
 
-    const dates = filteredData.flatMap(item => [
-      dayjs(item.startDate),
-      dayjs(item.endDate)
-    ]);
+    const dates = filteredData.flatMap(item => {
+      const ds = [parseLocalDate(item.startDate), parseLocalDate(item.endDate)];
+      if (item.scheduleStartDate) ds.push(parseLocalDate(item.scheduleStartDate));
+      if (item.scheduleEndDate) ds.push(parseLocalDate(item.scheduleEndDate));
+      if (item.dailySchedules) {
+        item.dailySchedules.forEach(d => ds.push(parseLocalDate(d.date)));
+      }
+      return ds;
+    });
 
     const minDate = dates.reduce((min, d) => d.isBefore(min) ? d : min, dates[0]);
     const maxDate = dates.reduce((max, d) => d.isAfter(max) ? d : max, dates[0]);
@@ -136,19 +150,122 @@ const ScheduleGantt: React.FC = () => {
   // 获取产品列表
   const productOptions = Array.from(new Set(ganttData.map(item => item.product)));
 
+  // 获取排班状态颜色
+  const getScheduleStatusColor = (item: GanttViewItem) => {
+    const manpowerMet = item.allocatedDays >= item.manpowerDemand;
+    if (!manpowerMet) return '#faad14'; // 橙色：人力不满足
+
+    if (!item.scheduleEndDate || !item.endDate) return '#1890ff'; // 蓝色：默认
+
+    const scheduleEnd = parseLocalDate(item.scheduleEndDate);
+    const demandEnd = parseLocalDate(item.endDate);
+
+    if (scheduleEnd.isBefore(demandEnd, 'day')) return '#52c41a'; // 绿色：提前完成
+    if (scheduleEnd.isSame(demandEnd, 'day')) return '#faad14'; // 黄色：刚好完成
+    return '#ff4d4f'; // 红色：超出周期
+  };
+
+  // 获取排班状态描述
+  const getScheduleStatusText = (item: GanttViewItem) => {
+    const manpowerMet = item.allocatedDays >= item.manpowerDemand;
+    if (!manpowerMet) return '人力不足';
+
+    if (!item.scheduleEndDate || !item.endDate) return '未排班';
+
+    const scheduleEnd = parseLocalDate(item.scheduleEndDate);
+    const demandEnd = parseLocalDate(item.endDate);
+
+    if (scheduleEnd.isBefore(demandEnd, 'day')) return '提前完成';
+    if (scheduleEnd.isSame(demandEnd, 'day')) return '按时完成';
+    return '超出周期';
+  };
+
   // 渲染甘特图条
   const renderGanttBar = (item: GanttViewItem) => {
-    const itemStart = dayjs(item.startDate);
-    const itemEnd = dayjs(item.endDate);
+    const demandStart = parseLocalDate(item.startDate);
+    const demandEnd = parseLocalDate(item.endDate);
 
-    const startOffset = itemStart.diff(timelineRange.start, 'day');
-    const duration = itemEnd.diff(itemStart, 'day') + 1;
+    // 计算条框有效范围：覆盖需求周期 + 排班实际日期
+    let barStart = demandStart;
+    let barEnd = demandEnd;
+    if (item.scheduleStartDate) {
+      const sStart = parseLocalDate(item.scheduleStartDate);
+      if (sStart.isBefore(barStart)) barStart = sStart;
+    }
+    if (item.scheduleEndDate) {
+      const sEnd = parseLocalDate(item.scheduleEndDate);
+      if (sEnd.isAfter(barEnd)) barEnd = sEnd;
+    }
 
-    const leftPercent = (startOffset / totalDays) * 100;
-    const widthPercent = (duration / totalDays) * 100;
+    const barStartOffset = barStart.diff(timelineRange.start, 'day');
+    const barDuration = barEnd.diff(barStart, 'day') + 1;
 
-    const color = getStatusColor(item);
+    const leftPercent = (barStartOffset / totalDays) * 100;
+    const widthPercent = (barDuration / totalDays) * 100;
+
+    const scheduleColor = getScheduleStatusColor(item);
     const hasRisk = item.riskScore >= 50;
+
+    // 计算需求周期在条框内的相对位置
+    const demandLeftInBar = demandStart.diff(barStart, 'day');
+    const demandDuration = demandEnd.diff(demandStart, 'day') + 1;
+    const demandLeftPercent = (demandLeftInBar / barDuration) * 100;
+    const demandWidthPercent = (demandDuration / barDuration) * 100;
+
+    // 判断排班是否超出测试周期
+    const extendsLeft = demandStart.diff(barStart, 'day') > 0;
+    const extendsRight = barEnd.diff(demandEnd, 'day') > 0;
+    const hasExtension = extendsLeft || extendsRight;
+
+    // 渲染每日排班详情（覆盖整个条框范围）
+    const renderDailySchedules = () => {
+      if (!item.dailySchedules || item.dailySchedules.length === 0) return null;
+
+      return item.dailySchedules.map((daily, idx) => {
+        const dailyDate = parseLocalDate(daily.date);
+        // 渲染整个条框范围内的排班（含超出测试周期的日期）
+        if (dailyDate.isBefore(barStart, 'day') || dailyDate.isAfter(barEnd, 'day')) return null;
+        const dayOffset = dailyDate.diff(barStart, 'day');
+        const dayLeftPercent = (dayOffset / barDuration) * 100;
+        const dayWidthPercent = (1 / barDuration) * 100;
+
+        // 判断是否在需求周期内
+        const isInDemand = !dailyDate.isBefore(demandStart, 'day') && !dailyDate.isAfter(demandEnd, 'day');
+        const opacity = Math.min(1, daily.totalPercentage / 100);
+
+        return (
+          <div
+            key={idx}
+            style={{
+              position: 'absolute',
+              left: `${dayLeftPercent}%`,
+              width: `${dayWidthPercent}%`,
+              height: '100%',
+              background: isInDemand
+                ? `rgba(24, 144, 255, ${opacity})`
+                : `rgba(255, 77, 79, ${opacity * 0.7})`,
+              borderRight: '1px solid rgba(255,255,255,0.3)',
+            }}
+            title={`${daily.date}: ${daily.totalPercentage}% (${daily.staffCount}人)${isInDemand ? '' : ' [超出测试周期]'}`}
+          />
+        );
+      });
+    };
+
+    // 构建提示信息
+    const tooltip = [
+      `测试周期: ${demandStart.format('YYYY-MM-DD')} ~ ${demandEnd.format('YYYY-MM-DD')}`,
+      hasExtension
+        ? `实际排班范围: ${barStart.format('YYYY-MM-DD')} ~ ${barEnd.format('YYYY-MM-DD')}`
+        : '',
+      item.scheduleStartDate && item.scheduleEndDate
+        ? `排班周期: ${item.scheduleStartDate} ~ ${item.scheduleEndDate}`
+        : '排班周期: 未排班',
+      `已排人力: ${item.allocatedDays.toFixed(1)} 人/天`,
+      `需求人力: ${item.manpowerDemand.toFixed(1)} 人/天`,
+      `状态: ${getScheduleStatusText(item)}`,
+      hasExtension ? '⚠️ 排班超出测试周期' : '',
+    ].filter(Boolean).join('\n');
 
     return (
       <div
@@ -157,39 +274,61 @@ const ScheduleGantt: React.FC = () => {
           left: `${leftPercent}%`,
           width: `${widthPercent}%`,
           height: 32,
-          background: `linear-gradient(to right, ${color} ${item.progressPercentage}%, ${color}33 ${item.progressPercentage}%)`,
+          background: hasExtension ? `${scheduleColor}40` : scheduleColor,
           borderRadius: 4,
-          display: 'flex',
-          alignItems: 'center',
-          padding: '0 8px',
+          border: hasExtension ? '1px dashed #ff4d4f' : '1px solid transparent',
+          overflow: 'hidden',
           cursor: hasRisk ? 'pointer' : 'default',
-          border: hasRisk ? '2px solid #ff4d4f' : `1px solid ${color}`,
           transition: 'all 0.3s',
         }}
         onClick={() => hasRisk && handleRiskClick(item)}
-        title={hasRisk ? '点击查看风险详情' : undefined}
+        title={tooltip}
       >
+        {/* 需求周期部分：实色叠加层 */}
+        {hasExtension && (
+          <div style={{
+            position: 'absolute',
+            left: `${demandLeftPercent}%`,
+            width: `${demandWidthPercent}%`,
+            height: '100%',
+            background: scheduleColor,
+          }} />
+        )}
+
+        {/* 每日排班详情（覆盖整个条框范围） */}
+        {renderDailySchedules()}
+
+        {/* 产品名称 + 进度 */}
         <div style={{
-          fontSize: 12,
-          fontWeight: 500,
-          color: '#fff',
-          textShadow: '0 1px 2px rgba(0,0,0,0.3)',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
+          position: 'relative',
+          zIndex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          height: '100%',
+          padding: '0 8px',
         }}>
-          {item.product}
-          {hasRisk && <ExclamationCircleOutlined style={{ marginLeft: 4, color: '#ff4d4f', background: '#fff', borderRadius: '50%', padding: 2 }} />}
-        </div>
-        <div style={{
-          marginLeft: 'auto',
-          fontSize: 11,
-          color: '#fff',
-          background: 'rgba(0,0,0,0.2)',
-          padding: '2px 6px',
-          borderRadius: 3,
-        }}>
-          {item.progressPercentage.toFixed(0)}%
+          <div style={{
+            fontSize: 12,
+            fontWeight: 500,
+            color: '#fff',
+            textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}>
+            {item.product}
+            {hasRisk && <ExclamationCircleOutlined style={{ marginLeft: 4, color: '#fff' }} />}
+          </div>
+          <div style={{
+            marginLeft: 'auto',
+            fontSize: 11,
+            color: '#fff',
+            background: 'rgba(0,0,0,0.25)',
+            padding: '2px 6px',
+            borderRadius: 3,
+          }}>
+            {item.progressPercentage.toFixed(0)}%
+          </div>
         </div>
       </div>
     );
@@ -206,77 +345,84 @@ const ScheduleGantt: React.FC = () => {
     }
 
     return (
-      <div style={{ display: 'flex', position: 'relative', height: 40, borderBottom: '2px solid #d9d9d9' }}>
-        {/* 竖向网格线（每天） */}
-        {Array.from({ length: totalDays + 1 }, (_, i) => {
-          const date = timelineRange.start.add(i, 'day');
-          const leftPercent = (i / totalDays) * 100;
-          const isMonday = date.day() === 1; // 周一的线更明显
-          return (
-            <div
-              key={`grid-${i}`}
-              style={{
-                position: 'absolute',
-                left: `${leftPercent}%`,
-                height: '100%',
-                borderLeft: isMonday ? '1px solid #d9d9d9' : '1px solid #f0f0f0',
-              }}
-            />
-          );
-        })}
-        {/* 周刻度标签 */}
-        {ticks.map((tick, idx) => {
-          const offset = tick.diff(timelineRange.start, 'day');
-          const leftPercent = (offset / totalDays) * 100;
-
-          return (
-            <div
-              key={idx}
-              style={{
-                position: 'absolute',
-                left: `${leftPercent}%`,
-                height: '100%',
-                paddingLeft: 4,
-                zIndex: 2,
-              }}
-            >
-              <div style={{ fontSize: 12, color: '#666', fontWeight: 500 }}>
-                {tick.format('MM/DD')}
-              </div>
-            </div>
-          );
-        })}
-        {/* 今天标记 */}
-        {(() => {
-          const today = dayjs();
-          if (today.isAfter(timelineRange.start) && today.isBefore(timelineRange.end)) {
-            const todayOffset = today.diff(timelineRange.start, 'day');
-            const todayPercent = (todayOffset / totalDays) * 100;
+      <div style={{ display: 'flex', height: 40, borderBottom: '2px solid #d9d9d9' }}>
+        {/* 左侧占位列：与甘特图行的产品列对齐 */}
+        <div style={{ width: 160, flexShrink: 0 }} />
+        {/* 中间占位列：与甘特图行的天数列对齐 */}
+        <div style={{ width: 80, flexShrink: 0 }} />
+        {/* 甘特图区域：与甘特图条的父容器宽度一致 */}
+        <div style={{ flex: 1, position: 'relative' }}>
+          {/* 竖向网格线（每天） */}
+          {Array.from({ length: totalDays + 1 }, (_, i) => {
+            const date = timelineRange.start.add(i, 'day');
+            const leftPercent = (i / totalDays) * 100;
+            const isMonday = date.day() === 1;
             return (
               <div
+                key={`grid-${i}`}
                 style={{
                   position: 'absolute',
-                  left: `${todayPercent}%`,
+                  left: `${leftPercent}%`,
                   height: '100%',
-                  borderLeft: '2px solid #ff4d4f',
-                  zIndex: 10,
+                  borderLeft: isMonday ? '1px solid #d9d9d9' : '1px solid #f0f0f0',
+                }}
+              />
+            );
+          })}
+          {/* 周刻度标签 */}
+          {ticks.map((tick, idx) => {
+            const offset = tick.diff(timelineRange.start, 'day');
+            const leftPercent = (offset / totalDays) * 100;
+
+            return (
+              <div
+                key={idx}
+                style={{
+                  position: 'absolute',
+                  left: `${leftPercent}%`,
+                  height: '100%',
+                  paddingLeft: 4,
+                  zIndex: 2,
                 }}
               >
-                <div style={{
-                  fontSize: 11,
-                  color: '#fff',
-                  background: '#ff4d4f',
-                  padding: '2px 4px',
-                  borderRadius: 3,
-                  marginTop: -2,
-                }}>
-                  今天
+                <div style={{ fontSize: 12, color: '#666', fontWeight: 500 }}>
+                  {tick.format('MM/DD')}
                 </div>
               </div>
             );
-          }
-          return null;
-        })()}
+          })}
+          {/* 今天标记 */}
+          {(() => {
+            const today = dayjs();
+            if (today.isAfter(timelineRange.start) && today.isBefore(timelineRange.end)) {
+              const todayOffset = today.diff(timelineRange.start, 'day');
+              const todayPercent = (todayOffset / totalDays) * 100;
+              return (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: `${todayPercent}%`,
+                    height: '100%',
+                    borderLeft: '2px solid #ff4d4f',
+                    zIndex: 10,
+                  }}
+                >
+                  <div style={{
+                    fontSize: 11,
+                    color: '#fff',
+                    background: '#ff4d4f',
+                    padding: '2px 4px',
+                    borderRadius: 3,
+                    marginTop: -2,
+                  }}>
+                    今天
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          })()}
+        </div>
       </div>
     );
   };
@@ -362,7 +508,7 @@ const ScheduleGantt: React.FC = () => {
                         </div>
                         {item.version && <div style={{ fontSize: 12, color: '#666', marginBottom: 2 }}>{item.version}</div>}
                         <div style={{ fontSize: 11, color: '#999' }}>
-                          {dayjs(item.startDate).format('MM/DD')} ~ {dayjs(item.endDate).format('MM/DD')}
+                          {parseLocalDate(item.startDate).format('MM/DD')} ~ {parseLocalDate(item.endDate).format('MM/DD')}
                         </div>
                       </div>
 
@@ -432,11 +578,11 @@ const ScheduleGantt: React.FC = () => {
                 {getStatusTag(selectedRiskItem)}
               </Descriptions.Item>
               <Descriptions.Item label="测试周期" span={2}>
-                {dayjs(selectedRiskItem.startDate).format('YYYY-MM-DD')} ~ {dayjs(selectedRiskItem.endDate).format('YYYY-MM-DD')}
+                {parseLocalDate(selectedRiskItem.startDate).format('YYYY-MM-DD')} ~ {parseLocalDate(selectedRiskItem.endDate).format('YYYY-MM-DD')}
               </Descriptions.Item>
               <Descriptions.Item label="完成期限">
                 <span style={{ color: selectedRiskItem.daysToEnd <= 0 ? '#ff4d4f' : selectedRiskItem.daysToEnd <= 3 ? '#faad14' : undefined }}>
-                  {dayjs(selectedRiskItem.endDate).format('YYYY-MM-DD')}
+                  {parseLocalDate(selectedRiskItem.endDate).format('YYYY-MM-DD')}
                   {selectedRiskItem.daysToEnd <= 0
                     ? ` (已超期 ${Math.abs(selectedRiskItem.daysToEnd)} 天)`
                     : ` (剩余 ${selectedRiskItem.daysToEnd} 天)`}

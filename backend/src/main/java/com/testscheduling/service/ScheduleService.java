@@ -17,7 +17,9 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -188,9 +190,50 @@ public class ScheduleService {
             long daysToEnd = ChronoUnit.DAYS.between(now, demand.getEndDate());
             item.setDaysToEnd(daysToEnd);
 
-            // 计算进度百分比（基于时间）
-            double progressPercentage = calculateProgressPercentage(demand, now);
+            // 计算进度百分比（基于人力分配）
+            double progressPercentage = calculateProgressPercentageByAllocation(demand, allocatedDays);
             item.setProgressPercentage(progressPercentage);
+
+            // 计算排班实际起止日期
+            if (!schedules.isEmpty()) {
+                LocalDate scheduleStart = schedules.stream()
+                    .map(Schedule::getDate)
+                    .min(LocalDate::compareTo)
+                    .orElse(null);
+                LocalDate scheduleEnd = schedules.stream()
+                    .map(Schedule::getDate)
+                    .max(LocalDate::compareTo)
+                    .orElse(null);
+                item.setScheduleStartDate(scheduleStart);
+                item.setScheduleEndDate(scheduleEnd);
+
+                // 判断排班是否超出测试周期
+                LocalDate demandEndDate = demand.getEndDate() != null ? demand.getEndDate().toLocalDate() : null;
+                if (scheduleEnd != null && demandEndDate != null) {
+                    item.setScheduleExceedsDemand(scheduleEnd.isAfter(demandEndDate));
+                } else {
+                    item.setScheduleExceedsDemand(false);
+                }
+
+                // 计算每日排班汇总
+                Map<LocalDate, List<Schedule>> schedulesByDate = schedules.stream()
+                    .collect(Collectors.groupingBy(Schedule::getDate));
+                List<GanttViewItem.DailySchedule> dailySchedules = new ArrayList<>();
+                for (Map.Entry<LocalDate, List<Schedule>> entry : schedulesByDate.entrySet()) {
+                    GanttViewItem.DailySchedule daily = new GanttViewItem.DailySchedule();
+                    daily.setDate(entry.getKey());
+                    daily.setTotalPercentage(entry.getValue().stream().mapToInt(Schedule::getPercentage).sum());
+                    daily.setStaffCount(entry.getValue().size());
+                    dailySchedules.add(daily);
+                }
+                dailySchedules.sort(Comparator.comparing(GanttViewItem.DailySchedule::getDate));
+                item.setDailySchedules(dailySchedules);
+            } else {
+                item.setScheduleStartDate(null);
+                item.setScheduleEndDate(null);
+                item.setScheduleExceedsDemand(false);
+                item.setDailySchedules(new ArrayList<>());
+            }
 
             // 计算风险分数和风险因素
             RiskAssessment risk = assessRisk(demand, allocatedDays, daysToEnd, remainingDays);
@@ -225,6 +268,24 @@ public class ScheduleService {
 
         // 限制在 0-100 之间
         double percentage = (elapsedDays * 100.0) / totalDays;
+        return Math.max(0.0, Math.min(100.0, percentage));
+    }
+
+    /**
+     * 计算进度百分比（基于人力分配）
+     * 进度 = 已分配人力 / 需求人力 * 100
+     */
+    private double calculateProgressPercentageByAllocation(TestDemand demand, double allocatedDays) {
+        if (demand.getManpowerDemand() == null || demand.getManpowerDemand().doubleValue() <= 0) {
+            return 0.0;
+        }
+
+        // 如果已完成，返回 100%
+        if ("completed".equals(demand.getStatus())) {
+            return 100.0;
+        }
+
+        double percentage = (allocatedDays / demand.getManpowerDemand().doubleValue()) * 100.0;
         return Math.max(0.0, Math.min(100.0, percentage));
     }
 
