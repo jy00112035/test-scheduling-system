@@ -819,19 +819,14 @@ const ScheduleWorkbench: React.FC = () => {
 
   // ---- 发布全部 ----
   const handlePublishAll = () => {
-    // 筛选可发布需求：有草稿排班 + 人力已满足 + 无冲突
+    // 筛选可发布需求：有草稿排班即可
     const publishableDemands = demands.filter(d => {
       const hasDraft = schedules.some(s => s.demandId === d.id && !s.published);
-      if (!hasDraft) return false;
-      if (unfulfilledDemands.has(d.id)) return false;
-      const hasConflict = conflictDetails.some(c =>
-        schedules.some(s => s.demandId === d.id && s.staffId === c.staffId && s.date === c.date)
-      );
-      return !hasConflict;
+      return hasDraft;
     });
 
     if (publishableDemands.length === 0) {
-      message.info('没有可发布的排班（需有草稿排班、人力已满足且无冲突）');
+      message.info('没有可发布的排班（需有草稿排班）');
       return;
     }
 
@@ -873,6 +868,7 @@ const ScheduleWorkbench: React.FC = () => {
           setPendingChangeDemandIds(new Set());
           setSelectedDemandIds(new Set());
           setConflictDetails([]);
+          setUnfulfilledDemands(new Set());
           clearDraftFromLocalStorage();
           if (failCount === 0) {
             message.success(`已成功发布 ${successCount} 个需求的排班`);
