@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Select, DatePicker, Tag, Modal, Descriptions, Spin, message, Empty } from 'antd';
-import { ExclamationCircleOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import dayjs, { Dayjs } from 'dayjs';
 import { api } from '../services/api';
 
@@ -150,34 +150,35 @@ const ScheduleGantt: React.FC = () => {
   // 获取产品列表
   const productOptions = Array.from(new Set(ganttData.map(item => item.product)));
 
-  // 获取排班状态颜色
+  // 获取需求周期框体颜色
+  // 绿色 = 人力满足 + 不超出（两者必须同时满足）
+  // 橙色 = 人力不足 或 延期满足
   const getScheduleStatusColor = (item: GanttViewItem) => {
-    const manpowerMet = item.allocatedDays >= item.manpowerDemand;
-    if (!manpowerMet) return '#faad14'; // 橙色：人力不满足
+    const hasSchedules = item.scheduleStartDate && item.scheduleEndDate
+      && item.dailySchedules && item.dailySchedules.length > 0;
 
-    if (!item.scheduleEndDate || !item.endDate) return '#1890ff'; // 蓝色：默认
+    // 未排班 → 灰色
+    if (!hasSchedules) return '#d9d9d9';
 
-    const scheduleEnd = parseLocalDate(item.scheduleEndDate);
-    const demandEnd = parseLocalDate(item.endDate);
+    // 人力满足 且 不超出 → 绿色
+    if (item.allocatedDays >= item.manpowerDemand && !item.scheduleExceedsDemand) {
+      return '#52c41a';
+    }
 
-    if (scheduleEnd.isBefore(demandEnd, 'day')) return '#52c41a'; // 绿色：提前完成
-    if (scheduleEnd.isSame(demandEnd, 'day')) return '#faad14'; // 黄色：刚好完成
-    return '#ff4d4f'; // 红色：超出周期
+    // 人力不足 或 延期满足 → 橙色
+    return '#faad14';
   };
 
   // 获取排班状态描述
   const getScheduleStatusText = (item: GanttViewItem) => {
-    const manpowerMet = item.allocatedDays >= item.manpowerDemand;
-    if (!manpowerMet) return '人力不足';
+    const hasSchedules = item.scheduleStartDate && item.scheduleEndDate
+      && item.dailySchedules && item.dailySchedules.length > 0;
 
-    if (!item.scheduleEndDate || !item.endDate) return '未排班';
-
-    const scheduleEnd = parseLocalDate(item.scheduleEndDate);
-    const demandEnd = parseLocalDate(item.endDate);
-
-    if (scheduleEnd.isBefore(demandEnd, 'day')) return '提前完成';
-    if (scheduleEnd.isSame(demandEnd, 'day')) return '按时完成';
-    return '超出周期';
+    if (!hasSchedules) return '未排班';
+    if (item.allocatedDays >= item.manpowerDemand && !item.scheduleExceedsDemand) {
+      return '人力满足';
+    }
+    return '人力不足/延期';
   };
 
   // 渲染甘特图条
@@ -217,36 +218,57 @@ const ScheduleGantt: React.FC = () => {
     const extendsRight = barEnd.diff(demandEnd, 'day') > 0;
     const hasExtension = extendsLeft || extendsRight;
 
-    // 渲染每日排班详情（覆盖整个条框范围）
-    const renderDailySchedules = () => {
+    // 需求周期内的每日排班（白色半透明方块）
+    const renderDailyDemandSchedules = () => {
       if (!item.dailySchedules || item.dailySchedules.length === 0) return null;
-
       return item.dailySchedules.map((daily, idx) => {
         const dailyDate = parseLocalDate(daily.date);
-        // 渲染整个条框范围内的排班（含超出测试周期的日期）
-        if (dailyDate.isBefore(barStart, 'day') || dailyDate.isAfter(barEnd, 'day')) return null;
-        const dayOffset = dailyDate.diff(barStart, 'day');
-        const dayLeftPercent = (dayOffset / barDuration) * 100;
-        const dayWidthPercent = (1 / barDuration) * 100;
-
-        // 判断是否在需求周期内
-        const isInDemand = !dailyDate.isBefore(demandStart, 'day') && !dailyDate.isAfter(demandEnd, 'day');
+        if (dailyDate.isBefore(demandStart, 'day') || dailyDate.isAfter(demandEnd, 'day')) return null;
+        const dayOffset = dailyDate.diff(demandStart, 'day');
+        const dayLeftPercent = (dayOffset / demandDuration) * 100;
+        const dayWidthPercent = (1 / demandDuration) * 100;
         const opacity = Math.min(1, daily.totalPercentage / 100);
-
         return (
           <div
-            key={idx}
+            key={`d-${idx}`}
             style={{
               position: 'absolute',
               left: `${dayLeftPercent}%`,
               width: `${dayWidthPercent}%`,
               height: '100%',
-              background: isInDemand
-                ? `rgba(24, 144, 255, ${opacity})`
-                : `rgba(255, 77, 79, ${opacity * 0.7})`,
-              borderRight: '1px solid rgba(255,255,255,0.3)',
+              background: `rgba(255, 255, 255, ${opacity * 0.7})`,
+              borderRight: '1px solid rgba(255,255,255,0.2)',
             }}
-            title={`${daily.date}: ${daily.totalPercentage}% (${daily.staffCount}人)${isInDemand ? '' : ' [超出测试周期]'}`}
+            title={`${daily.date}: ${daily.totalPercentage}% (${daily.staffCount}人)`}
+          />
+        );
+      });
+    };
+
+    // 超出需求周期的排班色块（红色半透明）
+    const renderDailyExtensionSchedules = () => {
+      if (!hasExtension || !item.dailySchedules || item.dailySchedules.length === 0) return null;
+      return item.dailySchedules.map((daily, idx) => {
+        const dailyDate = parseLocalDate(daily.date);
+        // 只渲染超出需求周期的日期
+        if (!dailyDate.isBefore(demandStart, 'day') && !dailyDate.isAfter(demandEnd, 'day')) return null;
+        if (dailyDate.isBefore(barStart, 'day') || dailyDate.isAfter(barEnd, 'day')) return null;
+        const dayOffset = dailyDate.diff(barStart, 'day');
+        const dayLeftPercent = (dayOffset / barDuration) * 100;
+        const dayWidthPercent = (1 / barDuration) * 100;
+        const opacity = Math.min(1, daily.totalPercentage / 100);
+        return (
+          <div
+            key={`ext-${idx}`}
+            style={{
+              position: 'absolute',
+              left: `${dayLeftPercent}%`,
+              width: `${dayWidthPercent}%`,
+              height: '100%',
+              background: `rgba(255, 77, 79, ${opacity * 0.5})`,
+              borderRight: '1px solid rgba(255,255,255,0.2)',
+            }}
+            title={`${daily.date}: ${daily.totalPercentage}% (${daily.staffCount}人) [超出测试周期]`}
           />
         );
       });
@@ -274,60 +296,79 @@ const ScheduleGantt: React.FC = () => {
           left: `${leftPercent}%`,
           width: `${widthPercent}%`,
           height: 32,
-          background: hasExtension ? `${scheduleColor}40` : scheduleColor,
+          background: 'transparent',
           borderRadius: 4,
-          border: hasExtension ? '1px dashed #ff4d4f' : '1px solid transparent',
-          overflow: 'hidden',
+          overflow: 'visible',
           cursor: hasRisk ? 'pointer' : 'default',
           transition: 'all 0.3s',
         }}
         onClick={() => hasRisk && handleRiskClick(item)}
         title={tooltip}
       >
-        {/* 需求周期部分：实色叠加层 */}
+        {/* 超出部分：红色半透明延伸尾 */}
         {hasExtension && (
           <div style={{
             position: 'absolute',
-            left: `${demandLeftPercent}%`,
-            width: `${demandWidthPercent}%`,
+            left: 0,
+            width: '100%',
             height: '100%',
-            background: scheduleColor,
-          }} />
+            background: `rgba(255, 77, 79, 0.15)`,
+            borderRadius: 4,
+            border: '1px dashed #ff4d4f',
+            overflow: 'hidden',
+          }}>
+            {/* 超出部分的每日排班色块 */}
+            {renderDailyExtensionSchedules()}
+          </div>
         )}
 
-        {/* 每日排班详情（覆盖整个条框范围） */}
-        {renderDailySchedules()}
-
-        {/* 产品名称 + 进度 */}
+        {/* 需求周期框体：可见边框 + 状态色填充 */}
         <div style={{
-          position: 'relative',
-          zIndex: 1,
-          display: 'flex',
-          alignItems: 'center',
+          position: 'absolute',
+          left: `${demandLeftPercent}%`,
+          width: `${demandWidthPercent}%`,
           height: '100%',
-          padding: '0 8px',
+          background: scheduleColor,
+          borderRadius: 4,
+          border: '2px solid rgba(0,0,0,0.25)',
+          boxSizing: 'border-box',
+          overflow: 'hidden',
+          zIndex: 1,
         }}>
+          {/* 需求周期内的每日排班色块 */}
+          {renderDailyDemandSchedules()}
+
+          {/* 产品名称 + 进度 */}
           <div style={{
-            fontSize: 12,
-            fontWeight: 500,
-            color: '#fff',
-            textShadow: '0 1px 2px rgba(0,0,0,0.3)',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
+            position: 'relative',
+            zIndex: 2,
+            display: 'flex',
+            alignItems: 'center',
+            height: '100%',
+            padding: '0 8px',
           }}>
-            {item.product}
-            {hasRisk && <ExclamationCircleOutlined style={{ marginLeft: 4, color: '#fff' }} />}
-          </div>
-          <div style={{
-            marginLeft: 'auto',
-            fontSize: 11,
-            color: '#fff',
-            background: 'rgba(0,0,0,0.25)',
-            padding: '2px 6px',
-            borderRadius: 3,
-          }}>
-            {item.progressPercentage.toFixed(0)}%
+            <div style={{
+              fontSize: 12,
+              fontWeight: 500,
+              color: '#fff',
+              textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}>
+              {item.product}
+              {hasRisk && <ExclamationCircleOutlined style={{ marginLeft: 4, color: '#fff' }} />}
+            </div>
+            <div style={{
+              marginLeft: 'auto',
+              fontSize: 11,
+              color: '#fff',
+              background: 'rgba(0,0,0,0.25)',
+              padding: '2px 6px',
+              borderRadius: 3,
+            }}>
+              {item.progressPercentage.toFixed(0)}%
+            </div>
           </div>
         </div>
       </div>
@@ -339,9 +380,9 @@ const ScheduleGantt: React.FC = () => {
     const ticks: Dayjs[] = [];
     let current = timelineRange.start.startOf('day');
 
-    while (current.isBefore(timelineRange.end)) {
+    while (current.isBefore(timelineRange.end) || current.isSame(timelineRange.end, 'day')) {
       ticks.push(current);
-      current = current.add(7, 'day'); // 每周一个刻度
+      current = current.add(1, 'day'); // 每天一个刻度
     }
 
     return (
@@ -369,10 +410,12 @@ const ScheduleGantt: React.FC = () => {
               />
             );
           })}
-          {/* 周刻度标签 */}
+          {/* 每日日期标签 */}
           {ticks.map((tick, idx) => {
             const offset = tick.diff(timelineRange.start, 'day');
             const leftPercent = (offset / totalDays) * 100;
+            const isMonday = tick.day() === 1;
+            const isFirstOfMonth = tick.date() === 1;
 
             return (
               <div
@@ -380,14 +423,34 @@ const ScheduleGantt: React.FC = () => {
                 style={{
                   position: 'absolute',
                   left: `${leftPercent}%`,
+                  top: 0,
                   height: '100%',
-                  paddingLeft: 4,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'flex-start',
+                  alignItems: 'center',
+                  paddingTop: 2,
                   zIndex: 2,
+                  pointerEvents: 'none',
                 }}
               >
-                <div style={{ fontSize: 12, color: '#666', fontWeight: 500 }}>
-                  {tick.format('MM/DD')}
-                </div>
+                <span style={{
+                  fontSize: 10,
+                  color: isMonday ? '#1890ff' : '#999',
+                  fontWeight: isMonday ? 600 : 400,
+                  lineHeight: '14px',
+                }}>
+                  {tick.format('D')}
+                </span>
+                {(isFirstOfMonth || idx === 0) && (
+                  <span style={{
+                    fontSize: 9,
+                    color: '#bbb',
+                    lineHeight: '12px',
+                  }}>
+                    {tick.format('M')}月
+                  </span>
+                )}
               </div>
             );
           })}
@@ -476,8 +539,62 @@ const ScheduleGantt: React.FC = () => {
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <div style={{ minWidth: 1200 }}>
+                {/* 图例 + 时间轴冻结容器 */}
+                <div style={{
+                  position: 'sticky',
+                  top: 0,
+                  zIndex: 100,
+                  background: '#fff',
+                  paddingBottom: 4,
+                }}>
+                {/* 颜色图例 */}
+                <div style={{
+                  display: 'flex',
+                  gap: 16,
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  padding: '8px 0',
+                  borderBottom: '1px solid #f0f0f0',
+                }}>
+                  <span style={{ fontSize: 12, color: '#999' }}>图例：</span>
+                  {[
+                    { color: '#d9d9d9', label: '未排班' },
+                    { color: '#52c41a', label: '人力满足（未超期）' },
+                    { color: '#faad14', label: '人力不足/延期' },
+                    { color: '#ff4d4f', label: '超期部分' },
+                  ].map(item => (
+                    <span key={item.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                      <span style={{
+                        display: 'inline-block',
+                        width: 14,
+                        height: 14,
+                        background: item.color,
+                        borderRadius: 2,
+                        border: '1px solid rgba(0,0,0,0.15)',
+                      }} />
+                      {item.label}
+                    </span>
+                  ))}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                    <span style={{
+                      display: 'inline-block',
+                      width: 14,
+                      height: 14,
+                      background: '#fff',
+                      border: '1px dashed #ff4d4f',
+                      borderRadius: 2,
+                    }} />
+                    超出测试周期
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                    <ExclamationCircleOutlined style={{ color: '#ff4d4f', fontSize: 12 }} />
+                    风险警告
+                  </span>
+                </div>
+
                 {/* 时间轴 */}
                 {renderTimeline()}
+                </div>
 
                 {/* 甘特图行 */}
                 <div style={{ marginTop: 16 }}>
@@ -512,20 +629,32 @@ const ScheduleGantt: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* 第二列：超期/剩余天数 */}
+                      {/* 第二列：超期/人力状态 */}
                       <div style={{ width: 80, flexShrink: 0, paddingRight: 12, textAlign: 'center' }}>
                         {item.daysToEnd < 0 ? (
-                          <span style={{ color: '#ff4d4f', fontWeight: 500, fontSize: 13 }}>
-                            超期 {Math.abs(item.daysToEnd)} 天
-                          </span>
-                        ) : item.daysToEnd === 0 ? (
-                          <span style={{ color: '#faad14', fontWeight: 500, fontSize: 13 }}>
-                            今天到期
-                          </span>
+                          // 已超期
+                          item.allocatedDays >= item.manpowerDemand ? (
+                            <span style={{ color: '#ff4d4f', fontWeight: 500, fontSize: 13 }}>
+                              超期 {Math.abs(item.daysToEnd)} 天
+                            </span>
+                          ) : (
+                            <span style={{ color: '#ff4d4f', fontWeight: 500, fontSize: 12, lineHeight: '18px' }}>
+                              超期 {Math.abs(item.daysToEnd)} 天
+                              <br />
+                              <span style={{ color: '#faad14', fontSize: 11 }}>
+                                需求未满足
+                              </span>
+                            </span>
+                          )
                         ) : (
-                          <span style={{ color: '#52c41a', fontSize: 13 }}>
-                            剩余 {item.daysToEnd} 天
-                          </span>
+                          // 未超期
+                          item.allocatedDays >= item.manpowerDemand ? (
+                            <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 20 }} />
+                          ) : (
+                            <span style={{ color: '#faad14', fontWeight: 500, fontSize: 12 }}>
+                              需求未满足
+                            </span>
+                          )
                         )}
                       </div>
 

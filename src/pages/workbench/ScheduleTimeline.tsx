@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Card, Space, DatePicker, Select, InputNumber, Tag, Button, Popconfirm, Popover, Divider, Tooltip, Checkbox, Modal, Input } from 'antd';
-import { DeleteOutlined, FilterFilled, FilterOutlined, SearchOutlined } from '@ant-design/icons';
+import { DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { ScheduleItem, DemandItem, StaffItem, DailyStatusEntry } from './workbenchTypes';
 import {
@@ -115,7 +115,6 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
   const [coefficientFilter, setCoefficientFilter] = useState<string[]>([]);
   const [clearanceFilter, setClearanceFilter] = useState<string[]>([]); // 'confidential' | 'normal'
   const [headerTestTypeFilter, setHeaderTestTypeFilter] = useState<string[]>([]);
-  const [headerPopover, setHeaderPopover] = useState<string | null>(null);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(excludedTestTypes));
@@ -220,7 +219,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
         </Space>
       }
       extra={
-        <Space size={8}>
+        <Space size={8} wrap>
           <DatePicker
             picker="week"
             value={weekViewDate}
@@ -238,6 +237,47 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
             maxTagCount={2}
             options={[...new Set(schedules.map(s => s.product).filter(Boolean))]
               .map(p => ({ label: p, value: p }))}
+          />
+          <Input
+            placeholder="搜索姓名"
+            value={nameSearch}
+            onChange={(e) => setNameSearch(e.target.value || '')}
+            allowClear
+            prefix={<SearchOutlined />}
+            style={{ width: 140 }}
+          />
+          <Select
+            mode="multiple"
+            placeholder="系数"
+            style={{ width: 100 }}
+            value={coefficientFilter}
+            onChange={setCoefficientFilter}
+            allowClear
+            maxTagCount={1}
+            options={allCoefficients.map(c => ({ label: c, value: c }))}
+          />
+          <Select
+            mode="multiple"
+            placeholder="保密权限"
+            style={{ width: 130 }}
+            value={clearanceFilter}
+            onChange={setClearanceFilter}
+            allowClear
+            maxTagCount={1}
+            options={[
+              { label: '保密', value: 'confidential' },
+              { label: '普通', value: 'normal' },
+            ]}
+          />
+          <Select
+            mode="multiple"
+            placeholder="测试类型"
+            style={{ width: 130 }}
+            value={headerTestTypeFilter}
+            onChange={setHeaderTestTypeFilter}
+            allowClear
+            maxTagCount={1}
+            options={allHeaderTestTypes.map(t => ({ label: t, value: t }))}
           />
         </Space>
       }
@@ -262,168 +302,26 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
         <table className="kanban-table" style={{ minWidth: 1200 }}>
           <thead>
             <tr style={{ position: 'sticky', top: 0, zIndex: 5 }}>
-              {/* 姓名+系数 — 搜索+筛选 */}
-              <th style={{ minWidth: 75, position: 'sticky', left: 0, background: '#fafafa', zIndex: 6, cursor: 'pointer' }}>
-                <Space size={4}>
-                  <Popover
-                    trigger="click"
-                    open={headerPopover === 'name'}
-                    onOpenChange={(open) => setHeaderPopover(open ? 'name' : null)}
-                    placement="bottomLeft"
-                    content={
-                      <div style={{ width: 160 }}>
-                        <Input
-                          placeholder="搜索姓名"
-                          size="small"
-                          allowClear
-                          value={nameSearch}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNameSearch(e.target.value || '')}
-                          autoFocus
-                        />
-                      </div>
-                    }
-                  >
-                    <span>
-                      姓名 {nameSearch
-                        ? <FilterFilled style={{ fontSize: 10, color: '#1677ff' }} />
-                        : <SearchOutlined style={{ fontSize: 10, color: '#bbb' }} />}
-                    </span>
-                  </Popover>
-                  <Popover
-                    trigger="click"
-                    open={headerPopover === 'coefficient'}
-                    onOpenChange={(open) => setHeaderPopover(open ? 'coefficient' : null)}
-                    placement="bottomLeft"
-                    content={
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {allCoefficients.map(c => (
-                          <Checkbox
-                            key={c}
-                            checked={coefficientFilter.includes(c)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setCoefficientFilter(prev => [...prev, c]);
-                              } else {
-                                setCoefficientFilter(prev => prev.filter(x => x !== c));
-                              }
-                            }}
-                          >
-                            {c}
-                          </Checkbox>
-                        ))}
-                        {allCoefficients.length > 0 && (
-                          <>
-                            <Divider style={{ margin: '4px 0' }} />
-                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                              <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setCoefficientFilter([])}>全选</Button>
-                              <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setCoefficientFilter([...allCoefficients])}>全不选</Button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    }
-                  >
-                    <span>
-                      系数 {coefficientFilter.length > 0
-                        ? <FilterFilled style={{ fontSize: 10, color: '#1677ff' }} />
-                        : <FilterOutlined style={{ fontSize: 10, color: '#bbb' }} />}
-                    </span>
-                  </Popover>
-                </Space>
+              {/* 姓名 */}
+              <th style={{ minWidth: 65, position: 'sticky', left: 0, background: '#fafafa', zIndex: 6 }}>
+                <span>姓名</span>
               </th>
-              {/* 保密权限 — 多选筛选 */}
-              <th style={{ minWidth: 50, position: 'sticky', left: 75, background: '#fafafa', zIndex: 6, cursor: 'pointer' }}>
-                <Popover
-                  trigger="click"
-                  open={headerPopover === 'clearance'}
-                  onOpenChange={(open) => setHeaderPopover(open ? 'clearance' : null)}
-                  placement="bottomLeft"
-                  content={
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      <Checkbox
-                        checked={clearanceFilter.includes('confidential')}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setClearanceFilter(prev => [...prev, 'confidential']);
-                          } else {
-                            setClearanceFilter(prev => prev.filter(x => x !== 'confidential'));
-                          }
-                        }}
-                      >
-                        <Tag color="red" style={{ fontSize: 10, padding: '0 4px', margin: 0 }}>保密</Tag>
-                      </Checkbox>
-                      <Checkbox
-                        checked={clearanceFilter.includes('normal')}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setClearanceFilter(prev => [...prev, 'normal']);
-                          } else {
-                            setClearanceFilter(prev => prev.filter(x => x !== 'normal'));
-                          }
-                        }}
-                      >
-                        普通
-                      </Checkbox>
-                      <Divider style={{ margin: '4px 0' }} />
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setClearanceFilter([])}>全选</Button>
-                        <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setClearanceFilter(['confidential', 'normal'])}>全不选</Button>
-                      </div>
-                    </div>
-                  }
-                >
-                  <span>
-                    保密权限 {clearanceFilter.length > 0
-                      ? <FilterFilled style={{ fontSize: 10, color: '#1677ff', marginLeft: 2 }} />
-                      : <FilterOutlined style={{ fontSize: 10, color: '#bbb', marginLeft: 2 }} />}
-                  </span>
-                </Popover>
+              {/* 系数 */}
+              <th style={{ minWidth: 50, position: 'sticky', left: 65, background: '#fafafa', zIndex: 6 }}>
+                <span>系数</span>
               </th>
-              {/* 测试类型 — 多选筛选 */}
-              <th style={{ minWidth: 45, position: 'sticky', left: 125, background: '#fafafa', zIndex: 6, cursor: 'pointer' }}>
-                <Popover
-                  trigger="click"
-                  open={headerPopover === 'testType'}
-                  onOpenChange={(open) => setHeaderPopover(open ? 'testType' : null)}
-                  placement="bottomLeft"
-                  content={
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 240, overflow: 'auto' }}>
-                      {allHeaderTestTypes.length === 0 && <span style={{ color: '#999', fontSize: 12 }}>暂无测试类型</span>}
-                      {allHeaderTestTypes.map(t => (
-                        <Checkbox
-                          key={t}
-                          checked={headerTestTypeFilter.includes(t)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setHeaderTestTypeFilter(prev => [...prev, t]);
-                            } else {
-                              setHeaderTestTypeFilter(prev => prev.filter(x => x !== t));
-                            }
-                          }}
-                        >
-                          {t}
-                        </Checkbox>
-                      ))}
-                      {allHeaderTestTypes.length > 0 && (
-                        <>
-                          <Divider style={{ margin: '4px 0' }} />
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setHeaderTestTypeFilter([])}>全选</Button>
-                            <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setHeaderTestTypeFilter([...allHeaderTestTypes])}>全不选</Button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  }
-                >
-                  <span>
-                    测试类型 {headerTestTypeFilter.length > 0
-                      ? <FilterFilled style={{ fontSize: 10, color: '#1677ff', marginLeft: 2 }} />
-                      : <FilterOutlined style={{ fontSize: 10, color: '#bbb', marginLeft: 2 }} />}
-                  </span>
-                </Popover>
+              {/* 保密权限 */}
+              <th style={{ minWidth: 60, position: 'sticky', left: 115, background: '#fafafa', zIndex: 6 }}>
+                <span>保密权限</span>
               </th>
-              <th style={{ minWidth: 140, position: 'sticky', left: 170, background: '#fafafa', zIndex: 6 }}>熟悉模块</th>
+              {/* 测试类型 */}
+              <th style={{ minWidth: 65, position: 'sticky', left: 175, background: '#fafafa', zIndex: 6 }}>
+                <span>测试类型</span>
+              </th>
+              {/* 熟悉模块 */}
+              <th style={{ minWidth: 140, position: 'sticky', left: 240, background: '#fafafa', zIndex: 6 }}>
+                <span>熟悉模块</span>
+              </th>
               {weekDates.map((date) => {
                 const isWeekend = [0, 6].includes(date.day());
                 return (
@@ -448,21 +346,23 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                 {/* Sticky columns */}
                 <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 12, whiteSpace: 'nowrap' }}>
                   <strong>{staff.name}</strong>
-                  <Tag color={staff.currentCoefficient === 1.0 ? 'green' : 'orange'} style={{ fontSize: 10, padding: '0 2px', marginLeft: 2 }}>
+                </td>
+                <td style={{ position: 'sticky', left: 65, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, textAlign: 'center' }}>
+                  <Tag color={staff.currentCoefficient === 1.0 ? 'green' : 'orange'} style={{ fontSize: 10, padding: '0 2px' }}>
                     {staff.currentCoefficient?.toFixed(1) || '1.0'}
                   </Tag>
                 </td>
-                <td style={{ position: 'sticky', left: 75, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, textAlign: 'center' }}>
+                <td style={{ position: 'sticky', left: 115, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, textAlign: 'center' }}>
                   {staff.confidentialClearance ? (
                     <Tag color="red" style={{ fontSize: 10, padding: '0 4px' }}>保密</Tag>
                   ) : (
                     <span style={{ color: '#ccc' }}>-</span>
                   )}
                 </td>
-                <td style={{ position: 'sticky', left: 125, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
+                <td style={{ position: 'sticky', left: 175, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
                   {staff.testType || '-'}
                 </td>
-                <td style={{ position: 'sticky', left: 170, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
+                <td style={{ position: 'sticky', left: 240, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
                   {staff.familiarModules ? (
                     <Tooltip title={staff.familiarModules}>
                       <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>
@@ -708,7 +608,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
             ))}
             {/* 空闲可用工作量汇总行 — 固定在底部 */}
             <tr style={{ position: 'sticky', bottom: 0, zIndex: 3, background: '#f0f5ff', fontWeight: 500, boxShadow: '0 -2px 4px rgba(0,0,0,0.08)' }}>
-              <td colSpan={4} style={{ position: 'sticky', left: 0, background: '#f0f5ff', zIndex: 4, padding: '6px 8px', fontSize: 12, whiteSpace: 'nowrap', borderTop: '2px solid #1677ff' }}>
+              <td colSpan={5} style={{ position: 'sticky', left: 0, background: '#f0f5ff', zIndex: 4, padding: '6px 8px', fontSize: 12, whiteSpace: 'nowrap', borderTop: '2px solid #1677ff' }}>
                 <span
                   style={{ cursor: 'pointer', userSelect: 'none' }}
                   onClick={() => setFilterModalOpen(true)}

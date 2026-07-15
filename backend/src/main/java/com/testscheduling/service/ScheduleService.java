@@ -187,7 +187,7 @@ public class ScheduleService {
             item.setRemainingDays(Math.max(0, remainingDays));
 
             // 计算距离结束日期的天数
-            long daysToEnd = ChronoUnit.DAYS.between(now, demand.getEndDate());
+            long daysToEnd = ChronoUnit.DAYS.between(now.toLocalDate(), demand.getEndDate().toLocalDate());
             item.setDaysToEnd(daysToEnd);
 
             // 计算进度百分比（基于人力分配）
@@ -259,12 +259,12 @@ public class ScheduleService {
             return 100.0;
         }
 
-        long totalDays = ChronoUnit.DAYS.between(demand.getStartDate(), demand.getEndDate());
+        long totalDays = ChronoUnit.DAYS.between(demand.getStartDate().toLocalDate(), demand.getEndDate().toLocalDate());
         if (totalDays <= 0) {
             return 0.0;
         }
 
-        long elapsedDays = ChronoUnit.DAYS.between(demand.getStartDate(), now);
+        long elapsedDays = ChronoUnit.DAYS.between(demand.getStartDate().toLocalDate(), now.toLocalDate());
 
         // 限制在 0-100 之间
         double percentage = (elapsedDays * 100.0) / totalDays;

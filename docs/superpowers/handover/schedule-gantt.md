@@ -98,7 +98,40 @@ Timeline 行:  [160px占位] [80px占位] [flex:1 网格线区域]
 - 左列：`width: 160, flexShrink: 0`
 - 中列：`width: 80, flexShrink: 0`
 
-### 4.3 进度计算
+### 4.3 条框渲染：框体 + 延伸尾双层结构 —— ⚠️ 核心
+
+条框渲染分为两层：
+
+```
+无超出时:  [=========框体(灰/绿/橙)=========]
+有超出时:  [=========框体(灰/绿/橙)=========]---延伸尾(红色半透明+虚线)---
+                                                    ↑
+                                              排班超出日期
+```
+
+**外层容器**（透明背景，`overflow: visible`）：
+- 跨越从 `min(需求开始, 排班开始)` 到 `max(需求结束, 排班结束)` 的全部日期
+- 位置计算：`leftPercent`/`widthPercent` 基于 `barStart`/`barEnd`（扩展后的范围）
+
+**延伸尾层**（仅 `hasExtension` 时渲染）：
+- 填满整个外层容器
+- 背景：`rgba(255, 77, 79, 0.15)`（淡红色）
+- 边框：`1px dashed #ff4d4f`（红色虚线）
+- 内含超出需求周期的每日排班色块（`renderDailyExtensionSchedules()`）
+
+**框体层**（需求周期，`zIndex: 1` 浮在延伸尾上方）：
+- 宽度 = 需求周期占条框的比例（`demandWidthPercent`）
+- 位置 = 需求开始相对条框开始的偏移（`demandLeftPercent`）
+- 填充：`scheduleColor`（`getScheduleStatusColor()` 返回值）
+- 边框：`2px solid rgba(0,0,0,0.25)`（可见框线，标记需求周期边界）
+- 内含需求周期内的每日排班色块（`renderDailyDemandSchedules()`）+ 产品名/进度文字
+
+### 4.4 每日排班拆分为两个渲染函数
+
+- **`renderDailyDemandSchedules()`**：渲染需求周期内的排班日期，位置相对于框体宽度
+- **`renderDailyExtensionSchedules()`**：渲染超出需求周期的排班日期，位置相对于条框总宽度，仅 `hasExtension` 时调用
+
+### 4.5 进度计算
 
 **当前方案（v2）：** 基于人力分配
 ```
@@ -111,20 +144,115 @@ progressPercentage = elapsedDays / totalDays × 100
 ```
 > v1 方案对未来的需求进度为 0%，已被替换。保留在 `calculateProgressPercentage()` 方法中但不再调用。
 
+### 4.6 时间轴每日日期标签
+
+**时间轴刻度从每周改为每天**，每个日期列顶部显示日期数字，方便用户快速定位日期。
+
+```typescript
+// tick 生成：add(1, 'day') 而非 add(7, 'day')
+const ticks: Dayjs[] = [];
+let current = timelineRange.start.startOf('day');
+while (current.isBefore(timelineRange.end) || current.isSame(timelineRange.end, 'day')) {
+  ticks.push(current);
+  current = current.add(1, 'day');
+}
+```
+
+**渲染格式：**
+- 每天显示日期数字（`D` 格式，10px 字号），周一蓝色加粗（`#1890ff`）
+- 每月 1 日或第一个可见日额外显示"M月"（9px，灰色）
+- `pointerEvents: 'none'` 避免遮挡"今天"红线
+
+### 4.7 表头和图例冻结
+
+图例和时间轴包裹在 `position: sticky; top: 0; zIndex: 100` 容器中，需求多时向下滚动页面，表头固定在视口顶部不消失。
+
+```tsx
+<div style={{ overflowX: 'auto' }}>
+  <div style={{ minWidth: 1200 }}>
+    {/* 图例 + 时间轴冻结容器 */}
+    <div style={{ position: 'sticky', top: 0, zIndex: 100, background: '#fff', paddingBottom: 4 }}>
+      {/* 颜色图例 */}
+      {/* 时间轴 renderTimeline() */}
+    </div>
+    {/* 甘特图行 — 自然跟随页面滚动 */}
+  </div>
+</div>
+```
+
+> **注意：** `background: '#fff'` 必须设置，否则下方滚动内容穿透可见。水平滚动（`overflowX: 'auto'`）不受影响。不需要设置 `overflow-y` 或 `max-height` — 页面自然滚动，表头自动冻结。
+
 ---
 
 ## 五、颜色状态逻辑
 
+### 框体颜色（需求周期内）
+
+仅判断人力状态，红色不用于整个条：
+
 ```typescript
 getScheduleStatusColor(item):
-  if allocatedDays < manpowerDemand → '#faad14' // 🟠 橙色：人力不满足
-  if scheduleEnd < demandEnd           → '#52c41a' // 🟢 绿色：提前完成
-  if scheduleEnd == demandEnd          → '#faad14' // 🟡 黄色：按时完成
-  if scheduleEnd > demandEnd           → '#ff4d4f' // 🔴 红色：超出周期
-  fallback                             → '#1890ff' // 🔵 蓝色：默认
+  if 无排班（scheduleStartDate 为空 或 dailySchedules 为空） → '#d9d9d9' // ⬜ 灰色：未排班
+  if allocatedDays >= manpowerDemand && !scheduleExceedsDemand → '#52c41a' // 🟢 绿色：人力满足（未超期）
+  else                                                        → '#faad14' // 🟠 橙色：人力不足/延期
 ```
 
-甘特图条背景直接使用该颜色，超出测试周期时额外加红色虚线边框。
+**关键设计：绿色 = 人力满足 + 不超期（两者必须同时满足）。延期满足（虽人力够但超期）= 橙色。**
+
+### 延伸尾颜色（超出需求周期部分）
+
+排班日期超出需求结束日期时，框体外延伸红色半透明尾部：
+
+```typescript
+延伸背景: rgba(255, 77, 79, 0.15)  // 淡红色
+延伸边框: 1px dashed #ff4d4f       // 红色虚线
+延伸排班色块: rgba(255, 77, 79, opacity*0.5)  // 红色调半透明
+```
+
+**红色仅标注超期部分，不会出现在框体上。**
+
+### 每日排班色块
+
+- **需求周期内**：白色半透明方块（`rgba(255,255,255, opacity*0.7)`），叠加在框体底色上
+- **超出部分**：红色半透明方块（`rgba(255,77,79, opacity*0.5)`），仅在延伸尾中显示
+
+### 图例
+
+页面顶部时间轴上方显示颜色图例，包含 4 项：未排班(灰)、人力满足-未超期(绿)、人力不足/延期(橙)、超期部分(红)。
+
+### 第二列状态显示（四象限逻辑）
+
+甘特图行第二列结合**超期状态 + 人力满足状态**做四象限判断，替代旧的纯时间判断：
+
+| 超期? | 人力满足? | 显示 |
+|-------|-----------|------|
+| `daysToEnd < 0` | `allocatedDays >= manpowerDemand` | 红色 "超期 N 天" |
+| `daysToEnd < 0` | `allocatedDays < manpowerDemand` | 红色 "超期 N 天" + 换行 + 橙色 "需求未满足" |
+| `daysToEnd >= 0` | `allocatedDays >= manpowerDemand` | 绿色 `CheckCircleOutlined` 图标 ✓ |
+| `daysToEnd >= 0` | `allocatedDays < manpowerDemand` | 橙色 "需求未满足" |
+
+```typescript
+{item.daysToEnd < 0 ? (
+  // 已超期
+  item.allocatedDays >= item.manpowerDemand ? (
+    <span style={{ color: '#ff4d4f' }}>超期 {Math.abs(item.daysToEnd)} 天</span>
+  ) : (
+    <span>
+      超期 {Math.abs(item.daysToEnd)} 天<br />
+      <span style={{ color: '#faad14' }}>需求未满足</span>
+    </span>
+  )
+) : (
+  // 未超期
+  item.allocatedDays >= item.manpowerDemand ? (
+    <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 20 }} />
+  ) : (
+    <span style={{ color: '#faad14' }}>需求未满足</span>
+  )
+)}
+```
+
+> **注意：** 移除了旧的"今天到期"、"剩余 N 天"状态，改为图标+状态文字。
 
 ---
 
@@ -151,13 +279,17 @@ getScheduleStatusColor(item):
 ## 八、已知坑点（修改前必读）
 
 1. **不要用 `dayjs()` 直接解析日期** → 必须走 `parseLocalDate()`
-2. **修改 Timeline 时不要忘记占位列** → 宽度必须与甘特图行固定列一致（160px + 80px）
-3. **修改甘特图行固定列宽时同步改 Timeline 占位列** → 否则对不齐
-4. **`totalDays` 不能为 0** → `getTimelineRange()` 在无数据时返回 30 天默认范围
-5. **`duration` 不能为 0** → `renderGanttBar` 中 `duration = endDate.diff(startDate) + 1`，同一天为 1
-6. **排班可能完全超出测试周期** → test02 场景：需求仅 7/12 当天，排班 7/13-7/17，此时 `exceedsRight=true`，条框仍在 7/12 位置，红色虚线边框标识
-7. **`dailySchedules` 中的日期用 `parseLocalDate()`** → 不要用 `dayjs()`
-8. **后端 `@JsonFormat(pattern = "yyyy-MM-dd")` 必须加在 `LocalDate` 字段上** → 否则 Jackson 序列化为数组 [2026,7,12]
+2. **框体颜色只看人力状态** → 绿色需同时满足 `allocatedDays >= manpowerDemand` AND `!scheduleExceedsDemand`
+3. **红色只用于超出部分的延伸尾** → 不用于整个条框，框体颜色只有灰/绿/橙
+4. **修改 Timeline 时不要忘记占位列** → 宽度必须与甘特图行固定列一致（160px + 80px）
+5. **修改甘特图行固定列宽时同步改 Timeline 占位列** → 否则对不齐
+6. **`totalDays` 不能为 0** → `getTimelineRange()` 在无数据时返回 30 天默认范围
+7. **`duration` 不能为 0** → `renderGanttBar` 中 `duration = endDate.diff(startDate) + 1`，同一天为 1
+8. **框体和延伸尾是双层结构** → 外层容器 `overflow: visible`，框体 `zIndex: 1`，延伸尾在下层。两者各有一套每日排班渲染
+9. **`dailySchedules` 中的日期用 `parseLocalDate()`** → 不要用 `dayjs()`
+10. **后端 `@JsonFormat(pattern = "yyyy-MM-dd")` 必须加在 `LocalDate` 字段上** → 否则 Jackson 序列化为数组 [2026,7,12]
+11. **图例位于 `renderTimeline()` 之前** → 修改图例时注意与 `getScheduleStatusColor()` 颜色保持一致
+12. **⚠️ `daysToEnd` 计算必须用 `LocalDate` 而非 `LocalDateTime`** → `ChronoUnit.DAYS.between(LocalDateTime, LocalDateTime)` 统计完整 24 小时间隔，当 `endDate` 的时间分量与 `now` 时间分量不满足 24h 时结果会少 1 天。务必用 `.toLocalDate()` 转换后再计算：`ChronoUnit.DAYS.between(now.toLocalDate(), demand.getEndDate().toLocalDate())`。同样的问题也存在于 `calculateProgressPercentage()` 中的 `totalDays` 和 `elapsedDays` 计算。
 
 ---
 
@@ -186,7 +318,14 @@ curl -s "http://localhost:8080/api/schedules/gantt-view" -H "Authorization: Bear
 
 # 4. 前端验证
 # - 刷新排期看板页面
-# - 检查 test02 条框是否在 7/12 位置（红色虚线边框）
+# - 检查时间轴：每个日期列顶部有日期数字（周一蓝色），月初显示"M月"
+# - 向下滚动：图例和时间轴表头冻结在视口顶部
+# - 检查第二列：超期+满足→"超期N天"、超期+未满足→"超期N天\n需求未满足"、未超期+满足→绿色✓、未超期+未满足→"需求未满足"
+# - 检查图例：4 项（灰/绿/橙/红超期部分）
+# - 框体颜色：无排班→灰、人力满足+未超期→绿、人力不足/延期→橙
+# - 超出部分：红色半透明延伸尾 + 红色虚线边框
+# - 框体边框可见（2px solid），能清晰区分需求周期起止日期
 # - 悬浮查看 tooltip 信息
 # - 筛选器功能是否正常
+# - API 返回的 daysToEnd 与日历天数一致（排除时间分量干扰）
 ```
