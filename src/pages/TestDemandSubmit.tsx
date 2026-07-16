@@ -281,8 +281,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
             <RangePicker
               style={{ width: '100%' }}
               placeholder={['开始日期', '结束日期']}
-              format="YYYY-MM-DD HH:mm"
-              showTime={{ format: 'HH:mm' }}
+              format="YYYY-MM-DD"
               disabledDate={(current) =>
                 current && current < dayjs().startOf('day')
               }

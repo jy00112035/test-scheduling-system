@@ -4,8 +4,8 @@
 // ============================================================
 
 import React, { useState, useEffect } from 'react';
-import { Card, Space, DatePicker, Select, InputNumber, Tag, Button, Popconfirm, Popover, Divider, Tooltip, Checkbox, Modal, Input } from 'antd';
-import { DeleteOutlined, SearchOutlined } from '@ant-design/icons';
+import { Card, Space, DatePicker, Select, InputNumber, Tag, Button, Popconfirm, Popover, Divider, Tooltip, Checkbox, Modal, Input, Dropdown } from 'antd';
+import { DeleteOutlined, SearchOutlined, DownOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { ScheduleItem, DemandItem, StaffItem, DailyStatusEntry } from './workbenchTypes';
 import {
@@ -163,6 +163,9 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
   // 所有测试类型（去重，基于全量员工用于弹窗选项）
   const allTestTypes = [...new Set(baseStaffs.map(s => s.testType).filter(Boolean))] as string[];
 
+  // 所有产品（去重）
+  const allProducts = [...new Set(schedules.map(s => s.product).filter(Boolean))] as string[];
+
   // 用于空闲工作量计算的员工（仅受空闲工作量弹窗筛选影响，不受表头筛选影响）
   const workloadStaffs = excludedTestTypes.length > 0
     ? baseStaffs.filter(s => !s.testType || !excludedTestTypes.includes(s.testType))
@@ -227,17 +230,44 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
             allowClear={false}
             style={{ width: 130 }}
           />
-          <Select
-            mode="multiple"
-            placeholder="全部产品"
-            style={{ minWidth: 200 }}
-            value={filterProducts}
-            onChange={onFilterProductsChange}
-            allowClear
-            maxTagCount={2}
-            options={[...new Set(schedules.map(s => s.product).filter(Boolean))]
-              .map(p => ({ label: p, value: p }))}
-          />
+          <Dropdown
+            trigger={['click']}
+            dropdownRender={() => (
+              <div style={{ padding: 8, background: '#fff', borderRadius: 4, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+                <div style={{ marginBottom: 4 }}>
+                  <Checkbox
+                    checked={filterProducts.length === allProducts.length}
+                    indeterminate={filterProducts.length > 0 && filterProducts.length < allProducts.length}
+                    onChange={(e) => {
+                      onFilterProductsChange(e.target.checked ? [...allProducts] : []);
+                    }}
+                  >
+                    <span style={{ fontSize: 12, color: '#888' }}>全选</span>
+                  </Checkbox>
+                </div>
+                {allProducts.map(p => (
+                  <div key={p} style={{ padding: '2px 0' }}>
+                    <Checkbox
+                      checked={filterProducts.includes(p)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          onFilterProductsChange([...filterProducts, p]);
+                        } else {
+                          onFilterProductsChange(filterProducts.filter(x => x !== p));
+                        }
+                      }}
+                    >
+                      {p}
+                    </Checkbox>
+                  </div>
+                ))}
+              </div>
+            )}
+          >
+            <Button style={{ minWidth: 200, textAlign: 'left' }}>
+              {filterProducts.length > 0 ? `产品筛选 (${filterProducts.length})` : '全部产品'} <DownOutlined style={{ fontSize: 10 }} />
+            </Button>
+          </Dropdown>
           <Input
             placeholder="搜索姓名"
             value={nameSearch}
@@ -269,16 +299,44 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
               { label: '普通', value: 'normal' },
             ]}
           />
-          <Select
-            mode="multiple"
-            placeholder="测试类型"
-            style={{ width: 130 }}
-            value={headerTestTypeFilter}
-            onChange={setHeaderTestTypeFilter}
-            allowClear
-            maxTagCount={1}
-            options={allHeaderTestTypes.map(t => ({ label: t, value: t }))}
-          />
+          <Dropdown
+            trigger={['click']}
+            dropdownRender={() => (
+              <div style={{ padding: 8, background: '#fff', borderRadius: 4, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+                <div style={{ marginBottom: 4 }}>
+                  <Checkbox
+                    checked={headerTestTypeFilter.length === allHeaderTestTypes.length}
+                    indeterminate={headerTestTypeFilter.length > 0 && headerTestTypeFilter.length < allHeaderTestTypes.length}
+                    onChange={(e) => {
+                      setHeaderTestTypeFilter(e.target.checked ? [...allHeaderTestTypes] : []);
+                    }}
+                  >
+                    <span style={{ fontSize: 12, color: '#888' }}>全选</span>
+                  </Checkbox>
+                </div>
+                {allHeaderTestTypes.map(t => (
+                  <div key={t} style={{ padding: '2px 0' }}>
+                    <Checkbox
+                      checked={headerTestTypeFilter.includes(t)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setHeaderTestTypeFilter(prev => [...prev, t]);
+                        } else {
+                          setHeaderTestTypeFilter(prev => prev.filter(x => x !== t));
+                        }
+                      }}
+                    >
+                      {t}
+                    </Checkbox>
+                  </div>
+                ))}
+              </div>
+            )}
+          >
+            <Button style={{ minWidth: 130, textAlign: 'left' }}>
+              {headerTestTypeFilter.length > 0 ? `测试类型 (${headerTestTypeFilter.length})` : '测试类型'} <DownOutlined style={{ fontSize: 10 }} />
+            </Button>
+          </Dropdown>
         </Space>
       }
       style={{ flex: 1, overflow: 'hidden', minWidth: 0, display: 'flex', flexDirection: 'column' }}

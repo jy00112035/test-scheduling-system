@@ -1,20 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Select, DatePicker, Tag, Tooltip, message, Button, Modal } from 'antd';
-import { DownloadOutlined } from '@ant-design/icons';
+import { Card, Select, DatePicker, Tag, Tooltip, message, Button, Modal, Input, Dropdown, Checkbox } from 'antd';
+import { DownloadOutlined, SearchOutlined, DownOutlined } from '@ant-design/icons';
 import dayjs, { Dayjs } from 'dayjs';
 import { api } from '../services/api';
 import * as XLSX from 'xlsx';
 import { DailyAvailabilityStatus, DailyStatusLabels, DailyStatusColors } from '../types';
 
-const { Option } = Select;
 const { RangePicker } = DatePicker;
 
 const dayLabels = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
 const TaskKanban: React.FC = () => {
   const [viewDate, setViewDate] = useState<Dayjs>(dayjs());
-  const [groupFilter, setGroupFilter] = useState<string>('all');
+  const [groupFilter, setGroupFilter] = useState<string[]>([]);
   const [filterProducts, setFilterProducts] = useState<string[]>([]);
+  const [nameSearch, setNameSearch] = useState<string>('');
   const [staffs, setStaffs] = useState<any[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -133,10 +133,19 @@ const TaskKanban: React.FC = () => {
   };
 
   const filteredStaffs = (() => {
-    let result = groupFilter === 'all'
-      ? staffs
-      : staffs.filter((s: any) => s.testType === groupFilter);
+    let result = staffs;
 
+    // 测试类型筛选（多选）
+    if (groupFilter.length > 0) {
+      result = result.filter((s: any) => groupFilter.includes(s.testType));
+    }
+
+    // 姓名搜索
+    if (nameSearch) {
+      result = result.filter((s: any) => s.name?.toLowerCase().includes(nameSearch.toLowerCase()));
+    }
+
+    // 产品筛选
     if (filterProducts.length > 0) {
       const weekDateStrs = weekDates.map(d => d.format('YYYY-MM-DD'));
       result = result.filter((s: any) =>
@@ -157,6 +166,7 @@ const TaskKanban: React.FC = () => {
   };
 
   const testTypes = Array.from(new Set(staffs.map((s: any) => s.testType).filter(Boolean)));
+  const allProducts = Array.from(new Set(schedules.map((s: any) => s.product).filter(Boolean)));
 
   return (
     <div>
@@ -170,25 +180,89 @@ const TaskKanban: React.FC = () => {
               picker="week"
               allowClear={false}
             />
-            <Select
-              value={groupFilter}
-              onChange={setGroupFilter}
-              style={{ width: 150 }}
+            <Dropdown
+              trigger={['click']}
+              dropdownRender={() => (
+                <div style={{ padding: 8, background: '#fff', borderRadius: 4, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+                  <div style={{ marginBottom: 4 }}>
+                    <Checkbox
+                      checked={groupFilter.length === testTypes.length}
+                      indeterminate={groupFilter.length > 0 && groupFilter.length < testTypes.length}
+                      onChange={(e) => {
+                        setGroupFilter(e.target.checked ? [...testTypes] : []);
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: '#888' }}>全选</span>
+                    </Checkbox>
+                  </div>
+                  {testTypes.map(t => (
+                    <div key={t} style={{ padding: '2px 0' }}>
+                      <Checkbox
+                        checked={groupFilter.includes(t)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setGroupFilter(prev => [...prev, t]);
+                          } else {
+                            setGroupFilter(prev => prev.filter(x => x !== t));
+                          }
+                        }}
+                      >
+                        {t}
+                      </Checkbox>
+                    </div>
+                  ))}
+                </div>
+              )}
             >
-              <Option value="all">全部测试类型</Option>
-              {testTypes.map(t => (
-                <Option key={t} value={t}>{t}</Option>
-              ))}
-            </Select>
-            <Select
-              mode="multiple"
-              placeholder="产品筛选"
-              style={{ minWidth: 200 }}
-              value={filterProducts}
-              onChange={setFilterProducts}
+              <Button style={{ minWidth: 150, textAlign: 'left' }}>
+                {groupFilter.length > 0 ? `测试类型 (${groupFilter.length})` : '全部测试类型'} <DownOutlined style={{ fontSize: 10 }} />
+              </Button>
+            </Dropdown>
+            <Dropdown
+              trigger={['click']}
+              dropdownRender={() => (
+                <div style={{ padding: 8, background: '#fff', borderRadius: 4, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+                  <div style={{ marginBottom: 4 }}>
+                    <Checkbox
+                      checked={filterProducts.length === allProducts.length}
+                      indeterminate={filterProducts.length > 0 && filterProducts.length < allProducts.length}
+                      onChange={(e) => {
+                        setFilterProducts(e.target.checked ? [...allProducts] : []);
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: '#888' }}>全选</span>
+                    </Checkbox>
+                  </div>
+                  {allProducts.map(p => (
+                    <div key={p} style={{ padding: '2px 0' }}>
+                      <Checkbox
+                        checked={filterProducts.includes(p)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFilterProducts(prev => [...prev, p]);
+                          } else {
+                            setFilterProducts(prev => prev.filter(x => x !== p));
+                          }
+                        }}
+                      >
+                        {p}
+                      </Checkbox>
+                    </div>
+                  ))}
+                </div>
+              )}
+            >
+              <Button style={{ minWidth: 200, textAlign: 'left' }}>
+                {filterProducts.length > 0 ? `产品筛选 (${filterProducts.length})` : '全部产品'} <DownOutlined style={{ fontSize: 10 }} />
+              </Button>
+            </Dropdown>
+            <Input
+              placeholder="搜索姓名"
+              value={nameSearch}
+              onChange={(e) => setNameSearch(e.target.value || '')}
               allowClear
-              maxTagCount={2}
-              options={[...new Set(schedules.map(s => s.product).filter(Boolean))].map(p => ({ label: p, value: p }))}
+              prefix={<SearchOutlined />}
+              style={{ width: 160 }}
             />
             <Button
               icon={<DownloadOutlined />}

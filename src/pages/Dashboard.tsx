@@ -12,6 +12,7 @@ import {
   Pie,
   Cell,
 } from 'recharts';
+import ReactECharts from 'echarts-for-react';
 import { UserOutlined, ArrowUpOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '../services/api';
@@ -49,8 +50,8 @@ const Dashboard: React.FC = () => {
   const [cachedDemands, setCachedDemands] = useState<any[]>([]);
   const [cachedSchedules, setCachedSchedules] = useState<any[]>([]);
 
-  // --- 利用率日期段 ---
-  const [utilDateRange, setUtilDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs(), dayjs()]);
+  // --- 利用率日期段（默认当天前后5天） ---
+  const [utilDateRange, setUtilDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs().subtract(5, 'day'), dayjs().add(5, 'day')]);
   const [rangeUtilData, setRangeUtilData] = useState<Array<{ date: string; rate: number }>>([]);
   const [rangeLoading, setRangeLoading] = useState(false);
   const [cachedActiveStaff, setCachedActiveStaff] = useState<any[]>([]);
@@ -465,7 +466,6 @@ const Dashboard: React.FC = () => {
                     }
                   }}
                   allowClear={false}
-                  disabledDate={(d) => d.isAfter(dayjs(), 'day')}
                 />
               </div>
             }
@@ -514,6 +514,62 @@ const Dashboard: React.FC = () => {
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={24}>
           <Card title="测试类型资源看板" loading={loading}>
+            {testTypeStats.length > 0 && (
+              <ReactECharts
+                style={{ height: 280, marginBottom: 16 }}
+                option={{
+                  tooltip: {
+                    trigger: 'axis',
+                    axisPointer: { type: 'shadow' },
+                  },
+                  legend: { data: ['需求(人/天)', '总人数', '今日可用', '今日投入'], top: 4 },
+                  grid: { left: 60, right: 30, top: 40, bottom: 40 },
+                  xAxis: {
+                    type: 'category',
+                    data: testTypeStats.map(s => s.testType),
+                    axisLabel: { rotate: testTypeStats.length > 6 ? 20 : 0, fontSize: 12 },
+                  },
+                  yAxis: [
+                    { type: 'value', name: '人/天', position: 'left' },
+                    { type: 'value', name: '人数', position: 'right' },
+                  ],
+                  series: [
+                    {
+                      name: '需求(人/天)',
+                      type: 'bar',
+                      yAxisIndex: 0,
+                      data: testTypeStats.map(s => s.totalDemand),
+                      itemStyle: { color: '#1890ff' },
+                      barMaxWidth: 32,
+                    },
+                    {
+                      name: '总人数',
+                      type: 'bar',
+                      yAxisIndex: 1,
+                      data: testTypeStats.map(s => s.totalStaff),
+                      itemStyle: { color: '#52c41a' },
+                      barMaxWidth: 32,
+                    },
+                    {
+                      name: '今日可用',
+                      type: 'bar',
+                      yAxisIndex: 1,
+                      data: testTypeStats.map(s => s.availableStaff),
+                      itemStyle: { color: '#faad14' },
+                      barMaxWidth: 32,
+                    },
+                    {
+                      name: '今日投入',
+                      type: 'bar',
+                      yAxisIndex: 1,
+                      data: testTypeStats.map(s => s.allocatedToday),
+                      itemStyle: { color: '#ff4d4f' },
+                      barMaxWidth: 32,
+                    },
+                  ],
+                }}
+              />
+            )}
             <Table
               columns={[
                 { title: '测试类型', dataIndex: 'testType', key: 'testType', width: 120 },

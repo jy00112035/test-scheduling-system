@@ -148,6 +148,16 @@ progressPercentage = elapsedDays / totalDays × 100
 
 **时间轴刻度从每周改为每天**，每个日期列顶部显示日期数字，方便用户快速定位日期。
 
+**时间轴范围扩展至整月**：`getTimelineRange()` 计算的起止日期会扩展到所在月的边界（月初/月末 ± 3 天），确保即使数据只覆盖月中部分，时间轴也会显示完整月份。
+
+```typescript
+// 范围计算：扩展到月边界
+return {
+  start: minDate.startOf('month').subtract(3, 'day'),
+  end: maxDate.endOf('month').add(3, 'day')
+};
+```
+
 ```typescript
 // tick 生成：add(1, 'day') 而非 add(7, 'day')
 const ticks: Dayjs[] = [];
@@ -161,6 +171,7 @@ while (current.isBefore(timelineRange.end) || current.isSame(timelineRange.end, 
 **渲染格式：**
 - 每天显示日期数字（`D` 格式，10px 字号），周一蓝色加粗（`#1890ff`）
 - 每月 1 日或第一个可见日额外显示"M月"（9px，灰色）
+- 日期标签在时间轴列内水平与垂直居中（`justifyContent: 'center'` + `alignItems: 'center'`）
 - `pointerEvents: 'none'` 避免遮挡"今天"红线
 
 ### 4.7 表头和图例冻结
@@ -290,6 +301,7 @@ getScheduleStatusColor(item):
 10. **后端 `@JsonFormat(pattern = "yyyy-MM-dd")` 必须加在 `LocalDate` 字段上** → 否则 Jackson 序列化为数组 [2026,7,12]
 11. **图例位于 `renderTimeline()` 之前** → 修改图例时注意与 `getScheduleStatusColor()` 颜色保持一致
 12. **⚠️ `daysToEnd` 计算必须用 `LocalDate` 而非 `LocalDateTime`** → `ChronoUnit.DAYS.between(LocalDateTime, LocalDateTime)` 统计完整 24 小时间隔，当 `endDate` 的时间分量与 `now` 时间分量不满足 24h 时结果会少 1 天。务必用 `.toLocalDate()` 转换后再计算：`ChronoUnit.DAYS.between(now.toLocalDate(), demand.getEndDate().toLocalDate())`。同样的问题也存在于 `calculateProgressPercentage()` 中的 `totalDays` 和 `elapsedDays` 计算。
+13. **时间轴范围按整月扩展** → `getTimelineRange()` 用 `startOf('month')` / `endOf('month')` 扩展范围，不是简单的 ±3 天。如果需要改为数据驱动的紧凑范围，需同时修改 `getTimelineRange()` 和无数据时的默认范围。
 
 ---
 
@@ -318,7 +330,8 @@ curl -s "http://localhost:8080/api/schedules/gantt-view" -H "Authorization: Bear
 
 # 4. 前端验证
 # - 刷新排期看板页面
-# - 检查时间轴：每个日期列顶部有日期数字（周一蓝色），月初显示"M月"
+# - 检查时间轴：每个日期列顶部有日期数字（周一蓝色），月初显示"M月"，日期标签水平垂直居中
+# - 检查时间轴范围：即使数据只覆盖月中部分，时间轴也应显示完整月份（月初~月末+3天边界）
 # - 向下滚动：图例和时间轴表头冻结在视口顶部
 # - 检查第二列：超期+满足→"超期N天"、超期+未满足→"超期N天\n需求未满足"、未超期+满足→绿色✓、未超期+未满足→"需求未满足"
 # - 检查图例：4 项（灰/绿/橙/红超期部分）

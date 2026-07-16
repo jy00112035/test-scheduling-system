@@ -216,13 +216,13 @@ const AppContent: React.FC = () => {
   }
 
   return (
-    <Layout style={{ height: '100vh', overflow: 'hidden' }}>
+    <Layout style={{ height: '100vh' }}>
       <Sider
         collapsed={collapsed}
         onCollapse={setCollapsed}
         trigger={null}
         collapsible
-        style={{ position: 'relative' }}
+        style={{ position: 'relative', overflow: 'hidden' }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <div>

@@ -123,7 +123,10 @@ const ScheduleGantt: React.FC = () => {
 
   // 计算时间轴范围
   const getTimelineRange = () => {
-    if (filteredData.length === 0) return { start: dayjs(), end: dayjs().add(30, 'day') };
+    if (filteredData.length === 0) {
+      const now = dayjs();
+      return { start: now.startOf('month').subtract(3, 'day'), end: now.endOf('month').add(3, 'day') };
+    }
 
     const dates = filteredData.flatMap(item => {
       const ds = [parseLocalDate(item.startDate), parseLocalDate(item.endDate)];
@@ -139,8 +142,8 @@ const ScheduleGantt: React.FC = () => {
     const maxDate = dates.reduce((max, d) => d.isAfter(max) ? d : max, dates[0]);
 
     return {
-      start: minDate.subtract(3, 'day'),
-      end: maxDate.add(3, 'day')
+      start: minDate.startOf('month').subtract(3, 'day'),
+      end: maxDate.endOf('month').add(3, 'day')
     };
   };
 
@@ -427,9 +430,8 @@ const ScheduleGantt: React.FC = () => {
                   height: '100%',
                   display: 'flex',
                   flexDirection: 'column',
-                  justifyContent: 'flex-start',
+                  justifyContent: 'center',
                   alignItems: 'center',
-                  paddingTop: 2,
                   zIndex: 2,
                   pointerEvents: 'none',
                 }}
