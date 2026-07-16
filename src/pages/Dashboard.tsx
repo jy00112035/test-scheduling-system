@@ -423,7 +423,7 @@ const Dashboard: React.FC = () => {
         <Col span={6}>
           <Card loading={loading}>
             <Statistic
-              title="测试执行总人数"
+              title="测试总人数"
               value={stats.totalStaff}
               prefix={<UserOutlined />}
             />
