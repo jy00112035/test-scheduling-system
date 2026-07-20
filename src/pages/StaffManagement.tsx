@@ -92,8 +92,10 @@ const roleLabels: Record<string, string> = {
 
 const StaffManagement: React.FC = () => {
   const { user } = useAuth();
-  const { hasRole } = useUserRole();
-  const isTestLead = hasRole('testLead');
+  const { hasRole, hasPermission, roles } = useUserRole();
+  const canManageStaff = hasPermission('manageStaff');
+  // 仅有 testLead 角色时才受限制（只能编辑同 testType，不能删除/导入/添加）
+  const isOnlyTestLead = canManageStaff && hasRole('testLead') && roles.length === 1 && roles[0] === 'testLead';
 
   const [staffs, setStaffs] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(false);
@@ -595,7 +597,7 @@ const StaffManagement: React.FC = () => {
       fixed: 'right' as const,
       render: (_: any, record: Staff) => (
         <Space size="small">
-          {(!isTestLead || (user?.testType && record.testType === user.testType)) && (
+          {(!isOnlyTestLead || (user?.testType && record.testType === user.testType)) && (
             <Button
               type="link"
               size="small"
@@ -605,7 +607,7 @@ const StaffManagement: React.FC = () => {
               编辑
             </Button>
           )}
-          {!isTestLead && (
+          {!isOnlyTestLead && (
             <Popconfirm
               title="确定删除此人员？"
               onConfirm={() => handleDelete(record.id)}
@@ -631,7 +633,7 @@ const StaffManagement: React.FC = () => {
     <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 96px)' }}>
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16, gap: 8, position: 'sticky', top: 0, zIndex: 10, background: '#fff', paddingTop: 8, paddingBottom: 8 }}>
-          {!isTestLead && selectedRowKeys.length > 0 && (
+          {!isOnlyTestLead && selectedRowKeys.length > 0 && (
             <Popconfirm
               title={`确定删除选中的 ${selectedRowKeys.length} 条人员数据？`}
               onConfirm={handleBatchDelete}
@@ -649,7 +651,7 @@ const StaffManagement: React.FC = () => {
             style={{ width: 250 }}
             allowClear
           />
-          {!isTestLead && (
+          {!isOnlyTestLead && (
             <Upload
               showUploadList={false}
               accept=".xlsx,.xls"
@@ -661,7 +663,7 @@ const StaffManagement: React.FC = () => {
               </Button>
             </Upload>
           )}
-          {!isTestLead && (
+          {!isOnlyTestLead && (
             <Button
               type="primary"
               icon={<PlusOutlined />}
@@ -679,7 +681,7 @@ const StaffManagement: React.FC = () => {
           bordered
           sticky={{ offsetHeader: 48 }}
           loading={loading}
-          rowSelection={isTestLead ? undefined : {
+          rowSelection={isOnlyTestLead ? undefined : {
             selectedRowKeys,
             onChange: (keys) => setSelectedRowKeys(keys),
           }}
