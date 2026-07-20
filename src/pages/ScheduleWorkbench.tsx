@@ -1419,7 +1419,7 @@ const ScheduleWorkbench: React.FC = () => {
   // 渲染
   // ============================================================
   return (
-    <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', overscrollBehavior: 'none', minHeight: 0 }}>
+    <div style={{ height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       {/* 顶部区域：总览条 + 冲突/缺口面板 */}
       <div style={{ flexShrink: 0, background: '#f0f2f5', paddingBottom: 8 }}>
         <WorkbenchSummaryBar

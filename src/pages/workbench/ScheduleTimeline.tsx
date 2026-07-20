@@ -3,7 +3,7 @@
 // Phase 1: 保留现有拖拽分配、编辑、删除、状态管理等全部功能
 // ============================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, Space, DatePicker, Select, InputNumber, Tag, Button, Popconfirm, Popover, Divider, Tooltip, Checkbox, Modal, Input, Dropdown } from 'antd';
 import { DeleteOutlined, SearchOutlined, DownOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -119,6 +119,17 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(excludedTestTypes));
   }, [excludedTestTypes]);
+
+  // 表头行 ref + 高度测量，用于空闲行 sticky top 偏移
+  const headerRowRef = useRef<HTMLTableRowElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(42); // 默认值，渲染后测量更新
+
+  useEffect(() => {
+    if (headerRowRef.current) {
+      const height = headerRowRef.current.offsetHeight;
+      if (height > 0) setHeaderHeight(height);
+    }
+  }, [weekDates]);
 
   // 表头筛选选项（基于全量 active 员工）
   const activeStaffs = staffs.filter(s => s.status === 'active');
@@ -359,7 +370,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
       <div onDragLeave={() => onCellDragOver(null)}>
         <table className="kanban-table" style={{ minWidth: 1200 }}>
           <thead>
-            <tr style={{ position: 'sticky', top: 0, zIndex: 5 }}>
+            <tr ref={headerRowRef} style={{ position: 'sticky', top: 0, zIndex: 5 }}>
               {/* 姓名 */}
               <th style={{ minWidth: 65, position: 'sticky', left: 0, background: '#fafafa', zIndex: 6 }}>
                 <span>姓名</span>
@@ -399,6 +410,81 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
             </tr>
           </thead>
           <tbody>
+            {/* 空闲可用工作量汇总行 — 固定在表头下方 */}
+            <tr style={{ position: 'sticky', top: headerHeight, zIndex: 4, background: '#f0f5ff', fontWeight: 500, boxShadow: '0 2px 4px rgba(0,0,0,0.08)' }}>
+              <td colSpan={5} style={{ position: 'sticky', left: 0, background: '#f0f5ff', zIndex: 4, padding: '6px 8px', fontSize: 12, whiteSpace: 'nowrap', borderBottom: '2px solid #1677ff' }}>
+                <span
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => setFilterModalOpen(true)}
+                >
+                  空闲可用工作量
+                  {excludedTestTypes.length > 0 && (
+                    <Tag color="orange" style={{ fontSize: 10, marginLeft: 4, lineHeight: '14px', padding: '0 3px' }}>
+                      已排除{excludedTestTypes.length}类
+                    </Tag>
+                  )}
+                </span>
+                <Modal
+                  title="空闲工作量统计范围"
+                  open={filterModalOpen}
+                  onCancel={() => setFilterModalOpen(false)}
+                  onOk={() => setFilterModalOpen(false)}
+                  width={360}
+                  destroyOnClose={false}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ fontSize: 12, color: '#999' }}>取消勾选的测试类型不计入空闲工作量统计：</div>
+                    {allTestTypes.length === 0 && <span style={{ color: '#999', fontSize: 12 }}>暂无测试类型</span>}
+                    {allTestTypes.map(t => (
+                      <Checkbox
+                        key={t}
+                        checked={!excludedTestTypes.includes(t)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setExcludedTestTypes(prev => prev.filter(x => x !== t));
+                          } else {
+                            setExcludedTestTypes(prev => [...prev, t]);
+                          }
+                        }}
+                      >
+                        {t}
+                      </Checkbox>
+                    ))}
+                    {allTestTypes.length > 0 && (
+                      <>
+                        <Divider style={{ margin: '4px 0' }} />
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setExcludedTestTypes([])}>全选</Button>
+                          <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setExcludedTestTypes([...allTestTypes])}>全不选</Button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </Modal>
+              </td>
+              {weekDates.map(date => {
+                const dateStr = date.format('YYYY-MM-DD');
+                const freeWorkload = calculateDailyFreeWorkload(workloadStaffs, schedules, dateStr, dailyStatuses);
+                const isWeekend = [0, 6].includes(date.day());
+                return (
+                  <td
+                    key={dateStr}
+                    style={{
+                      padding: '6px 2px',
+                      fontSize: 13,
+                      textAlign: 'center',
+                      fontWeight: 600,
+                      background: isWeekend ? '#e6f4ff' : '#f0f5ff',
+                      borderBottom: '2px solid #1677ff',
+                    }}
+                  >
+                    <span style={{ color: freeWorkload > 0 ? '#1677ff' : '#999' }}>
+                      {freeWorkload.toFixed(1)}
+                    </span>
+                  </td>
+                );
+              })}
+            </tr>
             {filteredStaffs.map(staff => (
               <tr key={staff.id}>
                 {/* Sticky columns */}
@@ -664,81 +750,6 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                 })}
               </tr>
             ))}
-            {/* 空闲可用工作量汇总行 — 固定在底部 */}
-            <tr style={{ position: 'sticky', bottom: 0, zIndex: 3, background: '#f0f5ff', fontWeight: 500, boxShadow: '0 -2px 4px rgba(0,0,0,0.08)' }}>
-              <td colSpan={5} style={{ position: 'sticky', left: 0, background: '#f0f5ff', zIndex: 4, padding: '6px 8px', fontSize: 12, whiteSpace: 'nowrap', borderTop: '2px solid #1677ff' }}>
-                <span
-                  style={{ cursor: 'pointer', userSelect: 'none' }}
-                  onClick={() => setFilterModalOpen(true)}
-                >
-                  空闲可用工作量
-                  {excludedTestTypes.length > 0 && (
-                    <Tag color="orange" style={{ fontSize: 10, marginLeft: 4, lineHeight: '14px', padding: '0 3px' }}>
-                      已排除{excludedTestTypes.length}类
-                    </Tag>
-                  )}
-                </span>
-                <Modal
-                  title="空闲工作量统计范围"
-                  open={filterModalOpen}
-                  onCancel={() => setFilterModalOpen(false)}
-                  onOk={() => setFilterModalOpen(false)}
-                  width={360}
-                  destroyOnClose={false}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <div style={{ fontSize: 12, color: '#999' }}>取消勾选的测试类型不计入空闲工作量统计：</div>
-                    {allTestTypes.length === 0 && <span style={{ color: '#999', fontSize: 12 }}>暂无测试类型</span>}
-                    {allTestTypes.map(t => (
-                      <Checkbox
-                        key={t}
-                        checked={!excludedTestTypes.includes(t)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setExcludedTestTypes(prev => prev.filter(x => x !== t));
-                          } else {
-                            setExcludedTestTypes(prev => [...prev, t]);
-                          }
-                        }}
-                      >
-                        {t}
-                      </Checkbox>
-                    ))}
-                    {allTestTypes.length > 0 && (
-                      <>
-                        <Divider style={{ margin: '4px 0' }} />
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setExcludedTestTypes([])}>全选</Button>
-                          <Button size="small" type="link" style={{ padding: 0 }} onClick={() => setExcludedTestTypes([...allTestTypes])}>全不选</Button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </Modal>
-              </td>
-              {weekDates.map(date => {
-                const dateStr = date.format('YYYY-MM-DD');
-                const freeWorkload = calculateDailyFreeWorkload(workloadStaffs, schedules, dateStr, dailyStatuses);
-                const isWeekend = [0, 6].includes(date.day());
-                return (
-                  <td
-                    key={dateStr}
-                    style={{
-                      padding: '6px 2px',
-                      fontSize: 13,
-                      textAlign: 'center',
-                      fontWeight: 600,
-                      background: isWeekend ? '#e6f4ff' : '#f0f5ff',
-                      borderTop: '2px solid #1677ff',
-                    }}
-                  >
-                    <span style={{ color: freeWorkload > 0 ? '#1677ff' : '#999' }}>
-                      {freeWorkload.toFixed(1)}
-                    </span>
-                  </td>
-                );
-              })}
-            </tr>
           </tbody>
         </table>
       </div>
