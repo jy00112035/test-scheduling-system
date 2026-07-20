@@ -26,11 +26,10 @@ public class TestStaffController {
     @Autowired
     private HttpServletRequest request;
 
-    @SuppressWarnings("unchecked")
-    private boolean isTestLead() {
+    private boolean isOnlyTestLead() {
         Object rolesObj = request.getAttribute("roles");
         if (rolesObj instanceof List<?> list) {
-            return list.contains("testLead");
+            return list.contains("testLead") && list.size() == 1;
         }
         return false;
     }
@@ -93,7 +92,7 @@ public class TestStaffController {
     @PutMapping("/{id}")
     public ApiResponse<TestStaff> updateStaff(@PathVariable Long id, @RequestBody StaffRequest request) {
         try {
-            if (isTestLead()) {
+            if (isOnlyTestLead()) {
                 TestStaff staff = testStaffService.findById(id);
                 String currentUserTestType = getCurrentUserTestType();
                 if (currentUserTestType != null && !currentUserTestType.equals(staff.getTestType())) {
@@ -109,7 +108,7 @@ public class TestStaffController {
     @DeleteMapping("/batch")
     public ApiResponse<Void> deleteStaffsBatch(@RequestBody List<Long> ids) {
         try {
-            if (isTestLead()) {
+            if (isOnlyTestLead()) {
                 return ApiResponse.error("无权删除人员");
             }
             testStaffService.deleteBatch(ids);
@@ -122,7 +121,7 @@ public class TestStaffController {
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteStaff(@PathVariable Long id) {
         try {
-            if (isTestLead()) {
+            if (isOnlyTestLead()) {
                 return ApiResponse.error("无权删除人员");
             }
             testStaffService.delete(id);

@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Component
 public class DataInitializer implements CommandLineRunner {
@@ -30,8 +31,51 @@ public class DataInitializer implements CommandLineRunner {
     public void run(String... args) {
         initUsers();
         migrateAdminRole();
+        migrateChineseRoles();
         initStaff();
         initFieldConfigs();
+    }
+
+    /**
+     * 修复数据库中存储的中文角色名称，将其转换为英文 code
+     */
+    private void migrateChineseRoles() {
+        java.util.Map<String, String> chineseToEnglish = java.util.Map.of(
+            "测试经理", "testManager",
+            "资源主管", "resourceManager",
+            "资源经理", "resourceManager",
+            "项目经理", "projectManager",
+            "测试执行人员", "testExecutor",
+            "字段管理员", "fieldAdmin",
+            "测试组长", "testLead"
+        );
+        List<User> allUsers = userRepository.findAll();
+        boolean changed = false;
+        for (User user : allUsers) {
+            List<String> roles = user.getRoles();
+            if (roles == null || roles.isEmpty()) continue;
+            List<String> migrated = new java.util.ArrayList<>();
+            boolean userChanged = false;
+            for (String role : roles) {
+                String english = chineseToEnglish.get(role);
+                if (english != null) {
+                    migrated.add(english);
+                    userChanged = true;
+                } else {
+                    migrated.add(role);
+                }
+            }
+            if (userChanged) {
+                // 去重
+                List<String> deduplicated = migrated.stream().distinct().collect(Collectors.toList());
+                user.setRoles(deduplicated);
+                userRepository.save(user);
+                changed = true;
+            }
+        }
+        if (changed) {
+            System.out.println("[DataInitializer] 已迁移中文角色名称为英文 code");
+        }
     }
 
     /**

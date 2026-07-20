@@ -5,8 +5,20 @@ export type UserRole = 'admin' | 'testManager' | 'resourceManager' | 'projectMan
 
 const ALL_ROLES: UserRole[] = ['admin', 'testManager', 'resourceManager', 'projectManager', 'testExecutor', 'fieldAdmin', 'testLead'];
 
-function isValidRole(r: string): r is UserRole {
-  return (ALL_ROLES as string[]).includes(r);
+// 中文角色名 → 英文 code 映射（兼容数据库中旧数据）
+const ROLE_ALIASES: Record<string, UserRole> = {
+  '测试经理': 'testManager',
+  '资源主管': 'resourceManager',
+  '资源经理': 'resourceManager',
+  '项目经理': 'projectManager',
+  '测试执行人员': 'testExecutor',
+  '字段管理员': 'fieldAdmin',
+  '测试组长': 'testLead',
+};
+
+function normalizeRole(r: string): UserRole | null {
+  if ((ALL_ROLES as string[]).includes(r)) return r as UserRole;
+  return ROLE_ALIASES[r] || null;
 }
 
 interface UserRoleContextType {
@@ -32,10 +44,13 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
 
   useEffect(() => {
     if (user) {
-      const userRoles: UserRole[] = (user.roles?.length > 0
-        ? user.roles.filter(isValidRole)
-        : [user.role].filter(isValidRole)) as UserRole[];
-      setRoles(userRoles.length > 0 ? userRoles : ['testExecutor']);
+      const rawRoles = user.roles?.length > 0 ? user.roles : [user.role];
+      const userRoles: UserRole[] = rawRoles
+        .map(normalizeRole)
+        .filter((r): r is UserRole => r !== null);
+      // 去重
+      const deduplicated = [...new Set(userRoles)];
+      setRoles(deduplicated.length > 0 ? deduplicated : ['testExecutor']);
       setUserName(user.username);
     }
   }, [user]);
