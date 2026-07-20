@@ -12,7 +12,7 @@ import {
   Pie,
   Cell,
 } from 'recharts';
-import ReactECharts from 'echarts-for-react';
+
 import { UserOutlined, ArrowUpOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '../services/api';
@@ -30,7 +30,7 @@ const Dashboard: React.FC = () => {
     totalStaff: 0,
     workingStaff: 0,
     idleStaff: 0,
-    versionTypeStats: [] as Array<{ id: number; name: string; avgManpower: number; count: number }>,
+    versionTypeStats: [] as Array<{ id: number; name: string; avgManpower: number; scheduledManpower: number; count: number }>,
   });
   const [trendData, setTrendData] = useState<Array<{ date: string; count: number }>>([]);
   const [pieData, setPieData] = useState<Array<{ name: string; value: number }>>([]);
@@ -149,31 +149,38 @@ const Dashboard: React.FC = () => {
         return { date: dateStr, count: products.size };
       });
 
-      // Pie: manpower by version type
-      const vtManpowerMap = new Map<string, number>();
+      // Pie: scheduled manpower by version type (exclude completed/rejected demands)
+      const vtScheduledMap = new Map<string, number>();
       schedules.forEach((s: any) => {
         const demand = demandMap.get(s.demandId);
-        if (demand?.versionType) {
+        if (!demand || demand.status === 'completed' || demand.status === 'rejected') return;
+        if (demand.versionType) {
           const vt = demand.versionType;
-          vtManpowerMap.set(vt, (vtManpowerMap.get(vt) || 0) + (s.percentage || 0) / 100);
+          vtScheduledMap.set(vt, (vtScheduledMap.get(vt) || 0) + (s.percentage || 0) / 100);
         }
       });
-      const pie = Array.from(vtManpowerMap.entries()).map(([name, value]) => ({
+      const pie = Array.from(vtScheduledMap.entries()).map(([name, value]) => ({
         name,
         value: Math.round(value * 10) / 10,
       }));
 
-      // Version type stats from demands
-      const vtDemandMap = new Map<string, number>();
+      // Version type stats: active demands only (exclude completed/rejected)
+      const vtDemandMap = new Map<string, number>();   // count of active demands
+      const vtManpowerDemandMap = new Map<string, number>(); // planned manpowerDemand from demands
+      let activeDemandCount = 0;
       demands.forEach((d: any) => {
+        if (d.status === 'completed' || d.status === 'rejected') return;
+        activeDemandCount++;
         const vt = d.versionType || '其他';
         vtDemandMap.set(vt, (vtDemandMap.get(vt) || 0) + 1);
+        vtManpowerDemandMap.set(vt, (vtManpowerDemandMap.get(vt) || 0) + (Number(d.manpowerDemand) || 0));
       });
       const vtStats = Array.from(vtDemandMap.entries()).map(([name, count], index) => ({
         id: index + 1,
         name,
-        avgManpower: pie.find(p => p.name === name)?.value || 0,
         count,
+        avgManpower: Math.round((vtManpowerDemandMap.get(name) || 0) * 10) / 10,
+        scheduledManpower: Math.round((vtScheduledMap.get(name) || 0) * 10) / 10,
       }));
 
       setStats({
@@ -185,11 +192,12 @@ const Dashboard: React.FC = () => {
       });
       setTrendData(trend);
       setPieData(pie.length > 0 ? pie : [{ name: '暂无数据', value: 1 }]);
-      setDemandCount(demands.length);
+      setDemandCount(activeDemandCount);
 
-      // --- TestType resource panel ---
+      // --- TestType resource panel (exclude completed/rejected demands) ---
       const demandByTestType = new Map<string, number>();
       demands.forEach((d: any) => {
+        if (d.status === 'completed' || d.status === 'rejected') return;
         if (d.manpowerDetails) {
           d.manpowerDetails.forEach((md: any) => {
             const prev = demandByTestType.get(md.testType) || 0;
@@ -514,69 +522,51 @@ const Dashboard: React.FC = () => {
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={24}>
           <Card title="测试类型资源看板" loading={loading}>
-            {testTypeStats.length > 0 && (
-              <ReactECharts
-                style={{ height: 280, marginBottom: 16 }}
-                option={{
-                  tooltip: {
-                    trigger: 'axis',
-                    axisPointer: { type: 'shadow' },
-                  },
-                  legend: { data: ['需求(人/天)', '总人数', '今日可用', '今日投入'], top: 4 },
-                  grid: { left: 60, right: 30, top: 40, bottom: 40 },
-                  xAxis: {
-                    type: 'category',
-                    data: testTypeStats.map(s => s.testType),
-                    axisLabel: { rotate: testTypeStats.length > 6 ? 20 : 0, fontSize: 12 },
-                  },
-                  yAxis: [
-                    { type: 'value', name: '人/天', position: 'left' },
-                    { type: 'value', name: '人数', position: 'right' },
-                  ],
-                  series: [
-                    {
-                      name: '需求(人/天)',
-                      type: 'bar',
-                      yAxisIndex: 0,
-                      data: testTypeStats.map(s => s.totalDemand),
-                      itemStyle: { color: '#1890ff' },
-                      barMaxWidth: 32,
-                    },
-                    {
-                      name: '总人数',
-                      type: 'bar',
-                      yAxisIndex: 1,
-                      data: testTypeStats.map(s => s.totalStaff),
-                      itemStyle: { color: '#52c41a' },
-                      barMaxWidth: 32,
-                    },
-                    {
-                      name: '今日可用',
-                      type: 'bar',
-                      yAxisIndex: 1,
-                      data: testTypeStats.map(s => s.availableStaff),
-                      itemStyle: { color: '#faad14' },
-                      barMaxWidth: 32,
-                    },
-                    {
-                      name: '今日投入',
-                      type: 'bar',
-                      yAxisIndex: 1,
-                      data: testTypeStats.map(s => s.allocatedToday),
-                      itemStyle: { color: '#ff4d4f' },
-                      barMaxWidth: 32,
-                    },
-                  ],
-                }}
-              />
-            )}
+            {/* 汇总统计 */}
+            {testTypeStats.length > 0 && (() => {
+              const totalDemand = testTypeStats.reduce((s, r) => s + r.totalDemand, 0);
+              const totalAvailable = testTypeStats.reduce((s, r) => s + r.availableStaff, 0);
+              const totalAllocated = testTypeStats.reduce((s, r) => s + r.allocatedToday, 0);
+              const overallRate = totalAvailable > 0 ? Math.round(totalAllocated / totalAvailable * 1000) / 10 : 0;
+              const rateColor = overallRate >= 80 ? '#ff4d4f' : overallRate >= 60 ? '#faad14' : '#52c41a';
+              return (
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  <Col span={8}>
+                    <Statistic title="活跃需求合计(人/天)" value={totalDemand} precision={1} />
+                  </Col>
+                  <Col span={8}>
+                    <Statistic title="今日可用合计(人)" value={totalAvailable} precision={totalAvailable % 1 === 0 ? 0 : 1} />
+                  </Col>
+                  <Col span={8}>
+                    <Statistic title="综合利用率" value={overallRate} suffix="%" precision={1} valueStyle={{ color: rateColor }} />
+                  </Col>
+                </Row>
+              );
+            })()}
             <Table
               columns={[
                 { title: '测试类型', dataIndex: 'testType', key: 'testType', width: 120 },
-                { title: '需求总数(人/天)', dataIndex: 'totalDemand', key: 'totalDemand', width: 130, render: (v: number) => v.toFixed(1) },
+                { title: '活跃需求(人/天)', dataIndex: 'totalDemand', key: 'totalDemand', width: 130, render: (v: number) => v.toFixed(1) },
                 { title: '总人数', dataIndex: 'totalStaff', key: 'totalStaff', width: 80 },
-                { title: '今日可用(人)', dataIndex: 'availableStaff', key: 'availableStaff', width: 120, render: (v: number) => v % 1 === 0 ? v : v.toFixed(1) },
-                { title: '今日投入(人)', dataIndex: 'allocatedToday', key: 'allocatedToday', width: 110 },
+                { title: '今日可用', dataIndex: 'availableStaff', key: 'availableStaff', width: 100, render: (v: number) => v % 1 === 0 ? v : v.toFixed(1) },
+                { title: '今日投入', dataIndex: 'allocatedToday', key: 'allocatedToday', width: 100 },
+                {
+                  title: '利用率', key: 'utilization', width: 100,
+                  render: (_: any, record: any) => {
+                    const rate = record.availableStaff > 0 ? Math.round(record.allocatedToday / record.availableStaff * 1000) / 10 : 0;
+                    const color = rate >= 80 ? '#ff4d4f' : rate >= 60 ? '#faad14' : '#52c41a';
+                    return <span style={{ color, fontWeight: 600 }}>{rate}%</span>;
+                  },
+                },
+                {
+                  title: '供需缺口', key: 'gap', width: 110,
+                  render: (_: any, record: any) => {
+                    const gap = Math.round((record.totalDemand - record.availableStaff) * 10) / 10;
+                    if (gap > 0) return <span style={{ color: '#ff4d4f' }}>缺 {gap} 人</span>;
+                    if (gap < 0) return <span style={{ color: '#52c41a' }}>余 {Math.abs(gap)} 人</span>;
+                    return <span style={{ color: '#999' }}>持平</span>;
+                  },
+                },
                 { title: '备注', dataIndex: 'remark', key: 'remark', width: 200, render: (v: string) => v || '-' },
               ]}
               dataSource={testTypeStats}
@@ -678,11 +668,12 @@ const Dashboard: React.FC = () => {
                     padding: '4px 12px',
                     borderRadius: 4
                   }}>
-                    {item.avgManpower} 人/天
+                    共 {item.count} 个需求
                   </span>
                 </div>
-                <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
-                  共 {item.count} 个测试需求
+                <div style={{ marginTop: 8, fontSize: 12, color: '#666', display: 'flex', gap: 16 }}>
+                  <span>需求量：<strong style={{ color: '#1890ff' }}>{item.avgManpower} 人/天</strong></span>
+                  <span>已排班：<strong style={{ color: '#52c41a' }}>{item.scheduledManpower} 人/天</strong></span>
                 </div>
               </div>
             ))}

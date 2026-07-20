@@ -29,4 +29,16 @@ public interface UserRepository extends JpaRepository<User, Long> {
      */
     @Query("SELECT u FROM User u WHERE u.enabled = false AND u.testType = :testType AND 'testExecutor' MEMBER OF u.roles")
     List<User> findPendingTestExecutorsByTestType(@Param("testType") String testType);
+
+    /**
+     * 查找角色在指定列表中的待审批用户
+     */
+    @Query("SELECT u FROM User u WHERE u.enabled = false AND EXISTS (SELECT r FROM u.roles r WHERE r IN :roles)")
+    List<User> findPendingByRoles(@Param("roles") List<String> roles);
+
+    /**
+     * 查找所有待审批的测试执行人员（资源经理审批用，不过滤testType）
+     */
+    @Query("SELECT u FROM User u WHERE u.enabled = false AND 'testExecutor' MEMBER OF u.roles")
+    List<User> findPendingTestExecutors();
 }

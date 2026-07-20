@@ -127,21 +127,6 @@ const ScheduleWorkbench: React.FC = () => {
   useEffect(() => {
     fetchData();
     fetchPriorityOptions();
-    document.body.style.overflow = 'hidden';
-    const contentEl = document.querySelector('.ant-layout-content') as HTMLElement | null;
-    if (contentEl) {
-      contentEl.style.overflow = 'hidden';
-      contentEl.style.display = 'flex';
-      contentEl.style.flexDirection = 'column';
-    }
-    return () => {
-      document.body.style.overflow = '';
-      if (contentEl) {
-        contentEl.style.overflow = '';
-        contentEl.style.display = '';
-        contentEl.style.flexDirection = '';
-      }
-    };
   }, []);
 
   // ---- 草稿持久化：beforeunload ----

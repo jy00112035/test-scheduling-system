@@ -92,31 +92,49 @@ public class AuthService {
     }
 
     public List<User> getPendingApprovals(List<String> approverRoles, String approverUsername) {
-        // 获取当前审批人信息
-        User approver = userRepository.findByUsername(approverUsername)
-            .orElseThrow(() -> new RuntimeException("审批人不存在"));
+        // admin：审批字段管理员和项目经理
+        if (approverRoles.contains("admin")) {
+            return userRepository.findPendingByRoles(List.of("fieldAdmin", "projectManager"));
+        }
 
-        if (approverRoles.contains("testLead") && approverRoles.contains("projectManager")) {
-            // 同时是测试组长和项目经理，可以看到所有待审批
-            return userRepository.findByEnabledFalse();
-        } else if (approverRoles.contains("testLead")) {
-            // 测试组长：只能看到自己负责的测试类型的测试执行人员
+        // 项目经理：审批测试经理、资源经理、测试组长
+        if (approverRoles.contains("projectManager")) {
+            return userRepository.findPendingByRoles(List.of("testManager", "resourceManager", "testLead"));
+        }
+
+        // 资源经理 + 测试组长（双角色）：合并两者的审批范围
+        if (approverRoles.contains("resourceManager") && approverRoles.contains("testLead")) {
+            User approver = userRepository.findByUsername(approverUsername)
+                .orElseThrow(() -> new RuntimeException("审批人不存在"));
+            List<User> result = new ArrayList<>(userRepository.findPendingTestExecutors());
+            String approverTestType = approver.getTestType();
+            if (approverTestType != null && !approverTestType.isEmpty()) {
+                List<User> byTestType = userRepository.findPendingTestExecutorsByTestType(approverTestType);
+                for (User u : byTestType) {
+                    if (result.stream().noneMatch(existing -> existing.getId().equals(u.getId()))) {
+                        result.add(u);
+                    }
+                }
+            }
+            return result;
+        }
+
+        // 资源经理：审批所有测试执行人员（不过滤testType）
+        if (approverRoles.contains("resourceManager")) {
+            return userRepository.findPendingTestExecutors();
+        }
+
+        // 测试组长：审批同testType的测试执行人员
+        if (approverRoles.contains("testLead")) {
+            User approver = userRepository.findByUsername(approverUsername)
+                .orElseThrow(() -> new RuntimeException("审批人不存在"));
             String approverTestType = approver.getTestType();
             if (approverTestType == null || approverTestType.isEmpty()) {
                 return new ArrayList<>();
             }
             return userRepository.findPendingTestExecutorsByTestType(approverTestType);
-        } else if (approverRoles.contains("projectManager")) {
-            // 项目经理：可以看到除测试执行人员外的所有待审批
-            List<User> all = userRepository.findByEnabledFalse();
-            List<User> filtered = new ArrayList<>();
-            for (User u : all) {
-                if (!"testExecutor".equals(u.getRole())) {
-                    filtered.add(u);
-                }
-            }
-            return filtered;
         }
+
         return new ArrayList<>();
     }
 

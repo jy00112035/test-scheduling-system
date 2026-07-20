@@ -1,9 +1,9 @@
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import { useAuth } from './AuthContext';
 
-export type UserRole = 'testManager' | 'resourceManager' | 'projectManager' | 'testExecutor' | 'fieldAdmin' | 'testLead';
+export type UserRole = 'admin' | 'testManager' | 'resourceManager' | 'projectManager' | 'testExecutor' | 'fieldAdmin' | 'testLead';
 
-const ALL_ROLES: UserRole[] = ['testManager', 'resourceManager', 'projectManager', 'testExecutor', 'fieldAdmin', 'testLead'];
+const ALL_ROLES: UserRole[] = ['admin', 'testManager', 'resourceManager', 'projectManager', 'testExecutor', 'fieldAdmin', 'testLead'];
 
 function isValidRole(r: string): r is UserRole {
   return (ALL_ROLES as string[]).includes(r);
@@ -42,6 +42,17 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
 
   // 权限矩阵
   const permissions: Record<UserRole, string[]> = {
+    admin: [
+      'viewDashboard',
+      'viewTaskKanban',
+      'approveRegistration',
+      'approveTestDemand',
+      'manageBaseFields',
+      'viewBaseConfig',
+      'manageStaff',
+      'viewReports',
+      'personalCenter',
+    ],
     testManager: [
       'viewDashboard',
       'viewTaskKanban',
@@ -68,7 +79,7 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
       'submitSupplementRequest',
       'viewReports',
       'manageStaff',
-      // 'approveRegistration',  // 已移除：测试执行人员改由测试组长审批
+      'approveRegistration',  // 资源经理可审批所有测试执行人员
       'personalCenter',
     ],
     projectManager: [
@@ -107,7 +118,6 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
       'scheduleManpower',
       'aiRecommendSchedule',
       'manageStaff',
-      'approveRegistration',
       'approveTestDemand',
       'manageBaseFields',
       'viewBaseConfig',

@@ -44,6 +44,7 @@ interface HomeFeature {
 }
 
 const roleNames: Record<UserRole, string> = {
+  admin: '管理员',
   testManager: '测试经理',
   resourceManager: '资源主管',
   projectManager: '项目经理',
@@ -53,6 +54,11 @@ const roleNames: Record<UserRole, string> = {
 };
 
 const roleProfiles: Record<UserRole, { summary: string; tags: string[]; tone: string }> = {
+  admin: {
+    summary: '系统管理员，审批高级角色注册与管理基础配置',
+    tags: ['注册审批', '需求审批', '字段管理', '人员管理'],
+    tone: 'red',
+  },
   testManager: {
     summary: '负责需求提交、进度管理与测试闭环',
     tags: ['提交需求', '关闭需求', '查看报表', '调整周期'],

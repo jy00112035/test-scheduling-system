@@ -131,11 +131,11 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateLogin }) => {
               placeholder="请选择角色（可多选）"
               onChange={(values) => setSelectedRoles(values)}
             >
-              <Option value="testExecutor">测试执行人员（测试组长审批）</Option>
+              <Option value="testExecutor">测试执行人员（测试组长/资源经理审批）</Option>
               <Option value="testManager">测试经理（项目经理审批）</Option>
               <Option value="resourceManager">资源主管（项目经理审批）</Option>
-              <Option value="projectManager">项目经理（项目经理审批）</Option>
-              <Option value="fieldAdmin">字段管理员（项目经理审批）</Option>
+              <Option value="projectManager">项目经理（管理员审批）</Option>
+              <Option value="fieldAdmin">字段管理员（管理员审批）</Option>
               <Option value="testLead">测试组长（项目经理审批）</Option>
             </Select>
           </Form.Item>

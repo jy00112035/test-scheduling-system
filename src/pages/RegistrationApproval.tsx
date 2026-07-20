@@ -6,6 +6,7 @@ import { api } from '../services/api';
 import { useUserRole } from '../context/UserRoleContext';
 
 const roleLabels: Record<string, string> = {
+  admin: '管理员',
   testManager: '测试经理',
   resourceManager: '资源主管',
   projectManager: '项目经理',
@@ -86,13 +87,18 @@ const RegistrationApproval: React.FC = () => {
     }
   };
 
-  const isTestLead = roles.includes('testLead' as any);
+  const isAdmin = roles.includes('admin' as any);
   const isProjectManager = roles.includes('projectManager' as any);
+  const isResourceManager = roles.includes('resourceManager' as any);
+  const isTestLead = roles.includes('testLead' as any);
+
   let title = '注册审批';
-  if (isTestLead && !isProjectManager) {
+  if (isAdmin) {
+    title = '注册审批 — 管理员审批';
+  } else if (isProjectManager) {
+    title = '注册审批 — 项目经理审批';
+  } else if (isResourceManager || isTestLead) {
     title = '注册审批 — 测试执行人员';
-  } else if (isProjectManager && !isTestLead) {
-    title = '注册审批 — 其他角色';
   }
 
   const columns = [
@@ -102,6 +108,10 @@ const RegistrationApproval: React.FC = () => {
       title: '申请角色', dataIndex: 'role', key: 'role', width: 140,
       render: (r: string) => <Tag color="blue">{roleLabels[r] || r}</Tag>,
     },
+    ...((isResourceManager || isTestLead) ? [{
+      title: '测试类型', dataIndex: 'testType', key: 'testType', width: 120,
+      render: (testType: string) => testType || '-',
+    }] : []),
     {
       title: '注册时间', dataIndex: 'createdAt', key: 'createdAt', width: 180,
       render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '-',

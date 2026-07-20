@@ -83,18 +83,6 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateRegister }) => {
           <Link onClick={onNavigateRegister}>立即注册</Link>
         </div>
 
-        <div style={{ marginTop: 16, padding: 16, background: '#f5f5f5', borderRadius: 4 }}>
-          <p style={{ marginBottom: 8, fontWeight: 500 }}>测试账号：</p>
-          <p style={{ margin: 0, fontSize: 12, color: '#666' }}>
-            admin / admin123 (管理员)<br />
-            testmanager / test123 (测试经理)<br />
-            resourcemanager / resource123 (资源主管)<br />
-            projectmanager / project123 (项目经理)<br />
-            testexecutor / test123 (测试执行人员)<br />
-            testlead / test123 (测试组长)
-          </p>
-        </div>
-
       </Card>
       <div style={{ marginTop: 24, paddingBottom: 24, textAlign: 'center' }}>
         <a

@@ -29,8 +29,23 @@ public class DataInitializer implements CommandLineRunner {
     @Override
     public void run(String... args) {
         initUsers();
+        migrateAdminRole();
         initStaff();
         initFieldConfigs();
+    }
+
+    /**
+     * 给现有 admin 账号补上 admin 角色（兼容旧数据库）
+     */
+    private void migrateAdminRole() {
+        userRepository.findByUsername("admin").ifPresent(admin -> {
+            if (!admin.getRoles().contains("admin")) {
+                List<String> roles = new java.util.ArrayList<>(admin.getRoles());
+                roles.add(0, "admin");
+                admin.setRoles(roles);
+                userRepository.save(admin);
+            }
+        });
     }
 
     private void initUsers() {
@@ -38,7 +53,7 @@ public class DataInitializer implements CommandLineRunner {
             User admin = new User();
             admin.setUsername("admin");
             admin.setPassword(passwordEncoder.encode("admin123"));
-            admin.setRoles(List.of("fieldAdmin", "testManager"));
+            admin.setRoles(List.of("admin", "fieldAdmin", "testManager"));
             admin.setDisplayName("管理员");
             admin.setEnabled(true);
             userRepository.save(admin);
