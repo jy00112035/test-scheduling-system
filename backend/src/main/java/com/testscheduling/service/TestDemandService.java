@@ -90,11 +90,8 @@ public class TestDemandService {
             ? beforeSpecials
             : demand.getSpecialModuleDemands();
 
-        boolean quotasLocked = scheduleRepository.existsByDemandId(id);
-        if (quotasLocked && quotasChanged(
-                beforeDetails, beforeSpecials, requestedDetails, requestedSpecials)) {
-            throw immutableScheduledDemand();
-        }
+        boolean quotasLocked = checkScheduledStructureLock(
+            id, beforeDetails, beforeSpecials, requestedDetails, requestedSpecials);
 
         copyEditableFields(existing, demand);
         existing.setManpowerDemand(computeTotalManpower(requestedDetails));
@@ -178,6 +175,8 @@ public class TestDemandService {
         List<DemandSpecialModule> requestedSpecials = modifiedDemand.getSpecialModuleDemands() == null
             ? beforeSpecials
             : modifiedDemand.getSpecialModuleDemands();
+        boolean quotasLocked = checkScheduledStructureLock(
+            id, beforeDetails, beforeSpecials, requestedDetails, requestedSpecials);
 
         demand.setStartDate(modifiedDemand.getStartDate());
         demand.setEndDate(modifiedDemand.getEndDate());
@@ -191,9 +190,14 @@ public class TestDemandService {
         demand.setStatus(TestDemand.DemandStatus.pending);
 
         TestDemand saved = testDemandRepository.save(demand);
-        replaceDetails(id, requestedDetails);
-        List<DemandSpecialModule> after = specialModuleService.replaceForDemand(
-            id, requestedDetails, requestedSpecials, true);
+        List<DemandSpecialModule> after;
+        if (quotasLocked) {
+            after = beforeSpecials;
+        } else {
+            replaceDetails(id, requestedDetails);
+            after = specialModuleService.replaceForDemand(
+                id, requestedDetails, requestedSpecials, true);
+        }
         auditSpecialChange(id, beforeSpecials, after);
         return enrichWithDetails(saved);
     }
@@ -300,6 +304,20 @@ public class TestDemandService {
             List<DemandSpecialModule> afterSpecials) {
         return !detailQuotas(beforeDetails).equals(detailQuotas(afterDetails))
             || !specialQuotas(beforeSpecials).equals(specialQuotas(afterSpecials));
+    }
+
+    private boolean checkScheduledStructureLock(
+            Long demandId,
+            List<DemandManpowerDetail> beforeDetails,
+            List<DemandSpecialModule> beforeSpecials,
+            List<DemandManpowerDetail> requestedDetails,
+            List<DemandSpecialModule> requestedSpecials) {
+        boolean hasSchedules = scheduleRepository.existsByDemandId(demandId);
+        if (hasSchedules && quotasChanged(
+                beforeDetails, beforeSpecials, requestedDetails, requestedSpecials)) {
+            throw immutableScheduledDemand();
+        }
+        return hasSchedules;
     }
 
     private List<QuotaValue> detailQuotas(List<DemandManpowerDetail> details) {

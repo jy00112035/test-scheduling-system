@@ -263,6 +263,58 @@ class TestDemandServiceTest {
     }
 
     @Test
+    void approveWithChangesRejectsChangedStructureWhenSchedulesExist() {
+        TestModuleConfig payment = saveModule("审批锁定支付模块", true);
+        TestDemand original = demand("审批锁定需求", "8.0");
+        original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
+        TestDemand created = service.create(original);
+        Long detailId = created.getManpowerDetails().getFirst().getId();
+        Long specialId = created.getSpecialModuleDemands().getFirst().getId();
+        Schedule schedule = new Schedule();
+        schedule.setDemandId(created.getId());
+        scheduleRepository.saveAndFlush(schedule);
+
+        TestDemand changes = demand("审批试图改配额", "9.0");
+        changes.setSpecialModuleDemands(List.of(special(payment.getId(), "2.1")));
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service.approveWithChanges(created.getId(), changes));
+
+        assertEquals("DEMAND_WITH_SCHEDULE_IMMUTABLE", error.getErrorCode());
+        TestDemand persisted = service.findById(created.getId());
+        assertEquals(TestDemand.DemandStatus.submitted, persisted.getStatus());
+        assertEquals(new BigDecimal("8.00"), persisted.getManpowerDemand());
+        assertEquals(detailId, persisted.getManpowerDetails().getFirst().getId());
+        assertEquals(specialId, persisted.getSpecialModuleDemands().getFirst().getId());
+        assertEquals(new BigDecimal("2.0"),
+            persisted.getSpecialModuleDemands().getFirst().getManpowerDemand());
+    }
+
+    @Test
+    void approveWithChangesAllowsMetadataEditWhenScheduledStructureIsUnchanged() {
+        TestModuleConfig payment = saveModule("审批元数据支付模块", true);
+        TestDemand original = demand("审批元数据需求", "8.0");
+        original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
+        TestDemand created = service.create(original);
+        Long detailId = created.getManpowerDetails().getFirst().getId();
+        Long specialId = created.getSpecialModuleDemands().getFirst().getId();
+        Schedule schedule = new Schedule();
+        schedule.setDemandId(created.getId());
+        scheduleRepository.saveAndFlush(schedule);
+
+        TestDemand changes = demand("不修改产品", "8.00");
+        changes.setPriority("高");
+        changes.setSpecialModuleDemands(List.of(special(payment.getId(), "2.00")));
+
+        TestDemand approved = service.approveWithChanges(created.getId(), changes);
+
+        assertEquals(TestDemand.DemandStatus.pending, approved.getStatus());
+        assertEquals("高", approved.getPriority());
+        assertEquals(detailId, approved.getManpowerDetails().getFirst().getId());
+        assertEquals(specialId, approved.getSpecialModuleDemands().getFirst().getId());
+    }
+
+    @Test
     void deletionRemovesSpecialsBeforeDetailsAndRejectsScheduledDemand() {
         TestModuleConfig payment = saveModule("删除支付模块", true);
         TestDemand deletable = demand("可删除需求", "8.0");
