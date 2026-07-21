@@ -1,5 +1,6 @@
 package com.testscheduling.controller;
 
+import com.testscheduling.dto.TestModuleRequest;
 import com.testscheduling.entity.TestModuleConfig;
 import com.testscheduling.exception.BusinessException;
 import com.testscheduling.security.RequestRoleGuard;
@@ -25,13 +26,14 @@ class TestModuleControllerTest {
 
     @Test
     void everyWriteEndpointRequiresFieldAdminRole() {
+        TestModuleRequest request = new TestModuleRequest("支付模块", "功能测试", 10);
         TestModuleConfig module = new TestModuleConfig();
-        when(service.create(module)).thenReturn(module);
-        when(service.update(11L, module)).thenReturn(module);
+        when(service.create(request)).thenReturn(module);
+        when(service.update(11L, request)).thenReturn(module);
         when(service.setEnabled(11L, false)).thenReturn(module);
 
-        controller.create(module);
-        controller.update(11L, module);
+        controller.create(request);
+        controller.update(11L, request);
         controller.status(11L, Map.of("enabled", false));
         controller.delete(11L);
 

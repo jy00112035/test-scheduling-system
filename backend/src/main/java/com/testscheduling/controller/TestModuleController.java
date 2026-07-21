@@ -1,6 +1,7 @@
 package com.testscheduling.controller;
 
 import com.testscheduling.dto.ApiResponse;
+import com.testscheduling.dto.TestModuleRequest;
 import com.testscheduling.entity.TestModuleConfig;
 import com.testscheduling.exception.BusinessException;
 import com.testscheduling.security.RequestRoleGuard;
@@ -38,14 +39,14 @@ public class TestModuleController {
     }
 
     @PostMapping
-    public ApiResponse<TestModuleConfig> create(@RequestBody TestModuleConfig module) {
+    public ApiResponse<TestModuleConfig> create(@RequestBody TestModuleRequest module) {
         roleGuard.requireAny("fieldAdmin");
         return ApiResponse.success("创建成功", service.create(module));
     }
 
     @PutMapping("/{id}")
     public ApiResponse<TestModuleConfig> update(
-            @PathVariable Long id, @RequestBody TestModuleConfig module) {
+            @PathVariable Long id, @RequestBody TestModuleRequest module) {
         roleGuard.requireAny("fieldAdmin");
         return ApiResponse.success("更新成功", service.update(id, module));
     }

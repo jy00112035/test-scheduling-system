@@ -23,6 +23,17 @@ public interface TestModuleConfigRepository extends JpaRepository<TestModuleConf
     List<TestModuleConfig> findByEnabledOrderByTestTypeAscSortOrderAscModuleNameAsc(boolean enabled);
 
     @Query(value = """
+        SELECT module_id
+        FROM demand_special_module
+        WHERE module_id IN (:moduleIds)
+        UNION
+        SELECT module_id
+        FROM test_staff_module
+        WHERE module_id IN (:moduleIds)
+        """, nativeQuery = true)
+    List<Long> findReferencedModuleIds(@Param("moduleIds") List<Long> moduleIds);
+
+    @Query(value = """
         SELECT COUNT(*)
         FROM demand_special_module
         WHERE module_id = :moduleId

@@ -58,6 +58,19 @@ class RequestRoleGuardTest {
     }
 
     @Test
+    void rejectsMalformedRoleContainer() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute("username", "field-admin");
+        request.setAttribute("roles", "fieldAdmin");
+        bindRequest(request);
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> guard.requireAny("fieldAdmin"));
+
+        assertEquals("FORBIDDEN", error.getErrorCode());
+    }
+
+    @Test
     void acceptsRequestWithAnyRequiredRole() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute("username", "field-admin");
