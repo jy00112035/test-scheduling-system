@@ -1,11 +1,11 @@
 package com.testscheduling.service;
 
 import com.testscheduling.dto.LegacyModuleMigrationReport;
+import com.testscheduling.dto.LegacyModuleUser;
 import com.testscheduling.entity.TestModuleConfig;
 import com.testscheduling.entity.TestStaff;
 import com.testscheduling.entity.TestStaffModule;
 import com.testscheduling.entity.TestStaffModuleId;
-import com.testscheduling.entity.User;
 import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.TestModuleConfigRepository;
 import com.testscheduling.repository.TestStaffModuleRepository;
@@ -17,9 +17,10 @@ import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -121,32 +122,33 @@ class StaffModuleServiceTest {
 
     @Test
     void migrationReportsUnknownAndDuplicateNamesAndKeepsLegacyText() {
-        User user = legacyUser("T1001", "支付模块，未知模块;支付模块");
+        LegacyModuleUser user = legacyUser("T1001", "支付模块，未知模块;支付模块");
         TestStaff staff = staff(101L, "T1001");
         TestModuleConfig payment = module(11L, "支付模块", true);
-        when(staffRepository.findByEmpNo("T1001")).thenReturn(Optional.of(staff));
+        when(staffRepository.findByEmpNoIn(List.of("T1001"))).thenReturn(List.of(staff));
         when(moduleRepository.findAll()).thenReturn(List.of(payment));
-        when(staffModuleRepository.findModuleIdsByStaffId(101L)).thenReturn(List.of());
+        when(staffModuleRepository.findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc(
+            List.of(101L))).thenReturn(List.of());
 
-        LegacyModuleMigrationReport report = service.migrateLegacy(List.of(user));
+        LegacyModuleMigrationReport report = service.migrateLegacyPage(List.of(user));
 
         assertEquals(List.of("未知模块"), report.unmatched().get("T1001"));
         assertEquals(List.of("支付模块"), report.duplicateNames().get("T1001"));
         assertEquals(1, report.createdRelations());
-        assertEquals("支付模块，未知模块;支付模块", user.getFamiliarModules());
     }
 
     @Test
     void migrationIsIdempotentAndReportsMissingStaffAccounts() {
-        User migrated = legacyUser("T1001", "支付模块");
-        User missing = legacyUser("T404", "支付模块");
+        LegacyModuleUser migrated = legacyUser("T1001", "支付模块");
+        LegacyModuleUser missing = legacyUser("T404", "支付模块");
         TestStaff staff = staff(101L, "T1001");
         when(moduleRepository.findAll()).thenReturn(List.of(module(11L, "支付模块", true)));
-        when(staffRepository.findByEmpNo("T1001")).thenReturn(Optional.of(staff));
-        when(staffRepository.findByEmpNo("T404")).thenReturn(Optional.empty());
-        when(staffModuleRepository.findModuleIdsByStaffId(101L)).thenReturn(List.of(11L));
+        when(staffRepository.findByEmpNoIn(List.of("T1001", "T404")))
+            .thenReturn(List.of(staff));
+        when(staffModuleRepository.findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc(
+            List.of(101L))).thenReturn(List.of(new TestStaffModule(101L, 11L)));
 
-        LegacyModuleMigrationReport report = service.migrateLegacy(List.of(migrated, missing));
+        LegacyModuleMigrationReport report = service.migrateLegacyPage(List.of(migrated, missing));
 
         assertEquals(0, report.createdRelations());
         assertEquals(List.of("T404"), report.missingStaffAccounts());
@@ -155,13 +157,14 @@ class StaffModuleServiceTest {
 
     @Test
     void migrationReportsDisabledLegacyModuleWithoutCreatingRelation() {
-        User user = legacyUser("T1001", "停用模块");
+        LegacyModuleUser user = legacyUser("T1001", "停用模块");
         TestStaff staff = staff(101L, "T1001");
         when(moduleRepository.findAll()).thenReturn(List.of(module(11L, "停用模块", false)));
-        when(staffRepository.findByEmpNo("T1001")).thenReturn(Optional.of(staff));
-        when(staffModuleRepository.findModuleIdsByStaffId(101L)).thenReturn(List.of());
+        when(staffRepository.findByEmpNoIn(List.of("T1001"))).thenReturn(List.of(staff));
+        when(staffModuleRepository.findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc(
+            List.of(101L))).thenReturn(List.of());
 
-        LegacyModuleMigrationReport report = service.migrateLegacy(List.of(user));
+        LegacyModuleMigrationReport report = service.migrateLegacyPage(List.of(user));
 
         assertEquals(0, report.createdRelations());
         assertEquals(List.of("停用模块"), report.unmatched().get("T1001"));
@@ -170,17 +173,50 @@ class StaffModuleServiceTest {
 
     @Test
     void migrationPreservesPreExistingDisabledRelationWithoutReportingOrWriting() {
-        User user = legacyUser("T1001", "停用模块");
+        LegacyModuleUser user = legacyUser("T1001", "停用模块");
         TestStaff staff = staff(101L, "T1001");
         when(moduleRepository.findAll()).thenReturn(List.of(module(11L, "停用模块", false)));
-        when(staffRepository.findByEmpNo("T1001")).thenReturn(Optional.of(staff));
-        when(staffModuleRepository.findModuleIdsByStaffId(101L)).thenReturn(List.of(11L));
+        when(staffRepository.findByEmpNoIn(List.of("T1001"))).thenReturn(List.of(staff));
+        when(staffModuleRepository.findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc(
+            List.of(101L))).thenReturn(List.of(new TestStaffModule(101L, 11L)));
 
-        LegacyModuleMigrationReport report = service.migrateLegacy(List.of(user));
+        LegacyModuleMigrationReport report = service.migrateLegacyPage(List.of(user));
 
         assertEquals(0, report.createdRelations());
         assertFalse(report.unmatched().containsKey("T1001"));
         verify(staffModuleRepository, never()).saveAll(anyList());
+    }
+
+    @Test
+    void migrationBatchLoadsStaffAndRelationsOnce() {
+        LegacyModuleUser first = legacyUser("T1001", "支付模块");
+        LegacyModuleUser second = legacyUser("T1002", "支付模块");
+        TestStaff firstStaff = staff(101L, "T1001");
+        TestStaff secondStaff = staff(102L, "T1002");
+        when(moduleRepository.findAll()).thenReturn(List.of(module(11L, "支付模块", true)));
+        when(staffRepository.findByEmpNoIn(List.of("T1001", "T1002")))
+            .thenReturn(List.of(firstStaff, secondStaff));
+        when(staffModuleRepository.findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc(
+            List.of(101L, 102L))).thenReturn(List.of());
+
+        LegacyModuleMigrationReport report = service.migrateLegacyPage(List.of(first, second));
+
+        assertEquals(2, report.createdRelations());
+        verify(staffRepository).findByEmpNoIn(List.of("T1001", "T1002"));
+        verify(staffRepository, never()).findByEmpNo(any());
+        verify(staffModuleRepository)
+            .findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc(List.of(101L, 102L));
+        verify(staffModuleRepository, never()).findModuleIdsByStaffId(any());
+        verify(staffModuleRepository).saveAll(anyList());
+    }
+
+    @Test
+    void migrationBatchUsesRequiresNewTransaction() throws NoSuchMethodException {
+        Transactional transactional = StaffModuleService.class
+            .getMethod("migrateLegacyPage", List.class)
+            .getAnnotation(Transactional.class);
+
+        assertEquals(Propagation.REQUIRES_NEW, transactional.propagation());
     }
 
     private TestStaff staff(Long id, String empNo) {
@@ -199,10 +235,7 @@ class StaffModuleServiceTest {
         return module;
     }
 
-    private User legacyUser(String username, String familiarModules) {
-        User user = new User();
-        user.setUsername(username);
-        user.setFamiliarModules(familiarModules);
-        return user;
+    private LegacyModuleUser legacyUser(String username, String familiarModules) {
+        return new LegacyModuleUser(username, familiarModules);
     }
 }

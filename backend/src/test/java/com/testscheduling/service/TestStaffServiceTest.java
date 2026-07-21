@@ -1,6 +1,7 @@
 package com.testscheduling.service;
 
 import com.testscheduling.dto.LegacyModuleMigrationReport;
+import com.testscheduling.dto.LegacyModuleUser;
 import com.testscheduling.dto.StaffCreateResponse;
 import com.testscheduling.dto.StaffRequest;
 import com.testscheduling.entity.TestModuleConfig;
@@ -15,14 +16,19 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.SliceImpl;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -76,6 +82,17 @@ class TestStaffServiceTest {
     }
 
     @Test
+    void duplicateCreateChecksAccountBeforeSavingStaff() {
+        when(userRepository.existsByUsername("T1001")).thenReturn(true);
+
+        assertThrows(RuntimeException.class, () -> service.create(request));
+
+        verify(testStaffRepository, never()).save(any());
+        verify(userRepository, never()).save(any());
+        verify(passwordEncoder, never()).encode(anyString());
+    }
+
+    @Test
     void updateWithEmptyModuleIdsClearsAndReturnsFreshStructuredModules() {
         request.setFamiliarModuleIds(List.of());
         TestStaff existing = staff(101L, "T1001");
@@ -112,16 +129,56 @@ class TestStaffServiceTest {
     }
 
     @Test
-    void migrationUsesAllUsersAndReturnsReport() {
-        User user = user("T1001", "支付模块");
-        LegacyModuleMigrationReport expected = new LegacyModuleMigrationReport(
-            1, Map.of(), Map.of(), List.of());
-        when(userRepository.findAll()).thenReturn(List.of(user));
-        when(staffModuleService.migrateLegacy(List.of(user))).thenReturn(expected);
+    void updateRejectsUsernameOwnedByAnotherUserBeforeMutatingStaff() {
+        TestStaff existing = staff(101L, "T1001");
+        User current = user("T1001", "支付模块");
+        current.setId(1L);
+        User target = user("T2002", "其他模块");
+        target.setId(2L);
+        request.setEmpNo("T2002");
+        when(testStaffRepository.findById(101L)).thenReturn(Optional.of(existing));
+        when(userRepository.findByUsername("T1001")).thenReturn(Optional.of(current));
+        when(userRepository.findByUsername("T2002")).thenReturn(Optional.of(target));
+
+        assertThrows(RuntimeException.class, () -> service.update(101L, request));
+
+        assertEquals("T1001", existing.getEmpNo());
+        verify(testStaffRepository, never()).save(any());
+        verify(userRepository, never()).save(any());
+        verify(staffModuleService, never()).replaceModules(any(), any());
+    }
+
+    @Test
+    void migrationPagesLightweightRowsAndAggregatesReportsDeterministically() {
+        List<LegacyModuleUser> firstPageUsers = IntStream.range(0, 200)
+            .mapToObj(index -> new LegacyModuleUser("T" + index, "支付模块"))
+            .toList();
+        List<LegacyModuleUser> secondPageUsers = List.of(
+            new LegacyModuleUser("T200", "未知模块"));
+        PageRequest firstRequest = PageRequest.of(0, 200);
+        PageRequest secondRequest = PageRequest.of(1, 200);
+        when(userRepository.findLegacyModuleUsers(firstRequest)).thenReturn(
+            new SliceImpl<>(firstPageUsers, firstRequest, true));
+        when(userRepository.findLegacyModuleUsers(secondRequest)).thenReturn(
+            new SliceImpl<>(secondPageUsers, secondRequest, false));
+        when(staffModuleService.migrateLegacyPage(firstPageUsers)).thenReturn(
+            new LegacyModuleMigrationReport(
+                200, Map.of("T0", List.of("支付模块")), Map.of(), List.of()));
+        when(staffModuleService.migrateLegacyPage(secondPageUsers)).thenReturn(
+            new LegacyModuleMigrationReport(
+                0, Map.of(), Map.of("T200", List.of("未知模块")), List.of("T200")));
 
         LegacyModuleMigrationReport result = service.migrateLegacyModules();
 
-        assertEquals(expected, result);
+        assertEquals(200, result.createdRelations());
+        assertEquals(List.of("T0"), result.duplicateNames().keySet().stream().toList());
+        assertEquals(List.of("T200"), result.unmatched().keySet().stream().toList());
+        assertEquals(List.of("T200"), result.missingStaffAccounts());
+        verify(userRepository).findLegacyModuleUsers(firstRequest);
+        verify(userRepository).findLegacyModuleUsers(secondRequest);
+        verify(userRepository, never()).findAll();
+        verify(staffModuleService).migrateLegacyPage(firstPageUsers);
+        verify(staffModuleService).migrateLegacyPage(secondPageUsers);
     }
 
     @Test
@@ -129,7 +186,8 @@ class TestStaffServiceTest {
         TestStaff staff = staff(101L, "T1001");
         TestModuleConfig payment = module(11L, "支付模块");
         when(testStaffRepository.findAll()).thenReturn(List.of(staff));
-        when(userRepository.findByUsername("T1001")).thenReturn(Optional.of(user("T1001", "支付模块")));
+        when(userRepository.findByUsernameIn(List.of("T1001")))
+            .thenReturn(List.of(user("T1001", "支付模块")));
         when(staffModuleService.findModulesByStaffIds(List.of(101L)))
             .thenReturn(Map.of(101L, List.of(payment)));
 
@@ -138,6 +196,46 @@ class TestStaffServiceTest {
         assertEquals(List.of(payment), result.getFirst().getFamiliarModules());
         assertEquals("支付模块", result.getFirst().getLegacyFamiliarModules());
         assertNull(result.getFirst().getLockVersion());
+        verify(userRepository).findByUsernameIn(List.of("T1001"));
+        verify(userRepository, never()).findByUsername(anyString());
+    }
+
+    @Test
+    void activeListUsesOneBatchUserLookupForMultipleStaff() {
+        TestStaff first = staff(101L, "T1001");
+        TestStaff second = staff(102L, "T1002");
+        when(testStaffRepository.findByStatus(TestStaff.StaffStatus.active))
+            .thenReturn(List.of(first, second));
+        when(userRepository.findByUsernameIn(List.of("T1001", "T1002")))
+            .thenReturn(List.of(user("T1001", "模块一"), user("T1002", "模块二")));
+        when(staffModuleService.findModulesByStaffIds(List.of(101L, 102L)))
+            .thenReturn(Map.of());
+
+        List<TestStaff> result = service.findActive();
+
+        assertEquals(List.of("模块一", "模块二"), result.stream()
+            .map(TestStaff::getLegacyFamiliarModules)
+            .toList());
+        verify(userRepository).findByUsernameIn(List.of("T1001", "T1002"));
+        verify(userRepository, never()).findByUsername(anyString());
+    }
+
+    @Test
+    void groupListUsesOneBatchUserLookupForMultipleStaff() {
+        TestStaff first = staff(101L, "T1001");
+        TestStaff second = staff(102L, "T1002");
+        when(testStaffRepository.findByGroupName("功能测试组"))
+            .thenReturn(List.of(first, second));
+        when(userRepository.findByUsernameIn(List.of("T1001", "T1002")))
+            .thenReturn(List.of(user("T1001", "模块一"), user("T1002", "模块二")));
+        when(staffModuleService.findModulesByStaffIds(List.of(101L, 102L)))
+            .thenReturn(Map.of());
+
+        List<TestStaff> result = service.findByGroupName("功能测试组");
+
+        assertEquals(2, result.size());
+        verify(userRepository).findByUsernameIn(List.of("T1001", "T1002"));
+        verify(userRepository, never()).findByUsername(anyString());
     }
 
     private TestStaff staff(Long id, String empNo) {

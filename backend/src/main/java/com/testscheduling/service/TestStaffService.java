@@ -1,6 +1,7 @@
 package com.testscheduling.service;
 
 import com.testscheduling.dto.LegacyModuleMigrationReport;
+import com.testscheduling.dto.LegacyModuleUser;
 import com.testscheduling.dto.StaffCreateResponse;
 import com.testscheduling.dto.StaffRequest;
 import com.testscheduling.entity.TestModuleConfig;
@@ -11,15 +12,23 @@ import com.testscheduling.repository.UserRepository;
 import com.testscheduling.util.PasswordGenerator;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Slice;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
 public class TestStaffService {
+
+    private static final int LEGACY_MIGRATION_PAGE_SIZE = 200;
 
     @Autowired
     private TestStaffRepository testStaffRepository;
@@ -61,33 +70,42 @@ public class TestStaffService {
     private void enrichWithRole(TestStaff staff) {
         if (staff != null) {
             userRepository.findByUsername(staff.getEmpNo())
-                .ifPresent(user -> {
-                    staff.setRole(user.getRole());
-                    staff.setRoles(user.getRoles());
-                    staff.setLegacyFamiliarModules(user.getFamiliarModules());
-                    staff.setConfidentialClearance(user.getConfidentialClearance());
-                });
+                .ifPresent(user -> applyUserDetails(staff, user));
             staff.setFamiliarModules(staffModuleService.findModulesByStaffId(staff.getId()));
         }
     }
 
     private void enrichWithRole(List<TestStaff> staffs) {
+        if (staffs.isEmpty()) {
+            return;
+        }
         Map<Long, List<TestModuleConfig>> modulesByStaffId = staffModuleService
             .findModulesByStaffIds(staffs.stream().map(TestStaff::getId).toList());
+        List<String> empNos = staffs.stream().map(TestStaff::getEmpNo).distinct().toList();
+        Map<String, User> usersByUsername = userRepository.findByUsernameIn(empNos).stream()
+            .collect(Collectors.toMap(User::getUsername, Function.identity()));
         for (TestStaff staff : staffs) {
-            userRepository.findByUsername(staff.getEmpNo())
-                .ifPresent(user -> {
-                    staff.setRole(user.getRole());
-                    staff.setRoles(user.getRoles());
-                    staff.setLegacyFamiliarModules(user.getFamiliarModules());
-                    staff.setConfidentialClearance(user.getConfidentialClearance());
-                });
+            User user = usersByUsername.get(staff.getEmpNo());
+            if (user != null) {
+                applyUserDetails(staff, user);
+            }
             staff.setFamiliarModules(modulesByStaffId.getOrDefault(staff.getId(), List.of()));
         }
     }
 
+    private void applyUserDetails(TestStaff staff, User user) {
+        staff.setRole(user.getRole());
+        staff.setRoles(user.getRoles());
+        staff.setLegacyFamiliarModules(user.getFamiliarModules());
+        staff.setConfidentialClearance(user.getConfidentialClearance());
+    }
+
     @Transactional
     public StaffCreateResponse create(StaffRequest request) {
+        if (userRepository.existsByUsername(request.getEmpNo())) {
+            throw duplicateAccount();
+        }
+
         TestStaff staff = new TestStaff();
         staff.setName(request.getName());
         staff.setEmpNo(request.getEmpNo());
@@ -100,10 +118,6 @@ public class TestStaffService {
             staff.setStatus(TestStaff.StaffStatus.valueOf(request.getStatus()));
         }
         TestStaff savedStaff = testStaffRepository.save(staff);
-
-        if (userRepository.existsByUsername(request.getEmpNo())) {
-            throw new RuntimeException("该工号对应的用户账号已存在");
-        }
 
         String plainPassword = "12345678";
         User user = new User();
@@ -133,6 +147,14 @@ public class TestStaffService {
         TestStaff existing = testStaffRepository.findById(id)
             .orElseThrow(() -> new RuntimeException("人员不存在"));
         String oldEmpNo = existing.getEmpNo();
+        User user = userRepository.findByUsername(oldEmpNo).orElse(null);
+        if (!Objects.equals(oldEmpNo, request.getEmpNo())) {
+            User targetUser = userRepository.findByUsername(request.getEmpNo()).orElse(null);
+            if (targetUser != null
+                    && (user == null || !Objects.equals(targetUser.getId(), user.getId()))) {
+                throw duplicateAccount();
+            }
+        }
 
         existing.setName(request.getName());
         existing.setEmpNo(request.getEmpNo());
@@ -146,7 +168,6 @@ public class TestStaffService {
         }
         TestStaff saved = testStaffRepository.save(existing);
 
-        User user = userRepository.findByUsername(oldEmpNo).orElse(null);
         if (user == null) {
             user = new User();
             user.setUsername(request.getEmpNo());
@@ -178,6 +199,10 @@ public class TestStaffService {
         return saved;
     }
 
+    private RuntimeException duplicateAccount() {
+        return new RuntimeException("该工号对应的用户账号已存在");
+    }
+
     @Transactional
     public void delete(Long id) {
         TestStaff staff = findById(id);
@@ -198,9 +223,28 @@ public class TestStaffService {
         testStaffRepository.deleteAllById(ids);
     }
 
-    @Transactional
     public LegacyModuleMigrationReport migrateLegacyModules() {
-        return staffModuleService.migrateLegacy(userRepository.findAll());
+        int createdRelations = 0;
+        Map<String, List<String>> duplicateNames = new LinkedHashMap<>();
+        Map<String, List<String>> unmatched = new LinkedHashMap<>();
+        List<String> missingStaffAccounts = new ArrayList<>();
+        int pageNumber = 0;
+        Slice<LegacyModuleUser> page;
+
+        do {
+            page = userRepository.findLegacyModuleUsers(
+                PageRequest.of(pageNumber, LEGACY_MIGRATION_PAGE_SIZE));
+            LegacyModuleMigrationReport pageReport = staffModuleService
+                .migrateLegacyPage(page.getContent());
+            createdRelations += pageReport.createdRelations();
+            duplicateNames.putAll(pageReport.duplicateNames());
+            unmatched.putAll(pageReport.unmatched());
+            missingStaffAccounts.addAll(pageReport.missingStaffAccounts());
+            pageNumber++;
+        } while (page.hasNext());
+
+        return new LegacyModuleMigrationReport(
+            createdRelations, duplicateNames, unmatched, missingStaffAccounts);
     }
 
     public String getRoleByEmpNo(String empNo) {

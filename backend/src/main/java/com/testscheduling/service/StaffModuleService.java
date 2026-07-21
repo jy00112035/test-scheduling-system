@@ -1,22 +1,24 @@
 package com.testscheduling.service;
 
 import com.testscheduling.dto.LegacyModuleMigrationReport;
+import com.testscheduling.dto.LegacyModuleUser;
 import com.testscheduling.entity.TestModuleConfig;
 import com.testscheduling.entity.TestStaff;
 import com.testscheduling.entity.TestStaffModule;
-import com.testscheduling.entity.User;
 import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.TestModuleConfigRepository;
 import com.testscheduling.repository.TestStaffModuleRepository;
 import com.testscheduling.repository.TestStaffRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -121,8 +123,11 @@ public class StaffModuleService {
         staffModuleRepository.flush();
     }
 
-    @Transactional
-    public LegacyModuleMigrationReport migrateLegacy(List<User> users) {
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public LegacyModuleMigrationReport migrateLegacyPage(List<LegacyModuleUser> users) {
+        if (users == null || users.isEmpty()) {
+            return new LegacyModuleMigrationReport(0, Map.of(), Map.of(), List.of());
+        }
         Map<String, TestModuleConfig> modulesByName = moduleRepository.findAll().stream()
             .collect(Collectors.toMap(
                 TestModuleConfig::getModuleName,
@@ -132,27 +137,47 @@ public class StaffModuleService {
         Map<String, List<String>> duplicateNames = new LinkedHashMap<>();
         Map<String, List<String>> unmatched = new LinkedHashMap<>();
         List<String> missingStaffAccounts = new ArrayList<>();
-        int createdRelations = 0;
+        List<String> usernames = users.stream()
+            .map(LegacyModuleUser::username)
+            .distinct()
+            .toList();
+        Map<String, TestStaff> staffByEmpNo = staffRepository.findByEmpNoIn(usernames).stream()
+            .collect(Collectors.toMap(TestStaff::getEmpNo, Function.identity()));
+        List<Long> staffIds = usernames.stream()
+            .map(staffByEmpNo::get)
+            .filter(Objects::nonNull)
+            .map(TestStaff::getId)
+            .toList();
+        List<TestStaffModule> existingRelations = staffIds.isEmpty()
+            ? List.of()
+            : staffModuleRepository
+                .findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc(staffIds);
+        Map<Long, Set<Long>> existingIdsByStaff = new LinkedHashMap<>();
+        for (TestStaffModule relation : existingRelations) {
+            existingIdsByStaff
+                .computeIfAbsent(relation.getId().getStaffId(), ignored -> new LinkedHashSet<>())
+                .add(relation.getId().getModuleId());
+        }
+        List<TestStaffModule> additions = new ArrayList<>();
 
-        for (User user : users == null ? List.<User>of() : users) {
-            List<String> names = parseLegacyNames(user.getFamiliarModules());
+        for (LegacyModuleUser user : users) {
+            List<String> names = parseLegacyNames(user.familiarModules());
             if (names.isEmpty()) {
                 continue;
             }
             List<String> duplicates = duplicateNames(names);
             if (!duplicates.isEmpty()) {
-                duplicateNames.put(user.getUsername(), duplicates);
+                duplicateNames.put(user.username(), duplicates);
             }
 
-            TestStaff staff = staffRepository.findByEmpNo(user.getUsername()).orElse(null);
+            TestStaff staff = staffByEmpNo.get(user.username());
             if (staff == null) {
-                missingStaffAccounts.add(user.getUsername());
+                missingStaffAccounts.add(user.username());
                 continue;
             }
 
-            Set<Long> existingIds = new LinkedHashSet<>(
-                staffModuleRepository.findModuleIdsByStaffId(staff.getId()));
-            List<TestStaffModule> additions = new ArrayList<>();
+            Set<Long> existingIds = existingIdsByStaff.computeIfAbsent(
+                staff.getId(), ignored -> new LinkedHashSet<>());
             List<String> unknownNames = new ArrayList<>();
             for (String name : new LinkedHashSet<>(names)) {
                 TestModuleConfig module = modulesByName.get(name);
@@ -168,16 +193,16 @@ public class StaffModuleService {
                 }
             }
             if (!unknownNames.isEmpty()) {
-                unmatched.put(user.getUsername(), unknownNames);
-            }
-            if (!additions.isEmpty()) {
-                staffModuleRepository.saveAll(additions);
-                createdRelations += additions.size();
+                unmatched.put(user.username(), unknownNames);
             }
         }
 
+        if (!additions.isEmpty()) {
+            staffModuleRepository.saveAll(additions);
+        }
+
         return new LegacyModuleMigrationReport(
-            createdRelations, duplicateNames, unmatched, missingStaffAccounts);
+            additions.size(), duplicateNames, unmatched, missingStaffAccounts);
     }
 
     private Long requireStaffId(TestStaff staff) {

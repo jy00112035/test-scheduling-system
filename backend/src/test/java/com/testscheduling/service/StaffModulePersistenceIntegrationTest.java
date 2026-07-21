@@ -16,6 +16,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -101,6 +102,7 @@ class StaffModulePersistenceIntegrationTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void migrationReportsAllProblemKindsAndIsIdempotentWithoutChangingLegacyText() {
         TestModuleConfig payment = moduleRepository.saveAndFlush(
             module("迁移支付模块", "功能测试", false));
@@ -124,6 +126,7 @@ class StaffModulePersistenceIntegrationTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void migrationPreservesPreExistingDisabledRelationIdempotently() {
         TestModuleConfig module = moduleRepository.saveAndFlush(
             module("迁移历史停用模块", "功能测试", true));

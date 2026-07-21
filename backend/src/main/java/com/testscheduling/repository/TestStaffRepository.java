@@ -14,4 +14,6 @@ public interface TestStaffRepository extends JpaRepository<TestStaff, Long> {
     List<TestStaff> findByGroupName(String groupName);
 
     Optional<TestStaff> findByEmpNo(String empNo);
+
+    List<TestStaff> findByEmpNoIn(List<String> empNos);
 }
