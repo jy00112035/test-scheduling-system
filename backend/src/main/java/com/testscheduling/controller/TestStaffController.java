@@ -1,11 +1,13 @@
 package com.testscheduling.controller;
 
 import com.testscheduling.dto.ApiResponse;
+import com.testscheduling.dto.LegacyModuleMigrationReport;
 import com.testscheduling.dto.StaffCreateResponse;
 import com.testscheduling.dto.StaffRequest;
 import com.testscheduling.entity.TestStaff;
 import com.testscheduling.entity.User;
 import com.testscheduling.repository.UserRepository;
+import com.testscheduling.security.RequestRoleGuard;
 import com.testscheduling.service.TestStaffService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -25,6 +27,9 @@ public class TestStaffController {
 
     @Autowired
     private HttpServletRequest request;
+
+    @Autowired
+    private RequestRoleGuard roleGuard;
 
     private boolean isOnlyTestLead() {
         Object rolesObj = request.getAttribute("roles");
@@ -69,6 +74,12 @@ public class TestStaffController {
     public ApiResponse<List<String>> getRolesByEmpNo(@PathVariable String empNo) {
         List<String> roles = testStaffService.getRolesByEmpNo(empNo);
         return ApiResponse.success(roles);
+    }
+
+    @PostMapping("/modules/migrate-legacy")
+    public ApiResponse<LegacyModuleMigrationReport> migrateLegacyModules() {
+        roleGuard.requireAny("fieldAdmin");
+        return ApiResponse.success("迁移完成", testStaffService.migrateLegacyModules());
     }
 
     @GetMapping("/{id}")

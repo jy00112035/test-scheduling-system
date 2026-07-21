@@ -1,7 +1,9 @@
 package com.testscheduling.service;
 
+import com.testscheduling.dto.LegacyModuleMigrationReport;
 import com.testscheduling.dto.StaffCreateResponse;
 import com.testscheduling.dto.StaffRequest;
+import com.testscheduling.entity.TestModuleConfig;
 import com.testscheduling.entity.TestStaff;
 import com.testscheduling.entity.User;
 import com.testscheduling.repository.TestStaffRepository;
@@ -13,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -26,6 +29,9 @@ public class TestStaffService {
 
     @Autowired
     private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private StaffModuleService staffModuleService;
 
     public List<TestStaff> findAll() {
         List<TestStaff> staffs = testStaffRepository.findAll();
@@ -58,15 +64,25 @@ public class TestStaffService {
                 .ifPresent(user -> {
                     staff.setRole(user.getRole());
                     staff.setRoles(user.getRoles());
-                    staff.setFamiliarModules(user.getFamiliarModules());
+                    staff.setLegacyFamiliarModules(user.getFamiliarModules());
                     staff.setConfidentialClearance(user.getConfidentialClearance());
                 });
+            staff.setFamiliarModules(staffModuleService.findModulesByStaffId(staff.getId()));
         }
     }
 
     private void enrichWithRole(List<TestStaff> staffs) {
+        Map<Long, List<TestModuleConfig>> modulesByStaffId = staffModuleService
+            .findModulesByStaffIds(staffs.stream().map(TestStaff::getId).toList());
         for (TestStaff staff : staffs) {
-            enrichWithRole(staff);
+            userRepository.findByUsername(staff.getEmpNo())
+                .ifPresent(user -> {
+                    staff.setRole(user.getRole());
+                    staff.setRoles(user.getRoles());
+                    staff.setLegacyFamiliarModules(user.getFamiliarModules());
+                    staff.setConfidentialClearance(user.getConfidentialClearance());
+                });
+            staff.setFamiliarModules(modulesByStaffId.getOrDefault(staff.getId(), List.of()));
         }
     }
 
@@ -104,12 +120,18 @@ public class TestStaffService {
         user.setEnabled(true);
         userRepository.save(user);
 
+        if (request.getFamiliarModuleIds() != null) {
+            staffModuleService.replaceModules(savedStaff, request.getFamiliarModuleIds());
+        }
+        enrichWithRole(savedStaff);
+
         return new StaffCreateResponse(savedStaff, plainPassword);
     }
 
     @Transactional
     public TestStaff update(Long id, StaffRequest request) {
-        TestStaff existing = findById(id);
+        TestStaff existing = testStaffRepository.findById(id)
+            .orElseThrow(() -> new RuntimeException("人员不存在"));
         String oldEmpNo = existing.getEmpNo();
 
         existing.setName(request.getName());
@@ -142,9 +164,16 @@ public class TestStaffService {
         } else if (user.getRole() == null) {
             user.setRole("testExecutor");
         }
-        user.setFamiliarModules(request.getFamiliarModules());
+        if (request.getFamiliarModules() != null) {
+            user.setFamiliarModules(request.getFamiliarModules());
+        }
         user.setConfidentialClearance(request.getConfidentialClearance() != null ? request.getConfidentialClearance() : false);
         userRepository.save(user);
+
+        if (request.getFamiliarModuleIds() != null) {
+            staffModuleService.replaceModules(saved, request.getFamiliarModuleIds());
+        }
+        enrichWithRole(saved);
 
         return saved;
     }
@@ -152,6 +181,7 @@ public class TestStaffService {
     @Transactional
     public void delete(Long id) {
         TestStaff staff = findById(id);
+        staffModuleService.deleteForStaff(id);
         userRepository.findByUsername(staff.getEmpNo()).ifPresent(user -> userRepository.delete(user));
         testStaffRepository.deleteById(id);
     }
@@ -162,9 +192,15 @@ public class TestStaffService {
             .map(TestStaff::getEmpNo)
             .collect(Collectors.toList());
         if (!empNos.isEmpty()) {
+            staffModuleService.deleteForStaffIds(ids);
             userRepository.deleteByUsernameIn(empNos);
         }
         testStaffRepository.deleteAllById(ids);
+    }
+
+    @Transactional
+    public LegacyModuleMigrationReport migrateLegacyModules() {
+        return staffModuleService.migrateLegacy(userRepository.findAll());
     }
 
     public String getRoleByEmpNo(String empNo) {

@@ -41,6 +41,10 @@ public class TestStaff {
     @Enumerated(EnumType.STRING)
     private StaffStatus status = StaffStatus.active;
 
+    @Version
+    @Column(name = "lock_version", nullable = false)
+    private Long lockVersion;
+
     @Transient
     private String role;
 
@@ -48,7 +52,10 @@ public class TestStaff {
     private List<String> roles;
 
     @Transient
-    private String familiarModules;
+    private List<TestModuleConfig> familiarModules;
+
+    @Transient
+    private String legacyFamiliarModules;
 
     @Transient
     private Boolean confidentialClearance;
