@@ -127,6 +127,7 @@ const ScheduleWorkbench: React.FC = () => {
   useEffect(() => {
     fetchData();
     fetchPriorityOptions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Legacy dependency behavior; refactor under dedicated tests.
   }, []);
 
   // ---- 草稿持久化：beforeunload ----

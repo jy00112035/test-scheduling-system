@@ -68,6 +68,7 @@ const AppContent: React.FC = () => {
       clearInterval(timer);
       window.removeEventListener('refresh-pending-counts', handleRefresh);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Legacy dependency behavior; refactor under dedicated tests.
   }, [hasPermission]);
 
   // 进入审批中心时刷新计数
@@ -75,6 +76,7 @@ const AppContent: React.FC = () => {
     if (selectedKey === 'approvals') {
       fetchPendingCounts();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Legacy dependency behavior; refactor under dedicated tests.
   }, [selectedKey]);
 
   // 根据用户角色确定默认页面

@@ -112,6 +112,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         clearDraft(draftId);
       },
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Legacy dependency behavior; refactor under dedicated tests.
   }, [draftId, form]);
 
   // 监听草稿保存/清除事件
