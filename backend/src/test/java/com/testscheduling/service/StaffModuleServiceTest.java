@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -149,6 +150,36 @@ class StaffModuleServiceTest {
 
         assertEquals(0, report.createdRelations());
         assertEquals(List.of("T404"), report.missingStaffAccounts());
+        verify(staffModuleRepository, never()).saveAll(anyList());
+    }
+
+    @Test
+    void migrationReportsDisabledLegacyModuleWithoutCreatingRelation() {
+        User user = legacyUser("T1001", "停用模块");
+        TestStaff staff = staff(101L, "T1001");
+        when(moduleRepository.findAll()).thenReturn(List.of(module(11L, "停用模块", false)));
+        when(staffRepository.findByEmpNo("T1001")).thenReturn(Optional.of(staff));
+        when(staffModuleRepository.findModuleIdsByStaffId(101L)).thenReturn(List.of());
+
+        LegacyModuleMigrationReport report = service.migrateLegacy(List.of(user));
+
+        assertEquals(0, report.createdRelations());
+        assertEquals(List.of("停用模块"), report.unmatched().get("T1001"));
+        verify(staffModuleRepository, never()).saveAll(anyList());
+    }
+
+    @Test
+    void migrationPreservesPreExistingDisabledRelationWithoutReportingOrWriting() {
+        User user = legacyUser("T1001", "停用模块");
+        TestStaff staff = staff(101L, "T1001");
+        when(moduleRepository.findAll()).thenReturn(List.of(module(11L, "停用模块", false)));
+        when(staffRepository.findByEmpNo("T1001")).thenReturn(Optional.of(staff));
+        when(staffModuleRepository.findModuleIdsByStaffId(101L)).thenReturn(List.of(11L));
+
+        LegacyModuleMigrationReport report = service.migrateLegacy(List.of(user));
+
+        assertEquals(0, report.createdRelations());
+        assertFalse(report.unmatched().containsKey("T1001"));
         verify(staffModuleRepository, never()).saveAll(anyList());
     }
 

@@ -112,15 +112,35 @@ class StaffModulePersistenceIntegrationTest {
         LegacyModuleMigrationReport first = testStaffService.migrateLegacyModules();
         LegacyModuleMigrationReport second = testStaffService.migrateLegacyModules();
 
-        assertEquals(1, first.createdRelations());
+        assertEquals(0, first.createdRelations());
         assertEquals(List.of("迁移支付模块"), first.duplicateNames().get("能力-T3001"));
-        assertEquals(List.of("未知模块"), first.unmatched().get("能力-T3001"));
+        assertEquals(List.of("迁移支付模块", "未知模块"),
+            first.unmatched().get("能力-T3001"));
         assertTrue(first.missingStaffAccounts().contains("能力-T3404"));
         assertEquals(0, second.createdRelations());
-        assertEquals(List.of(payment.getId()),
-            staffModuleRepository.findModuleIdsByStaffId(staff.getId()));
+        assertTrue(staffModuleRepository.findModuleIdsByStaffId(staff.getId()).isEmpty());
         assertEquals("迁移支付模块，未知模块;迁移支付模块",
             userRepository.findById(user.getId()).orElseThrow().getFamiliarModules());
+    }
+
+    @Test
+    void migrationPreservesPreExistingDisabledRelationIdempotently() {
+        TestModuleConfig module = moduleRepository.saveAndFlush(
+            module("迁移历史停用模块", "功能测试", true));
+        TestStaff staff = staffRepository.saveAndFlush(staff("能力-T3101", "功能测试"));
+        staffModuleService.replaceModules(staff, List.of(module.getId()));
+        module.setEnabled(false);
+        moduleRepository.saveAndFlush(module);
+        userRepository.saveAndFlush(user("能力-T3101", "迁移历史停用模块"));
+
+        LegacyModuleMigrationReport first = testStaffService.migrateLegacyModules();
+        LegacyModuleMigrationReport second = testStaffService.migrateLegacyModules();
+
+        assertEquals(0, first.createdRelations());
+        assertFalse(first.unmatched().containsKey("能力-T3101"));
+        assertEquals(0, second.createdRelations());
+        assertEquals(List.of(module.getId()),
+            staffModuleRepository.findModuleIdsByStaffId(staff.getId()));
     }
 
     @Test

@@ -158,7 +158,12 @@ public class StaffModuleService {
                 TestModuleConfig module = modulesByName.get(name);
                 if (module == null) {
                     unknownNames.add(name);
-                } else if (existingIds.add(module.getId())) {
+                } else if (existingIds.contains(module.getId())) {
+                    continue;
+                } else if (!Boolean.TRUE.equals(module.getEnabled())) {
+                    unknownNames.add(name);
+                } else {
+                    existingIds.add(module.getId());
                     additions.add(new TestStaffModule(staff.getId(), module.getId()));
                 }
             }
