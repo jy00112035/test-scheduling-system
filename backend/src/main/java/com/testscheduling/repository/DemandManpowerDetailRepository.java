@@ -10,5 +10,7 @@ public interface DemandManpowerDetailRepository extends JpaRepository<DemandManp
 
     List<DemandManpowerDetail> findByDemandId(Long demandId);
 
+    List<DemandManpowerDetail> findByDemandIdIn(List<Long> demandIds);
+
     void deleteByDemandId(Long demandId);
 }

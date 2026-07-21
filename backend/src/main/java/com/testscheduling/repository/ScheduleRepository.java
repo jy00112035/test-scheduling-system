@@ -17,6 +17,8 @@ public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
 
     List<Schedule> findByDemandId(Long demandId);
 
+    boolean existsByDemandId(Long demandId);
+
     @Query("SELECT s FROM Schedule s WHERE s.date BETWEEN :startDate AND :endDate")
     List<Schedule> findByDateRange(
         @Param("startDate") LocalDate startDate,
