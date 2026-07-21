@@ -83,8 +83,8 @@ class StaffModuleServiceTest {
         when(staffModuleRepository.findModuleIdsByStaffId(101L)).thenReturn(List.of(11L));
         service.replaceModules(staff, List.of(11L));
 
-        verify(staffModuleRepository).deleteByStaffId(101L);
-        verify(staffModuleRepository).saveAll(anyList());
+        verify(staffModuleRepository, never()).deleteByStaffIdAndModuleIdIn(any(), anyList());
+        verify(staffModuleRepository, never()).saveAll(anyList());
     }
 
     @Test
@@ -96,7 +96,7 @@ class StaffModuleServiceTest {
         service.replaceModules(staff, List.of(11L, 11L));
 
         InOrder order = inOrder(staffModuleRepository, auditLogService);
-        order.verify(staffModuleRepository).deleteByStaffId(101L);
+        order.verify(staffModuleRepository).deleteByStaffIdAndModuleIdIn(101L, List.of(7L));
         order.verify(staffModuleRepository).flush();
         ArgumentCaptor<List<TestStaffModule>> rows = ArgumentCaptor.forClass(List.class);
         order.verify(staffModuleRepository).saveAll(rows.capture());
@@ -113,11 +113,30 @@ class StaffModuleServiceTest {
         service.replaceModules(staff, List.of());
 
         verify(moduleRepository, never()).findAllById(anyList());
-        verify(staffModuleRepository).deleteByStaffId(101L);
+        verify(staffModuleRepository).deleteByStaffIdAndModuleIdIn(101L, List.of(7L));
         verify(staffModuleRepository).flush();
         verify(staffModuleRepository, never()).saveAll(anyList());
         verify(auditLogService).record(
             "STAFF_MODULES_REPLACED", "TEST_STAFF", 101L, List.of(7L), List.of());
+    }
+
+    @Test
+    void replacementPersistsOnlyNewIdsAndLeavesRetainedRelationUntouched() {
+        TestStaff staff = staff(101L, "T1001");
+        when(staffModuleRepository.findModuleIdsByStaffId(101L))
+            .thenReturn(List.of(7L, 11L));
+        when(moduleRepository.findAllById(List.of(11L, 12L))).thenReturn(List.of(
+            module(11L, "保留模块", true), module(12L, "新增模块", true)));
+
+        service.replaceModules(staff, List.of(11L, 12L));
+
+        verify(staffModuleRepository).deleteByStaffIdAndModuleIdIn(101L, List.of(7L));
+        ArgumentCaptor<Iterable<TestStaffModule>> captor = ArgumentCaptor.forClass(Iterable.class);
+        verify(staffModuleRepository).saveAll(captor.capture());
+        List<TestStaffModule> saved = new java.util.ArrayList<>();
+        captor.getValue().forEach(saved::add);
+        assertEquals(List.of(new TestStaffModuleId(101L, 12L)),
+            saved.stream().map(TestStaffModule::getId).toList());
     }
 
     @Test

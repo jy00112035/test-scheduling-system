@@ -52,6 +52,7 @@ public class StaffModuleService {
         Map<Long, TestModuleConfig> modulesById = loadRequestedModules(requestedIds);
 
         Set<Long> existingIdSet = new LinkedHashSet<>(existingIds);
+        Set<Long> requestedIdSet = new LinkedHashSet<>(requestedIds);
         for (Long moduleId : requestedIds) {
             TestModuleConfig module = modulesById.get(moduleId);
             if (!Boolean.TRUE.equals(module.getEnabled()) && !existingIdSet.contains(moduleId)) {
@@ -60,13 +61,21 @@ public class StaffModuleService {
             }
         }
 
-        staffModuleRepository.deleteByStaffId(staffId);
-        staffModuleRepository.flush();
-        if (!requestedIds.isEmpty()) {
-            List<TestStaffModule> replacements = requestedIds.stream()
+        List<Long> removedIds = existingIds.stream()
+            .filter(moduleId -> !requestedIdSet.contains(moduleId))
+            .toList();
+        List<Long> addedIds = requestedIds.stream()
+            .filter(moduleId -> !existingIdSet.contains(moduleId))
+            .toList();
+        if (!removedIds.isEmpty()) {
+            staffModuleRepository.deleteByStaffIdAndModuleIdIn(staffId, removedIds);
+            staffModuleRepository.flush();
+        }
+        if (!addedIds.isEmpty()) {
+            List<TestStaffModule> additions = addedIds.stream()
                 .map(moduleId -> new TestStaffModule(staffId, moduleId))
                 .toList();
-            staffModuleRepository.saveAll(replacements);
+            staffModuleRepository.saveAll(additions);
         }
         auditLogService.record(
             "STAFF_MODULES_REPLACED", AUDIT_ENTITY_TYPE, staffId, existingIds, requestedIds);

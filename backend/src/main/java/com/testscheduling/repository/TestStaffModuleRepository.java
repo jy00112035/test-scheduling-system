@@ -30,6 +30,16 @@ public interface TestStaffModuleRepository
     void deleteByStaffId(@Param("staffId") Long staffId);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+        delete from TestStaffModule relation
+        where relation.id.staffId = :staffId
+          and relation.id.moduleId in :moduleIds
+        """)
+    void deleteByStaffIdAndModuleIdIn(
+        @Param("staffId") Long staffId,
+        @Param("moduleIds") List<Long> moduleIds);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("delete from TestStaffModule relation where relation.id.staffId in :staffIds")
     void deleteByStaffIdIn(@Param("staffIds") List<Long> staffIds);
 }
