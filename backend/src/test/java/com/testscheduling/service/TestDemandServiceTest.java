@@ -79,9 +79,8 @@ class TestDemandServiceTest {
         assertEquals(payment.getModuleName(),
             result.getSpecialModuleDemands().getFirst().getModuleName());
         assertEquals("功能测试", result.getSpecialModuleDemands().getFirst().getTestType());
-        assertEquals(BigDecimal.ZERO, result.getSpecialModuleDemands().getFirst().getAllocatedManpower());
-        assertEquals(new BigDecimal("2.0"),
-            result.getSpecialModuleDemands().getFirst().getRemainingManpower());
+        assertNull(result.getSpecialModuleDemands().getFirst().getAllocatedManpower());
+        assertNull(result.getSpecialModuleDemands().getFirst().getRemainingManpower());
         ManpowerSummary summary = result.getManpowerSummary().getFirst();
         assertEquals(new BigDecimal("4.5"), summary.generalManpower());
         assertNull(result.getManpowerFullySatisfied());
@@ -117,34 +116,47 @@ class TestDemandServiceTest {
     }
 
     @Test
-    void disabledHistoricalModuleCanStayOrDecreaseButCannotIncrease() {
-        TestModuleConfig payment = saveModule("历史支付模块", true);
-        TestDemand original = demand("历史需求", "8.0");
-        original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
-        TestDemand created = service.create(original);
-        payment.setEnabled(false);
-        moduleRepository.saveAndFlush(payment);
-
+    void disabledHistoricalModuleCanBeRetainedExactlyUnchanged() {
+        DisabledDemand fixture = createDisabledDemand("保留");
         TestDemand unchanged = demand("历史需求-保留", "8.0");
-        unchanged.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
-        TestDemand retained = service.update(created.getId(), unchanged);
+        unchanged.setSpecialModuleDemands(List.of(special(fixture.module().getId(), "2.0")));
+
+        TestDemand retained = service.update(fixture.demand().getId(), unchanged);
+
         assertFalse(retained.getSpecialModuleDemands().getFirst().getEnabled());
+        assertEquals(new BigDecimal("2.0"),
+            retained.getSpecialModuleDemands().getFirst().getManpowerDemand());
+    }
 
-        TestDemand decreased = demand("历史需求-减少", "8.0");
-        decreased.setSpecialModuleDemands(List.of(special(payment.getId(), "1.5")));
-        TestDemand reduced = service.update(created.getId(), decreased);
-        assertEquals(new BigDecimal("1.5"),
-            reduced.getSpecialModuleDemands().getFirst().getManpowerDemand());
+    @Test
+    void disabledHistoricalModuleCannotBeDecreased() {
+        DisabledDemand fixture = createDisabledDemand("减少");
+        TestDemand decreased = demand("不应减少", "8.0");
+        decreased.setSpecialModuleDemands(List.of(special(fixture.module().getId(), "1.5")));
 
-        TestDemand increased = demand("不应提交", "8.0");
-        increased.setSpecialModuleDemands(List.of(special(payment.getId(), "1.6")));
         BusinessException error = assertThrows(BusinessException.class,
-            () -> service.update(created.getId(), increased));
+            () -> service.update(fixture.demand().getId(), decreased));
 
         assertEquals("MODULE_DISABLED_FOR_NEW_DEMAND", error.getErrorCode());
-        TestDemand persisted = service.findById(created.getId());
-        assertEquals(reduced.getProduct(), persisted.getProduct());
-        assertEquals(new BigDecimal("1.5"),
+        TestDemand persisted = service.findById(fixture.demand().getId());
+        assertEquals(fixture.demand().getProduct(), persisted.getProduct());
+        assertEquals(new BigDecimal("2.0"),
+            persisted.getSpecialModuleDemands().getFirst().getManpowerDemand());
+    }
+
+    @Test
+    void disabledHistoricalModuleCannotBeIncreased() {
+        DisabledDemand fixture = createDisabledDemand("增加");
+        TestDemand increased = demand("不应增加", "8.0");
+        increased.setSpecialModuleDemands(List.of(special(fixture.module().getId(), "2.1")));
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service.update(fixture.demand().getId(), increased));
+
+        assertEquals("MODULE_DISABLED_FOR_NEW_DEMAND", error.getErrorCode());
+        TestDemand persisted = service.findById(fixture.demand().getId());
+        assertEquals(fixture.demand().getProduct(), persisted.getProduct());
+        assertEquals(new BigDecimal("2.0"),
             persisted.getSpecialModuleDemands().getFirst().getManpowerDemand());
     }
 
@@ -170,6 +182,60 @@ class TestDemandServiceTest {
 
         assertEquals("DEMAND_WITH_SCHEDULE_IMMUTABLE", error.getErrorCode());
         assertEquals(new BigDecimal("8.00"), service.findById(created.getId()).getManpowerDemand());
+    }
+
+    @Test
+    void scheduledDemandCannotBypassQuotaLockAfterStatusDowngrade() {
+        TestModuleConfig payment = saveModule("降级锁定支付模块", true);
+        TestDemand original = demand("降级锁定需求", "8.0");
+        original.setStatus(TestDemand.DemandStatus.pending);
+        original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
+        TestDemand created = service.create(original);
+        Schedule schedule = new Schedule();
+        schedule.setDemandId(created.getId());
+        scheduleRepository.saveAndFlush(schedule);
+
+        TestDemand downgrade = demand("降级后需求", "8.0");
+        downgrade.setStatus(TestDemand.DemandStatus.submitted);
+        downgrade.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
+        TestDemand downgraded = service.update(created.getId(), downgrade);
+        assertEquals(TestDemand.DemandStatus.submitted, downgraded.getStatus());
+
+        TestDemand changed = demand("试图绕过锁定", "9.0");
+        changed.setStatus(TestDemand.DemandStatus.submitted);
+        changed.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service.update(created.getId(), changed));
+
+        assertEquals("DEMAND_WITH_SCHEDULE_IMMUTABLE", error.getErrorCode());
+        assertEquals(new BigDecimal("8.00"), service.findById(created.getId()).getManpowerDemand());
+    }
+
+    @Test
+    void scheduledDemandAllowsMetadataEditWhenStructureIsExactlyUnchanged() {
+        TestModuleConfig payment = saveModule("元数据支付模块", true);
+        TestDemand original = demand("元数据原需求", "8.0");
+        original.setStatus(TestDemand.DemandStatus.pending);
+        original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
+        TestDemand created = service.create(original);
+        Long detailId = created.getManpowerDetails().getFirst().getId();
+        Long specialId = created.getSpecialModuleDemands().getFirst().getId();
+        Schedule schedule = new Schedule();
+        schedule.setDemandId(created.getId());
+        scheduleRepository.saveAndFlush(schedule);
+
+        TestDemand metadataEdit = demand("元数据已更新", "8.00");
+        metadataEdit.setStatus(TestDemand.DemandStatus.pending);
+        metadataEdit.setDescription("仅修改普通需求信息");
+        metadataEdit.setSpecialModuleDemands(List.of(special(payment.getId(), "2.00")));
+
+        TestDemand updated = service.update(created.getId(), metadataEdit);
+
+        assertEquals(metadataEdit.getProduct(), updated.getProduct());
+        assertEquals("仅修改普通需求信息", updated.getDescription());
+        assertEquals(detailId, updated.getManpowerDetails().getFirst().getId());
+        assertEquals(specialId, updated.getSpecialModuleDemands().getFirst().getId());
     }
 
     @Test
@@ -248,5 +314,18 @@ class TestDemandServiceTest {
         special.setModuleId(moduleId);
         special.setManpowerDemand(new BigDecimal(manpower));
         return special;
+    }
+
+    private DisabledDemand createDisabledDemand(String suffix) {
+        TestModuleConfig module = saveModule("历史支付模块-" + suffix, true);
+        TestDemand original = demand("历史需求-" + suffix, "8.0");
+        original.setSpecialModuleDemands(List.of(special(module.getId(), "2.0")));
+        TestDemand created = service.create(original);
+        module.setEnabled(false);
+        moduleRepository.saveAndFlush(module);
+        return new DisabledDemand(module, created);
+    }
+
+    private record DisabledDemand(TestModuleConfig module, TestDemand demand) {
     }
 }

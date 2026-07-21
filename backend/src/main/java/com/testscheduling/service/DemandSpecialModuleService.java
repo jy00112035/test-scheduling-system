@@ -207,14 +207,12 @@ public class DemandSpecialModuleService {
         special.setModuleName(configuration.getModuleName());
         special.setTestType(configuration.getTestType());
         special.setEnabled(configuration.getEnabled());
-        special.setAllocatedManpower(BigDecimal.ZERO);
-        special.setRemainingManpower(special.getManpowerDemand());
     }
 
     private boolean isAllowedHistoricalValue(
             DemandSpecialModule item, Map<Long, BigDecimal> historicalLimits) {
         BigDecimal historical = historicalLimits.get(item.getModuleId());
-        return historical != null && item.getManpowerDemand().compareTo(historical) <= 0;
+        return historical != null && item.getManpowerDemand().compareTo(historical) == 0;
     }
 
     private void validateManpower(BigDecimal manpower) {
@@ -235,8 +233,6 @@ public class DemandSpecialModuleService {
         target.setModuleName(source.getModuleName());
         target.setTestType(source.getTestType());
         target.setEnabled(source.getEnabled());
-        target.setAllocatedManpower(BigDecimal.ZERO);
-        target.setRemainingManpower(source.getManpowerDemand());
         return target;
     }
 

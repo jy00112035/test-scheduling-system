@@ -90,8 +90,7 @@ public class TestDemandService {
             ? beforeSpecials
             : demand.getSpecialModuleDemands();
 
-        boolean quotasLocked = isApproved(existing.getStatus())
-            && scheduleRepository.existsByDemandId(id);
+        boolean quotasLocked = scheduleRepository.existsByDemandId(id);
         if (quotasLocked && quotasChanged(
                 beforeDetails, beforeSpecials, requestedDetails, requestedSpecials)) {
             throw immutableScheduledDemand();
@@ -323,12 +322,6 @@ public class TestDemandService {
 
     private BigDecimal normalized(BigDecimal value) {
         return value == null ? null : value.stripTrailingZeros();
-    }
-
-    private boolean isApproved(TestDemand.DemandStatus status) {
-        return status == TestDemand.DemandStatus.pending
-            || status == TestDemand.DemandStatus.scheduled
-            || status == TestDemand.DemandStatus.completed;
     }
 
     private BusinessException immutableScheduledDemand() {
