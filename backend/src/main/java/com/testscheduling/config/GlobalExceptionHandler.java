@@ -1,6 +1,8 @@
 package com.testscheduling.config;
 
 import com.testscheduling.dto.ApiResponse;
+import com.testscheduling.dto.ErrorData;
+import com.testscheduling.exception.BusinessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -8,6 +10,12 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(BusinessException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiResponse<ErrorData> handleBusinessException(BusinessException e) {
+        return new ApiResponse<>(400, e.getMessage(), new ErrorData(e.getErrorCode()));
+    }
 
     @ExceptionHandler(RuntimeException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
