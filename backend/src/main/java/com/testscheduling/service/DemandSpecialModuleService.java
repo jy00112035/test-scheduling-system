@@ -34,36 +34,29 @@ public class DemandSpecialModuleService {
         this.moduleRepository = moduleRepository;
     }
 
-    public void validate(
+    public void validateNew(
             List<DemandManpowerDetail> manpowerDetails,
-            List<DemandSpecialModule> specialModuleDemands,
-            boolean allowHistoricalDisabled) {
-        Map<Long, BigDecimal> historicalLimits = new LinkedHashMap<>();
-        if (allowHistoricalDisabled) {
-            for (DemandSpecialModule item : specialList(specialModuleDemands)) {
-                if (item.getModuleId() != null && item.getManpowerDemand() != null) {
-                    historicalLimits.putIfAbsent(item.getModuleId(), item.getManpowerDemand());
-                }
-            }
-        }
-        validate(manpowerDetails, specialModuleDemands, historicalLimits);
+            List<DemandSpecialModule> specialModuleDemands) {
+        validate(manpowerDetails, specialModuleDemands, Map.of());
+    }
+
+    void validateReplacement(
+            Long demandId,
+            List<DemandManpowerDetail> manpowerDetails,
+            List<DemandSpecialModule> specialModuleDemands) {
+        List<DemandSpecialModule> existing = specialRepository.findByDemandIdOrderByIdAsc(demandId);
+        validate(manpowerDetails, specialModuleDemands, historicalLimits(existing));
     }
 
     @Transactional
     public List<DemandSpecialModule> replaceForDemand(
             Long demandId,
             List<DemandManpowerDetail> manpowerDetails,
-            List<DemandSpecialModule> specialModuleDemands,
-            boolean existingDemand) {
+            List<DemandSpecialModule> specialModuleDemands) {
         List<DemandSpecialModule> existing = specialRepository.findByDemandIdOrderByIdAsc(demandId);
-        Map<Long, BigDecimal> historicalLimits = existingDemand
-            ? existing.stream().collect(Collectors.toMap(
-                DemandSpecialModule::getModuleId,
-                DemandSpecialModule::getManpowerDemand))
-            : Map.of();
 
         List<DemandSpecialModule> requested = specialList(specialModuleDemands);
-        validate(manpowerDetails, requested, historicalLimits);
+        validate(manpowerDetails, requested, historicalLimits(existing));
 
         specialRepository.deleteByDemandId(demandId);
         specialRepository.flush();
@@ -75,6 +68,12 @@ public class DemandSpecialModuleService {
             .map(item -> replacement(demandId, item))
             .toList();
         return specialRepository.saveAll(replacements);
+    }
+
+    @Transactional
+    public void deleteForDemand(Long demandId) {
+        specialRepository.deleteByDemandId(demandId);
+        specialRepository.flush();
     }
 
     @Transactional(readOnly = true)
@@ -128,6 +127,7 @@ public class DemandSpecialModuleService {
             List<DemandManpowerDetail> manpowerDetails,
             List<DemandSpecialModule> specialModuleDemands,
             Map<Long, BigDecimal> historicalLimits) {
+        Map<String, BigDecimal> groupTotals = validateManpowerDetails(manpowerDetails);
         List<DemandSpecialModule> requested = specialList(specialModuleDemands);
         Set<Long> moduleIds = new LinkedHashSet<>();
         for (DemandSpecialModule item : requested) {
@@ -151,13 +151,6 @@ public class DemandSpecialModuleService {
             throw new BusinessException("MODULE_NOT_FOUND", "特殊模块不存在");
         }
 
-        Map<String, BigDecimal> groupTotals = detailList(manpowerDetails).stream()
-            .filter(detail -> detail.getTestType() != null)
-            .collect(Collectors.toMap(
-                DemandManpowerDetail::getTestType,
-                detail -> valueOrZero(detail.getManpowerDemand()),
-                BigDecimal::add,
-                LinkedHashMap::new));
         Map<String, BigDecimal> specialTotals = new LinkedHashMap<>();
 
         for (DemandSpecialModule item : requested) {
@@ -166,7 +159,7 @@ public class DemandSpecialModuleService {
             if (!Boolean.TRUE.equals(configuration.getEnabled())
                     && !isAllowedHistoricalValue(item, historicalLimits)) {
                 throw new BusinessException(
-                    "MODULE_DISABLED_FOR_NEW_DEMAND", "停用模块不能新增或增加人力");
+                    "MODULE_DISABLED_FOR_NEW_DEMAND", "停用模块只能保留原人力，不能新增或修改人力");
             }
             if (!groupTotals.containsKey(configuration.getTestType())) {
                 throw new BusinessException(
@@ -182,6 +175,45 @@ public class DemandSpecialModuleService {
                     "SPECIAL_MODULE_EXCEEDS_GROUP", "特殊模块人力合计不能超过小组总人力");
             }
         }
+    }
+
+    private Map<String, BigDecimal> validateManpowerDetails(
+            List<DemandManpowerDetail> manpowerDetails) {
+        if (manpowerDetails == null || manpowerDetails.isEmpty()) {
+            throw new BusinessException(
+                "DEMAND_MANPOWER_DETAILS_REQUIRED", "需求人力明细不能为空");
+        }
+
+        Map<String, BigDecimal> groupTotals = new LinkedHashMap<>();
+        for (DemandManpowerDetail detail : manpowerDetails) {
+            String testType = detail.getTestType();
+            if (testType == null || testType.isBlank()) {
+                throw new BusinessException("DEMAND_TEST_TYPE_REQUIRED", "测试类型不能为空");
+            }
+            testType = testType.trim();
+            detail.setTestType(testType);
+            validateParentManpower(detail.getManpowerDemand());
+            if (groupTotals.putIfAbsent(testType, detail.getManpowerDemand()) != null) {
+                throw new BusinessException(
+                    "DEMAND_TEST_TYPE_DUPLICATE", "同一测试类型只能填写一次");
+            }
+        }
+        return groupTotals;
+    }
+
+    private void validateParentManpower(BigDecimal manpower) {
+        if (manpower == null
+                || manpower.compareTo(BigDecimal.ZERO) <= 0
+                || manpower.stripTrailingZeros().scale() > 1) {
+            throw new BusinessException(
+                "DEMAND_MANPOWER_INVALID", "小组人力必须大于0且最多保留一位小数");
+        }
+    }
+
+    private Map<Long, BigDecimal> historicalLimits(List<DemandSpecialModule> existing) {
+        return existing.stream().collect(Collectors.toMap(
+            DemandSpecialModule::getModuleId,
+            DemandSpecialModule::getManpowerDemand));
     }
 
     private List<DemandSpecialModule> enrich(List<DemandSpecialModule> rows) {

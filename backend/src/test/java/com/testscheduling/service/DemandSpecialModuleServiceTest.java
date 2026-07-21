@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -48,10 +49,67 @@ class DemandSpecialModuleServiceTest {
             .thenReturn(List.of(paymentConfig, messageConfig));
 
         BusinessException error = assertThrows(BusinessException.class,
-            () -> service.validate(List.of(group), List.of(payment, message), false));
+            () -> service.validateNew(List.of(group), List.of(payment, message)));
 
         assertEquals("SPECIAL_MODULE_EXCEEDS_GROUP", error.getErrorCode());
         verify(specialRepository, never()).saveAll(anyList());
+    }
+
+    @Test
+    void rejectsMissingParentDetailsEvenWithoutSpecialModules() {
+        BusinessException nullDetails = assertThrows(BusinessException.class,
+            () -> service.validateNew(null, List.of()));
+        BusinessException emptyDetails = assertThrows(BusinessException.class,
+            () -> service.validateNew(List.of(), List.of()));
+
+        assertEquals("DEMAND_MANPOWER_DETAILS_REQUIRED", nullDetails.getErrorCode());
+        assertEquals("DEMAND_MANPOWER_DETAILS_REQUIRED", emptyDetails.getErrorCode());
+        verify(moduleRepository, never()).findAllById(anyList());
+    }
+
+    @Test
+    void rejectsInvalidParentManpowerEvenWithoutSpecialModules() {
+        DemandManpowerDetail missingManpower = group("功能测试", "1.0");
+        missingManpower.setManpowerDemand(null);
+        BusinessException missing = assertThrows(BusinessException.class,
+            () -> service.validateNew(List.of(missingManpower), List.of()));
+        BusinessException zero = assertThrows(BusinessException.class,
+            () -> service.validateNew(List.of(group("功能测试", "0.0")), List.of()));
+        BusinessException negative = assertThrows(BusinessException.class,
+            () -> service.validateNew(List.of(group("功能测试", "-1.0")), List.of()));
+        BusinessException excessiveScale = assertThrows(BusinessException.class,
+            () -> service.validateNew(List.of(group("功能测试", "1.25")), List.of()));
+
+        assertEquals("DEMAND_MANPOWER_INVALID", missing.getErrorCode());
+        assertEquals("DEMAND_MANPOWER_INVALID", zero.getErrorCode());
+        assertEquals("DEMAND_MANPOWER_INVALID", negative.getErrorCode());
+        assertEquals("DEMAND_MANPOWER_INVALID", excessiveScale.getErrorCode());
+        verify(moduleRepository, never()).findAllById(anyList());
+    }
+
+    @Test
+    void rejectsBlankOrDuplicateParentTestTypesEvenWithoutSpecialModules() {
+        BusinessException blank = assertThrows(BusinessException.class,
+            () -> service.validateNew(List.of(group("  ", "1.0")), List.of()));
+        BusinessException duplicate = assertThrows(BusinessException.class,
+            () -> service.validateNew(List.of(
+                group("功能测试", "1.0"), group(" 功能测试 ", "2.0")), List.of()));
+
+        assertEquals("DEMAND_TEST_TYPE_REQUIRED", blank.getErrorCode());
+        assertEquals("DEMAND_TEST_TYPE_DUPLICATE", duplicate.getErrorCode());
+        verify(moduleRepository, never()).findAllById(anyList());
+    }
+
+    @Test
+    void acceptsUniquePositiveOneDecimalParentWithoutSpecialModules() {
+        DemandManpowerDetail functional = group(" 功能测试 ", "8.0");
+        DemandManpowerDetail performance = group("性能测试", "1.5");
+
+        assertDoesNotThrow(() -> service.validateNew(
+            List.of(functional, performance), List.of()));
+
+        assertEquals("功能测试", functional.getTestType());
+        verify(moduleRepository, never()).findAllById(anyList());
     }
 
     @Test
@@ -77,8 +135,8 @@ class DemandSpecialModuleServiceTest {
         DemandManpowerDetail group = group("功能测试", "8.0");
 
         BusinessException error = assertThrows(BusinessException.class,
-            () -> service.validate(
-                List.of(group), List.of(special(11L, "2.0"), special(11L, "1.0")), false));
+            () -> service.validateNew(
+                List.of(group), List.of(special(11L, "2.0"), special(11L, "1.0"))));
 
         assertEquals("SPECIAL_MODULE_DUPLICATE", error.getErrorCode());
         verify(moduleRepository, never()).findAllById(anyList());
@@ -91,7 +149,7 @@ class DemandSpecialModuleServiceTest {
             .thenReturn(List.of(module(11L, "支付模块", "功能测试", false)));
 
         BusinessException error = assertThrows(BusinessException.class,
-            () -> service.validate(List.of(group), List.of(special(11L, "2.0")), false));
+            () -> service.validateNew(List.of(group), List.of(special(11L, "2.0"))));
 
         assertEquals("MODULE_DISABLED_FOR_NEW_DEMAND", error.getErrorCode());
     }
@@ -105,7 +163,7 @@ class DemandSpecialModuleServiceTest {
             .thenReturn(List.of(module(11L, "支付模块", "功能测试", true)));
 
         BusinessException error = assertThrows(BusinessException.class,
-            () -> service.validate(List.of(group), List.of(request), false));
+            () -> service.validateNew(List.of(group), List.of(request)));
 
         assertEquals("MODULE_GROUP_MISMATCH", error.getErrorCode());
     }
@@ -115,9 +173,9 @@ class DemandSpecialModuleServiceTest {
         DemandManpowerDetail group = group("功能测试", "8.0");
 
         BusinessException nonPositive = assertThrows(BusinessException.class,
-            () -> service.validate(List.of(group), List.of(special(11L, "0.0")), false));
+            () -> service.validateNew(List.of(group), List.of(special(11L, "0.0"))));
         BusinessException excessiveScale = assertThrows(BusinessException.class,
-            () -> service.validate(List.of(group), List.of(special(11L, "1.25")), false));
+            () -> service.validateNew(List.of(group), List.of(special(11L, "1.25"))));
 
         assertEquals("SPECIAL_MODULE_MANPOWER_INVALID", nonPositive.getErrorCode());
         assertEquals("SPECIAL_MODULE_MANPOWER_INVALID", excessiveScale.getErrorCode());
@@ -125,12 +183,12 @@ class DemandSpecialModuleServiceTest {
     }
 
     @Test
-    void historicalValidationStillReturnsBusinessErrorForMissingManpower() {
+    void newValidationReturnsBusinessErrorForMissingSpecialManpower() {
         DemandSpecialModule invalid = new DemandSpecialModule();
         invalid.setModuleId(11L);
 
         BusinessException error = assertThrows(BusinessException.class,
-            () -> service.validate(List.of(group("功能测试", "8.0")), List.of(invalid), true));
+            () -> service.validateNew(List.of(group("功能测试", "8.0")), List.of(invalid)));
 
         assertEquals("SPECIAL_MODULE_MANPOWER_INVALID", error.getErrorCode());
         verify(moduleRepository, never()).findAllById(anyList());
@@ -148,7 +206,7 @@ class DemandSpecialModuleServiceTest {
         when(specialRepository.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
 
         List<DemandSpecialModule> saved = service.replaceForDemand(
-            77L, List.of(group), List.of(request), false);
+            77L, List.of(group), List.of(request));
 
         assertEquals(1, saved.size());
         assertEquals(77L, saved.getFirst().getDemandId());

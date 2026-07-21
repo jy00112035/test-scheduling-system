@@ -42,21 +42,13 @@ public class TestDemandController {
 
     @PutMapping("/{id}")
     public ApiResponse<TestDemand> updateDemand(@PathVariable Long id, @RequestBody TestDemand demand) {
-        try {
-            return ApiResponse.success("更新成功", testDemandService.update(id, demand));
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+        return ApiResponse.success("更新成功", testDemandService.update(id, demand));
     }
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteDemand(@PathVariable Long id) {
-        try {
-            testDemandService.delete(id);
-            return ApiResponse.success("删除成功", null);
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+        testDemandService.delete(id);
+        return ApiResponse.success("删除成功", null);
     }
 
     @PostMapping("/{id}/close")
@@ -94,11 +86,7 @@ public class TestDemandController {
 
     @PutMapping("/{id}/approve-with-changes")
     public ApiResponse<TestDemand> approveWithChanges(@PathVariable Long id, @RequestBody TestDemand demand) {
-        try {
-            return ApiResponse.success("修改并批准成功", testDemandService.approveWithChanges(id, demand));
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+        return ApiResponse.success("修改并批准成功", testDemandService.approveWithChanges(id, demand));
     }
 
     @PutMapping("/{id}/priority")

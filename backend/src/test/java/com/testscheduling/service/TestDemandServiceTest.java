@@ -116,6 +116,18 @@ class TestDemandServiceTest {
     }
 
     @Test
+    void createWithoutSpecialModulesPersistsValidatedOneDecimalParent() {
+        TestDemand request = demand("仅父级人力", "3.5");
+        request.getManpowerDetails().getFirst().setTestType(" 功能测试 ");
+
+        TestDemand created = service.create(request);
+
+        assertEquals(new BigDecimal("3.5"), created.getManpowerDemand());
+        assertEquals("功能测试", created.getManpowerDetails().getFirst().getTestType());
+        assertTrue(created.getSpecialModuleDemands().isEmpty());
+    }
+
+    @Test
     void disabledHistoricalModuleCanBeRetainedExactlyUnchanged() {
         DisabledDemand fixture = createDisabledDemand("保留");
         TestDemand unchanged = demand("历史需求-保留", "8.0");
@@ -236,6 +248,120 @@ class TestDemandServiceTest {
         assertEquals("仅修改普通需求信息", updated.getDescription());
         assertEquals(detailId, updated.getManpowerDetails().getFirst().getId());
         assertEquals(specialId, updated.getSpecialModuleDemands().getFirst().getId());
+    }
+
+    @Test
+    void metadataOnlyUpdatePreservesParentAndSpecialStructures() {
+        TestModuleConfig payment = saveModule("更新保留支付模块", true);
+        TestDemand original = demand("更新保留需求", "8.0");
+        original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
+        TestDemand created = service.create(original);
+        Long detailId = created.getManpowerDetails().getFirst().getId();
+        Long specialId = created.getSpecialModuleDemands().getFirst().getId();
+        TestDemand metadata = demand("更新后的普通信息", "99.0");
+        metadata.setManpowerDetails(null);
+        metadata.setSpecialModuleDemands(null);
+
+        TestDemand updated = service.update(created.getId(), metadata);
+
+        assertEquals(metadata.getProduct(), updated.getProduct());
+        assertEquals(new BigDecimal("8.00"), updated.getManpowerDemand());
+        assertEquals(detailId, updated.getManpowerDetails().getFirst().getId());
+        assertEquals(specialId, updated.getSpecialModuleDemands().getFirst().getId());
+    }
+
+    @Test
+    void metadataOnlyUpdatePreservesParentWhenDemandHasNoSpecialModules() {
+        TestDemand created = service.create(demand("无模块更新需求", "3.0"));
+        Long detailId = created.getManpowerDetails().getFirst().getId();
+        TestDemand metadata = demand("无模块更新后", "99.0");
+        metadata.setManpowerDetails(null);
+        metadata.setSpecialModuleDemands(null);
+
+        TestDemand updated = service.update(created.getId(), metadata);
+
+        assertEquals(new BigDecimal("3.00"), updated.getManpowerDemand());
+        assertEquals(detailId, updated.getManpowerDetails().getFirst().getId());
+        assertTrue(updated.getSpecialModuleDemands().isEmpty());
+    }
+
+    @Test
+    void parentOnlyUpdateValidatesAgainstAndPreservesPersistedSpecialStructure() {
+        TestModuleConfig payment = saveModule("父级单独更新支付模块", true);
+        TestDemand original = demand("父级单独更新需求", "8.0");
+        original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
+        TestDemand created = service.create(original);
+        Long detailId = created.getManpowerDetails().getFirst().getId();
+        Long specialId = created.getSpecialModuleDemands().getFirst().getId();
+        TestDemand changes = demand("父级单独更新后", "10.0");
+        changes.setSpecialModuleDemands(null);
+
+        TestDemand updated = service.update(created.getId(), changes);
+
+        assertEquals(new BigDecimal("10.0"), updated.getManpowerDemand());
+        assertFalse(detailId.equals(updated.getManpowerDetails().getFirst().getId()));
+        assertEquals(specialId, updated.getSpecialModuleDemands().getFirst().getId());
+        assertEquals(new BigDecimal("8.0"),
+            updated.getManpowerSummary().getFirst().generalManpower());
+    }
+
+    @Test
+    void metadataOnlyApprovalPreservesParentAndSpecialStructures() {
+        TestModuleConfig payment = saveModule("审批保留支付模块", true);
+        TestDemand original = demand("审批保留需求", "8.0");
+        original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
+        TestDemand created = service.create(original);
+        Long detailId = created.getManpowerDetails().getFirst().getId();
+        Long specialId = created.getSpecialModuleDemands().getFirst().getId();
+        TestDemand metadata = new TestDemand();
+        metadata.setPriority("高");
+
+        TestDemand approved = service.approveWithChanges(created.getId(), metadata);
+
+        assertEquals(new BigDecimal("8.00"), approved.getManpowerDemand());
+        assertEquals(detailId, approved.getManpowerDetails().getFirst().getId());
+        assertEquals(specialId, approved.getSpecialModuleDemands().getFirst().getId());
+    }
+
+    @Test
+    void metadataOnlyApprovalPreservesParentWhenDemandHasNoSpecialModules() {
+        TestDemand created = service.create(demand("无模块审批需求", "3.0"));
+        Long detailId = created.getManpowerDetails().getFirst().getId();
+        TestDemand metadata = new TestDemand();
+        metadata.setPriority("高");
+
+        TestDemand approved = service.approveWithChanges(created.getId(), metadata);
+
+        assertEquals(new BigDecimal("3.00"), approved.getManpowerDemand());
+        assertEquals(detailId, approved.getManpowerDetails().getFirst().getId());
+        assertTrue(approved.getSpecialModuleDemands().isEmpty());
+    }
+
+    @Test
+    void updateRejectsExplicitlyEmptyParentStructure() {
+        TestDemand created = service.create(demand("拒绝清空更新", "3.0"));
+        TestDemand changes = demand("拒绝清空更新后", "3.0");
+        changes.setManpowerDetails(List.of());
+        changes.setSpecialModuleDemands(null);
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service.update(created.getId(), changes));
+
+        assertEquals("DEMAND_MANPOWER_DETAILS_REQUIRED", error.getErrorCode());
+        assertEquals(new BigDecimal("3.00"), service.findById(created.getId()).getManpowerDemand());
+    }
+
+    @Test
+    void approveWithChangesRejectsExplicitlyEmptyParentStructure() {
+        TestDemand created = service.create(demand("拒绝清空审批", "3.0"));
+        TestDemand changes = new TestDemand();
+        changes.setManpowerDetails(List.of());
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service.approveWithChanges(created.getId(), changes));
+
+        assertEquals("DEMAND_MANPOWER_DETAILS_REQUIRED", error.getErrorCode());
+        assertEquals(TestDemand.DemandStatus.submitted, service.findById(created.getId()).getStatus());
     }
 
     @Test

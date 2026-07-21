@@ -70,12 +70,13 @@ public class TestDemandService {
     public TestDemand create(TestDemand demand) {
         List<DemandManpowerDetail> requestedDetails = detailList(demand.getManpowerDetails());
         List<DemandSpecialModule> requestedSpecials = specialList(demand.getSpecialModuleDemands());
+        specialModuleService.validateNew(requestedDetails, requestedSpecials);
         demand.setManpowerDemand(computeTotalManpower(requestedDetails));
 
         TestDemand saved = testDemandRepository.save(demand);
         replaceDetails(saved.getId(), requestedDetails);
         List<DemandSpecialModule> after = specialModuleService.replaceForDemand(
-            saved.getId(), requestedDetails, requestedSpecials, false);
+            saved.getId(), requestedDetails, requestedSpecials);
         auditSpecialChange(saved.getId(), List.of(), after);
         return enrichWithDetails(saved);
     }
@@ -85,25 +86,36 @@ public class TestDemandService {
         TestDemand existing = findById(id);
         List<DemandManpowerDetail> beforeDetails = existing.getManpowerDetails();
         List<DemandSpecialModule> beforeSpecials = existing.getSpecialModuleDemands();
-        List<DemandManpowerDetail> requestedDetails = detailList(demand.getManpowerDetails());
-        List<DemandSpecialModule> requestedSpecials = demand.getSpecialModuleDemands() == null
-            ? beforeSpecials
-            : demand.getSpecialModuleDemands();
+        boolean detailsProvided = demand.getManpowerDetails() != null;
+        boolean specialsProvided = demand.getSpecialModuleDemands() != null;
+        List<DemandManpowerDetail> requestedDetails = detailsProvided
+            ? detailList(demand.getManpowerDetails())
+            : beforeDetails;
+        List<DemandSpecialModule> requestedSpecials = specialsProvided
+            ? demand.getSpecialModuleDemands()
+            : beforeSpecials;
 
         boolean quotasLocked = checkScheduledStructureLock(
             id, beforeDetails, beforeSpecials, requestedDetails, requestedSpecials);
+        if (!quotasLocked && (detailsProvided || specialsProvided)) {
+            specialModuleService.validateReplacement(id, requestedDetails, requestedSpecials);
+        }
 
         copyEditableFields(existing, demand);
-        existing.setManpowerDemand(computeTotalManpower(requestedDetails));
+        if (detailsProvided) {
+            existing.setManpowerDemand(computeTotalManpower(requestedDetails));
+        }
         TestDemand saved = testDemandRepository.save(existing);
 
-        List<DemandSpecialModule> after;
-        if (quotasLocked) {
-            after = beforeSpecials;
-        } else {
-            replaceDetails(id, requestedDetails);
-            after = specialModuleService.replaceForDemand(
-                id, requestedDetails, requestedSpecials, true);
+        List<DemandSpecialModule> after = beforeSpecials;
+        if (!quotasLocked) {
+            if (detailsProvided) {
+                replaceDetails(id, requestedDetails);
+            }
+            if (specialsProvided) {
+                after = specialModuleService.replaceForDemand(
+                    id, requestedDetails, requestedSpecials);
+            }
         }
         auditSpecialChange(id, beforeSpecials, after);
         return enrichWithDetails(saved);
@@ -114,7 +126,7 @@ public class TestDemandService {
         if (scheduleRepository.existsByDemandId(id)) {
             throw immutableScheduledDemand();
         }
-        specialModuleService.replaceForDemand(id, List.of(), List.of(), true);
+        specialModuleService.deleteForDemand(id);
         detailRepository.deleteByDemandId(id);
         detailRepository.flush();
         testDemandRepository.deleteById(id);
@@ -169,14 +181,19 @@ public class TestDemandService {
 
         List<DemandManpowerDetail> beforeDetails = demand.getManpowerDetails();
         List<DemandSpecialModule> beforeSpecials = demand.getSpecialModuleDemands();
-        List<DemandManpowerDetail> requestedDetails = modifiedDemand.getManpowerDetails() == null
-            ? beforeDetails
-            : modifiedDemand.getManpowerDetails();
-        List<DemandSpecialModule> requestedSpecials = modifiedDemand.getSpecialModuleDemands() == null
-            ? beforeSpecials
-            : modifiedDemand.getSpecialModuleDemands();
+        boolean detailsProvided = modifiedDemand.getManpowerDetails() != null;
+        boolean specialsProvided = modifiedDemand.getSpecialModuleDemands() != null;
+        List<DemandManpowerDetail> requestedDetails = detailsProvided
+            ? modifiedDemand.getManpowerDetails()
+            : beforeDetails;
+        List<DemandSpecialModule> requestedSpecials = specialsProvided
+            ? modifiedDemand.getSpecialModuleDemands()
+            : beforeSpecials;
         boolean quotasLocked = checkScheduledStructureLock(
             id, beforeDetails, beforeSpecials, requestedDetails, requestedSpecials);
+        if (!quotasLocked && (detailsProvided || specialsProvided)) {
+            specialModuleService.validateReplacement(id, requestedDetails, requestedSpecials);
+        }
 
         demand.setStartDate(modifiedDemand.getStartDate());
         demand.setEndDate(modifiedDemand.getEndDate());
@@ -186,17 +203,21 @@ public class TestDemandService {
         if (modifiedDemand.getTestDeviceCount() != null) {
             demand.setTestDeviceCount(modifiedDemand.getTestDeviceCount());
         }
-        demand.setManpowerDemand(computeTotalManpower(requestedDetails));
+        if (detailsProvided) {
+            demand.setManpowerDemand(computeTotalManpower(requestedDetails));
+        }
         demand.setStatus(TestDemand.DemandStatus.pending);
 
         TestDemand saved = testDemandRepository.save(demand);
-        List<DemandSpecialModule> after;
-        if (quotasLocked) {
-            after = beforeSpecials;
-        } else {
-            replaceDetails(id, requestedDetails);
-            after = specialModuleService.replaceForDemand(
-                id, requestedDetails, requestedSpecials, true);
+        List<DemandSpecialModule> after = beforeSpecials;
+        if (!quotasLocked) {
+            if (detailsProvided) {
+                replaceDetails(id, requestedDetails);
+            }
+            if (specialsProvided) {
+                after = specialModuleService.replaceForDemand(
+                    id, requestedDetails, requestedSpecials);
+            }
         }
         auditSpecialChange(id, beforeSpecials, after);
         return enrichWithDetails(saved);
