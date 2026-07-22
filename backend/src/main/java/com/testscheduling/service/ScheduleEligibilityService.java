@@ -135,6 +135,12 @@ public class ScheduleEligibilityService {
         validateBucketCapacity(schedule, detail, special, demandSchedules, context);
     }
 
+    /** Revalidates a persisted row against one preloaded publish snapshot. */
+    public void validateForPublish(
+            Schedule schedule, ValidationContext context) {
+        validate(schedule, schedule.getId(), context);
+    }
+
     public ValidationContext prepareContext(List<Schedule> input) {
         if (input == null || input.isEmpty()) {
             return new ValidationContext();

@@ -2,11 +2,13 @@ package com.testscheduling.controller;
 
 import com.testscheduling.config.GlobalExceptionHandler;
 import com.testscheduling.dto.ScheduleDeleteScope;
+import com.testscheduling.dto.BatchPublishResponse;
 import com.testscheduling.dto.ScheduleRecommendationResponse;
 import com.testscheduling.entity.Schedule;
 import com.testscheduling.exception.BusinessException;
 import com.testscheduling.security.RequestRoleGuard;
 import com.testscheduling.service.ScheduleService;
+import com.testscheduling.service.SchedulePublishService;
 import com.testscheduling.service.ScheduleRecommendationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,15 +37,18 @@ class ScheduleControllerTest {
 
     private ScheduleService service;
     private ScheduleRecommendationService recommendationService;
+    private SchedulePublishService publishService;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         service = mock(ScheduleService.class);
         recommendationService = mock(ScheduleRecommendationService.class);
+        publishService = mock(SchedulePublishService.class);
         ScheduleController controller = new ScheduleController();
         ReflectionTestUtils.setField(controller, "scheduleService", service);
         ReflectionTestUtils.setField(controller, "recommendationService", recommendationService);
+        ReflectionTestUtils.setField(controller, "publishService", publishService);
         ReflectionTestUtils.setField(controller, "roleGuard", new RequestRoleGuard());
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new GlobalExceptionHandler())
@@ -109,12 +114,38 @@ class ScheduleControllerTest {
     @Test
     void publishPropagatesStableBusinessErrorShape() throws Exception {
         doThrow(new BusinessException("DEMAND_NOT_FOUND", "测试需求不存在"))
-            .when(service).publishByDemandId(10L);
+            .when(publishService).publishOne(10L);
 
         mockMvc.perform(authorized(put("/api/schedules/publish/{demandId}", 10L),
                 "projectManager"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.data.errorCode").value("DEMAND_NOT_FOUND"));
+    }
+
+    @Test
+    void batchPublishRequiresSchedulingRole() throws Exception {
+        mockMvc.perform(post("/api/schedules/batch-publish")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"demandIds\":[10]}") )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.data.errorCode").value("FORBIDDEN"));
+    }
+
+    @Test
+    void batchPublishReturnsDetailedPartialResult() throws Exception {
+        when(publishService.publishBatch(any())).thenReturn(new BatchPublishResponse(
+            List.of(new BatchPublishResponse.Success(10L, 2)),
+            List.of(new BatchPublishResponse.Failure(11L,
+                "GENERAL_MANPOWER_UNFULFILLED", "通用人力仍缺少 0.5 人天"))));
+
+        mockMvc.perform(authorized(post("/api/schedules/batch-publish")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"demandIds\":[10,11]}") , "projectManager"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.success.length()").value(1))
+            .andExpect(jsonPath("$.data.failed.length()").value(1))
+            .andExpect(jsonPath("$.data.failed[0].reasonCode")
+                .value("GENERAL_MANPOWER_UNFULFILLED"));
     }
 
     @Test

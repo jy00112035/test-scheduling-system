@@ -1,6 +1,8 @@
 package com.testscheduling.controller;
 
 import com.testscheduling.dto.ApiResponse;
+import com.testscheduling.dto.BatchPublishRequest;
+import com.testscheduling.dto.BatchPublishResponse;
 import com.testscheduling.dto.GanttViewItem;
 import com.testscheduling.dto.ScheduleClassificationRequest;
 import com.testscheduling.dto.ScheduleDeleteScope;
@@ -12,10 +14,12 @@ import com.testscheduling.dto.ScheduleValidationResponse;
 import com.testscheduling.entity.Schedule;
 import com.testscheduling.security.RequestRoleGuard;
 import com.testscheduling.service.ScheduleService;
+import com.testscheduling.service.SchedulePublishService;
 import com.testscheduling.service.ScheduleRecommendationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -29,6 +33,9 @@ public class ScheduleController {
 
     @Autowired
     private ScheduleRecommendationService recommendationService;
+
+    @Autowired
+    private SchedulePublishService publishService;
 
     @Autowired
     private RequestRoleGuard roleGuard;
@@ -138,8 +145,19 @@ public class ScheduleController {
     @PutMapping("/publish/{demandId}")
     public ApiResponse<Void> publishSchedules(@PathVariable Long demandId) {
         requireSchedulingRole();
-        scheduleService.publishByDemandId(demandId);
+        if (publishService != null) {
+            publishService.publishOne(demandId);
+        } else {
+            scheduleService.publishByDemandId(demandId);
+        }
         return ApiResponse.success("发布成功", null);
+    }
+
+    @PostMapping("/batch-publish")
+    public ApiResponse<BatchPublishResponse> publishSchedulesBatch(
+            @Valid @RequestBody BatchPublishRequest request) {
+        requireSchedulingRole();
+        return ApiResponse.success("批量发布完成", publishService.publishBatch(request));
     }
 
     @PutMapping("/unpublish/{demandId}")

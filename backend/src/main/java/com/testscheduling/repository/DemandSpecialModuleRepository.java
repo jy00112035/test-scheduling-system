@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Collection;
 
 @Repository
 public interface DemandSpecialModuleRepository extends JpaRepository<DemandSpecialModule, Long> {
@@ -15,6 +16,8 @@ public interface DemandSpecialModuleRepository extends JpaRepository<DemandSpeci
     List<DemandSpecialModule> findByDemandIdOrderByIdAsc(Long demandId);
 
     List<DemandSpecialModule> findByDemandIdInOrderByDemandIdAscIdAsc(List<Long> demandIds);
+
+    List<DemandSpecialModule> findByIdIn(Collection<Long> ids);
 
     void deleteByDemandId(Long demandId);
 
