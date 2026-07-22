@@ -26,6 +26,16 @@ const moduleFixture = (overrides: Partial<TestModule> = {}): TestModule => ({
 
 const historicalModule = moduleFixture() as FamiliarModule;
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('StaffManagement familiar modules', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -66,6 +76,90 @@ describe('StaffManagement familiar modules', () => {
     await waitFor(() => expect(updateStaff).toHaveBeenCalledTimes(1));
     expect(updateStaff.mock.calls[0][1]).toMatchObject({ familiarModuleIds: [11, 12] });
     expect(updateStaff.mock.calls[0][1]).not.toHaveProperty('familiarModules');
+  });
+
+  it('keeps the newest edit session when an older role request resolves last', async () => {
+    const firstRoles = deferred<string[]>();
+    const secondRoles = deferred<string[]>();
+    vi.spyOn(api, 'getStaff').mockResolvedValue([
+      { id: 7, name: '甲', empNo: 'EMP007', joinDate: '2026-07-01', groupName: '功能测试组', initialCoefficient: 0.3, currentCoefficient: 0.3, status: 'active', familiarModules: [historicalModule] },
+      { id: 8, name: '乙', empNo: 'EMP008', joinDate: '2026-07-02', groupName: '自动化测试组', initialCoefficient: 0.5, currentCoefficient: 0.5, status: 'active', familiarModules: [] },
+    ]);
+    vi.spyOn(api, 'getStaffRolesByEmpNo')
+      .mockReturnValueOnce(firstRoles.promise)
+      .mockReturnValueOnce(secondRoles.promise);
+    const updateStaff = vi.spyOn(api, 'updateStaff').mockResolvedValue({});
+    render(<StaffManagement />);
+    const user = userEvent.setup();
+
+    const editButtons = await screen.findAllByText('编辑');
+    await user.click(editButtons[0]);
+    await user.click(editButtons[1]);
+    secondRoles.resolve(['testExecutor']);
+    expect(await screen.findByDisplayValue('乙')).toBeInTheDocument();
+    firstRoles.resolve(['testManager']);
+    await waitFor(() => expect(screen.getByDisplayValue('乙')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /保存/ }));
+    await waitFor(() => expect(updateStaff).toHaveBeenCalledWith(8, expect.objectContaining({ name: '乙' })));
+  });
+
+  it('does not reopen a canceled edit session after its role request resolves', async () => {
+    const roles = deferred<string[]>();
+    vi.spyOn(api, 'getStaffRolesByEmpNo').mockReturnValue(roles.promise);
+    render(<StaffManagement />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText('编辑'));
+    await user.click(screen.getByRole('button', { name: /添加人员/ }));
+    await user.click(screen.getByRole('button', { name: /取\s*消/ }));
+    roles.resolve(['testExecutor']);
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('does not populate an edit session after unmounting during its role request', async () => {
+    const roles = deferred<string[]>();
+    vi.spyOn(api, 'getStaffRolesByEmpNo').mockReturnValue(roles.promise);
+    const { unmount } = render(<StaffManagement />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText('编辑'));
+    unmount();
+    roles.resolve(['testExecutor']);
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(document.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+  });
+
+  it('omits module ids for an unchanged legacy edit but sends an explicit clear', async () => {
+    vi.spyOn(api, 'getStaff').mockResolvedValue([{
+      id: 7, name: '旧数据', empNo: 'EMP007', joinDate: '2026-07-01', groupName: '功能测试组', initialCoefficient: 0.3, currentCoefficient: 0.3, status: 'active', familiarModules: '支付模块',
+    }]);
+    const updateStaff = vi.spyOn(api, 'updateStaff').mockResolvedValue({});
+    render(<StaffManagement />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText('编辑'));
+    await user.click(screen.getByRole('button', { name: /保存/ }));
+    await waitFor(() => expect(updateStaff).toHaveBeenCalledTimes(1));
+    expect(updateStaff.mock.calls[0][1]).not.toHaveProperty('familiarModuleIds');
+  });
+
+  it('removes a disabled historical module, sends the resulting ids, and does not permit reselecting it', async () => {
+    const updateStaff = vi.spyOn(api, 'updateStaff').mockResolvedValue({});
+    render(<StaffManagement />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText('编辑'));
+    await user.click(await screen.findByLabelText('移除支付模块'));
+    await user.click(screen.getByRole('combobox', { name: '熟悉模块' }));
+    const disabledOption = await screen.findByText('支付模块');
+    expect(disabledOption.closest('.ant-select-item-option')).toHaveClass('ant-select-item-option-disabled');
+    await user.click(screen.getByRole('button', { name: /保存/ }));
+
+    await waitFor(() => expect(updateStaff).toHaveBeenCalledWith(7, expect.objectContaining({ familiarModuleIds: [] })));
   });
 
   it('shows exact unmatched Excel module names and blocks batch import', async () => {

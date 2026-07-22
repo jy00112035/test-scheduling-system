@@ -24,6 +24,7 @@ import {
   SaveOutlined,
   UploadOutlined,
   DownloadOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import * as XLSX from 'xlsx';
@@ -142,6 +143,9 @@ const StaffManagement: React.FC = () => {
   const [modulesError, setModulesError] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const moduleLoadGenerationRef = useRef(0);
+  const editSessionRef = useRef(0);
+  const familiarModuleEditRef = useRef({ session: 0, initialized: false, changed: false, isCreate: false });
+  const selectedFamiliarModuleIds = Form.useWatch('familiarModuleIds', form) || [];
 
   useEffect(() => {
     mountedRef.current = true;
@@ -150,6 +154,7 @@ const StaffManagement: React.FC = () => {
     void fetchModules();
     return () => {
       mountedRef.current = false;
+      editSessionRef.current += 1;
     };
   }, []);
 
@@ -423,32 +428,56 @@ const StaffManagement: React.FC = () => {
   };
 
   const handleAdd = () => {
+    const session = ++editSessionRef.current;
+    familiarModuleEditRef.current = { session, initialized: true, changed: false, isCreate: true };
     setEditingStaff(null);
     form.resetFields();
     setIsModalVisible(true);
   };
 
   const handleEdit = async (record: Staff) => {
-    setEditingStaff(record);
+    const session = ++editSessionRef.current;
+    const familiarModuleIds = Array.isArray(record.familiarModules)
+      ? record.familiarModules.map(module => module.id)
+      : undefined;
+    familiarModuleEditRef.current = {
+      session,
+      initialized: familiarModuleIds !== undefined,
+      changed: false,
+      isCreate: false,
+    };
     try {
       const roles = await api.getStaffRolesByEmpNo(record.empNo);
+      if (!mountedRef.current || session !== editSessionRef.current) return;
       form.setFieldsValue({
         ...record,
         joinDate: dayjs(record.joinDate),
         roles: roles && roles.length > 0 ? roles : ['testExecutor'],
-        familiarModuleIds: normalizeFamiliarModules(record.familiarModules).map(module => module.id),
+        familiarModuleIds,
         confidentialClearance: record.confidentialClearance || false,
       });
+      setEditingStaff(record);
+      setIsModalVisible(true);
     } catch {
+      if (!mountedRef.current || session !== editSessionRef.current) return;
       form.setFieldsValue({
         ...record,
         joinDate: dayjs(record.joinDate),
         roles: ['testExecutor'],
-        familiarModuleIds: normalizeFamiliarModules(record.familiarModules).map(module => module.id),
+        familiarModuleIds,
         confidentialClearance: record.confidentialClearance || false,
       });
+      setEditingStaff(record);
+      setIsModalVisible(true);
     }
-    setIsModalVisible(true);
+  };
+
+  const closeStaffModal = () => {
+    editSessionRef.current += 1;
+    familiarModuleEditRef.current = { session: editSessionRef.current, initialized: false, changed: false, isCreate: false };
+    setEditingStaff(null);
+    form.resetFields();
+    setIsModalVisible(false);
   };
 
   const handleDelete = async (id: number) => {
@@ -519,13 +548,17 @@ const StaffManagement: React.FC = () => {
 
   const handleSubmit = async (values: any) => {
     try {
+      const { familiarModuleIds, ...staffValues } = values;
       const staffData = {
-        ...values,
-        joinDate: values.joinDate.format('YYYY-MM-DD'),
+        ...staffValues,
+        joinDate: dayjs(values.joinDate).format('YYYY-MM-DD'),
         role: values.roles?.[0] || 'testExecutor',
-        familiarModuleIds: values.familiarModuleIds || [],
         confidentialClearance: values.confidentialClearance || false,
-      };
+      } as Record<string, unknown>;
+      const familiarModuleEdit = familiarModuleEditRef.current;
+      if (!editingStaff || familiarModuleEdit.initialized || familiarModuleEdit.changed) {
+        staffData.familiarModuleIds = familiarModuleIds || [];
+      }
 
       if (editingStaff) {
         await api.updateStaff(editingStaff.id, staffData);
@@ -537,7 +570,7 @@ const StaffManagement: React.FC = () => {
         message.success('人员已添加，初始登录密码为 12345678');
       }
 
-      setIsModalVisible(false);
+      closeStaffModal();
       fetchStaffs();
     } catch (error: any) {
       message.error(error.message || '操作失败');
@@ -784,7 +817,7 @@ const StaffManagement: React.FC = () => {
       <Modal
         title={editingStaff ? '编辑人员' : '添加人员'}
         open={isModalVisible}
-        onCancel={() => setIsModalVisible(false)}
+        onCancel={closeStaffModal}
         footer={null}
         width={600}
       >
@@ -794,6 +827,11 @@ const StaffManagement: React.FC = () => {
           labelCol={{ span: 6 }}
           wrapperCol={{ span: 18 }}
           onFinish={handleSubmit}
+          onValuesChange={(changedValues) => {
+            if (Object.prototype.hasOwnProperty.call(changedValues, 'familiarModuleIds')) {
+              familiarModuleEditRef.current.changed = true;
+            }
+          }}
           initialValues={{
             initialCoefficient: 0.3,
             currentCoefficient: 0.3,
@@ -914,10 +952,21 @@ const StaffManagement: React.FC = () => {
               optionLabelProp="label"
               tagRender={({ value, closable, onClose }) => {
                 const module = modulesById.get(value as number);
-                if (!module) return <Tag closable={closable} onClose={onClose}>{String(value)}</Tag>;
+                if (!module) return <Tag>{String(value)}</Tag>;
                 return (
-                  <Tag color={module.enabled ? 'blue' : 'default'} closable={closable} onClose={onClose}>
+                  <Tag color={module.enabled ? 'blue' : 'default'}>
                     {module.testType}: {module.moduleName}{!module.enabled && ' (已停用)'}
+                    {closable && (
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<CloseOutlined />}
+                        aria-label={`移除${module.moduleName}`}
+                        onMouseDown={event => event.preventDefault()}
+                        onClick={onClose}
+                        style={{ width: 16, minWidth: 16, height: 16, marginInlineStart: 2, padding: 0 }}
+                      />
+                    )}
                   </Tag>
                 );
               }}
@@ -925,7 +974,7 @@ const StaffManagement: React.FC = () => {
               {groupedModules.map(([testType, moduleList]) => (
                 <OptGroup key={testType} label={testType}>
                   {moduleList.map(module => (
-                    <Option key={module.id} value={module.id} disabled={!module.enabled} label={`${module.testType}: ${module.moduleName}${module.enabled ? '' : ' (已停用)'}`}>
+                    <Option key={module.id} value={module.id} disabled={!module.enabled && !selectedFamiliarModuleIds.includes(module.id)} label={`${module.testType}: ${module.moduleName}${module.enabled ? '' : ' (已停用)'}`}>
                       <Space size={4}>
                         <span>{module.moduleName}</span>
                         {!module.enabled && <Typography.Text type="secondary">已停用</Typography.Text>}
