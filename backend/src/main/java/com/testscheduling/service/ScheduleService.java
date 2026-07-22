@@ -120,6 +120,9 @@ public class ScheduleService {
     @Transactional
     public Schedule move(Long id, Long staffId, LocalDate date, Integer percentage) {
         Schedule existing = lockExisting(id, staffId);
+        if (Boolean.TRUE.equals(existing.getPublished())) {
+            throw error("SCHEDULE_PUBLISHED_MOVE_FORBIDDEN", "已发布排班不可移动");
+        }
         Schedule candidate = copy(existing);
         candidate.setStaffId(staffId);
         candidate.setDate(date);

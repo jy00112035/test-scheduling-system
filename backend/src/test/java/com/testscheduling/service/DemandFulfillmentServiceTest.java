@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.LongStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -220,6 +221,28 @@ class DemandFulfillmentServiceTest {
         verify(moduleRepository, times(1)).findAllById(anyList());
         verify(detailRepository, never()).findByDemandId(any(Long.class));
         verify(specialRepository, never()).findByDemandIdOrderByIdAsc(any(Long.class));
+    }
+
+    @Test
+    void batchCalculationChunksMoreThanFiveHundredDemandSchedulesAndKeepsResultOrder() {
+        List<Long> ids = LongStream.rangeClosed(1, 501).boxed().toList();
+        List<TestDemand> demands = ids.stream().map(id -> demand(id, "1.0")).toList();
+        when(scheduleRepository.findByDemandIdIn(anyList())).thenAnswer(invocation ->
+            invocation.<List<Long>>getArgument(0).stream().map(id -> {
+                Schedule schedule = new Schedule();
+                schedule.setDemandId(id);
+                schedule.setPercentage(100);
+                return schedule;
+            }).toList());
+
+        Map<Long, DemandFulfillmentResponse> results = service.calculateBatch(
+            demands, Map.of(), Map.of());
+
+        assertEquals(ids, results.keySet().stream().toList());
+        assertTrue(results.values().stream().allMatch(DemandFulfillmentResponse::fullySatisfied));
+        verify(scheduleRepository).findByDemandIdIn(ids.subList(0, 500));
+        verify(scheduleRepository).findByDemandIdIn(ids.subList(500, 501));
+        verify(scheduleRepository, times(2)).findByDemandIdIn(anyList());
     }
 
     private void assertSpecialSummary(

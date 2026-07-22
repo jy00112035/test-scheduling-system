@@ -40,6 +40,8 @@ function renderTimeline(options: {
   onDrop?: ReturnType<typeof vi.fn>;
   onScheduleTransfer?: ReturnType<typeof vi.fn>;
   onCellDragOver?: ReturnType<typeof vi.fn>;
+  onScheduleDragStart?: ReturnType<typeof vi.fn>;
+  onEditSchedule?: ReturnType<typeof vi.fn>;
 } = {}) {
   return render(<ScheduleTimeline
     staffs={staffs}
@@ -60,12 +62,12 @@ function renderTimeline(options: {
     onFilterProductsChange={noop}
     onDrop={options.onDrop || noop}
     onScheduleTransfer={options.onScheduleTransfer || noop}
-    onScheduleDragStart={noop}
+    onScheduleDragStart={options.onScheduleDragStart || noop}
     onScheduleDragEnd={noop}
     onCellDragOver={options.onCellDragOver || noop}
     onTrashDragOver={noop}
     onTrashDrop={noop}
-    onEditSchedule={noop}
+    onEditSchedule={options.onEditSchedule || noop}
     onDeleteSchedule={noop}
     onStatusPopoverOpen={noop}
     onStatusChange={noop}
@@ -153,6 +155,42 @@ describe('ScheduleTimeline module eligibility', () => {
 
     expect(screen.getByRole('button', { name: '删除排班 草稿排班' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '删除排班 已发布排班' })).not.toBeInTheDocument();
+  });
+
+  it('supports keyboard editing for drafts and keeps published cards immutable', () => {
+    const onEditSchedule = vi.fn();
+    const onScheduleDragStart = vi.fn();
+    const draft = { ...movingSchedule, product: '草稿排班' };
+    const published = {
+      ...movingSchedule, id: 9002, product: '已发布排班', published: true,
+    };
+    renderTimeline({
+      schedules: [draft, published],
+      onEditSchedule,
+      onScheduleDragStart,
+    });
+
+    const draftCard = screen.getByRole('button', { name: '编辑排班 草稿排班' });
+    const publishedCard = screen.getByRole('button', { name: '已发布排班 已发布排班' });
+    expect(draftCard).toHaveAttribute('tabindex', '0');
+    expect(draftCard).toHaveAttribute('draggable', 'true');
+    expect(draftCard).toHaveAttribute('aria-disabled', 'false');
+    expect(publishedCard).toHaveAttribute('tabindex', '-1');
+    expect(publishedCard).toHaveAttribute('draggable', 'false');
+    expect(publishedCard).toHaveAttribute('aria-disabled', 'true');
+
+    fireEvent.keyDown(draftCard, { key: 'Enter' });
+    fireEvent.keyDown(draftCard, { key: ' ' });
+    fireEvent.dragStart(draftCard);
+    expect(onEditSchedule).toHaveBeenCalledTimes(2);
+    expect(onEditSchedule).toHaveBeenCalledWith(draft);
+    expect(onScheduleDragStart).toHaveBeenCalledWith(expect.anything(), draft);
+
+    fireEvent.click(publishedCard);
+    fireEvent.keyDown(publishedCard, { key: 'Enter' });
+    fireEvent.dragStart(publishedCard);
+    expect(onEditSchedule).toHaveBeenCalledTimes(2);
+    expect(onScheduleDragStart).toHaveBeenCalledTimes(1);
   });
 
   it('activates only eligible cells from the keyboard for a selected target', () => {

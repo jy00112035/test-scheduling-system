@@ -12,8 +12,10 @@ import com.testscheduling.repository.TestDemandRepository;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.LongStream;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -27,6 +29,44 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TestDemandServiceBatchEnrichmentTest {
+
+    @Test
+    void listEnrichmentChunksMoreThanFiveHundredDemandDetailsAndPreservesOrder() {
+        List<Long> ids = LongStream.rangeClosed(1, 501).boxed().toList();
+        List<TestDemand> demands = ids.stream().map(TestDemandServiceBatchEnrichmentTest::demand).toList();
+        TestDemandRepository demandRepository = mock(TestDemandRepository.class);
+        DemandManpowerDetailRepository detailRepository = mock(DemandManpowerDetailRepository.class);
+        DemandSpecialModuleService specialService = mock(DemandSpecialModuleService.class);
+        DemandFulfillmentService fulfillmentService = mock(DemandFulfillmentService.class);
+        when(demandRepository.findByStatusIn(anyList())).thenReturn(demands);
+        when(detailRepository.findByDemandIdIn(anyList())).thenAnswer(invocation ->
+            invocation.<List<Long>>getArgument(0).stream()
+                .map(id -> detail(id, id + 1000L))
+                .toList());
+        when(specialService.findByDemandIds(ids)).thenReturn(Map.of());
+        when(specialService.summarize(anyList(), anyList())).thenReturn(List.of());
+        when(fulfillmentService.calculateBatch(
+            org.mockito.ArgumentMatchers.anyList(),
+            org.mockito.ArgumentMatchers.anyMap(),
+            org.mockito.ArgumentMatchers.anyMap())).thenAnswer(invocation -> {
+                Map<Long, DemandFulfillmentResponse> results = new LinkedHashMap<>();
+                invocation.<List<TestDemand>>getArgument(0)
+                    .forEach(item -> results.put(item.getId(), fulfilled(item.getId())));
+                return results;
+            });
+        TestDemandService service = new TestDemandService(
+            demandRepository, detailRepository, specialService, mock(ScheduleRepository.class),
+            mock(AuditLogService.class), fulfillmentService);
+
+        List<TestDemand> result = service.findPendingAndScheduled();
+
+        assertEquals(ids, result.stream().map(TestDemand::getId).toList());
+        assertEquals(501, result.stream().map(TestDemand::getManpowerDetails)
+            .mapToInt(List::size).sum());
+        verify(detailRepository).findByDemandIdIn(ids.subList(0, 500));
+        verify(detailRepository).findByDemandIdIn(ids.subList(500, 501));
+        verify(detailRepository, times(2)).findByDemandIdIn(anyList());
+    }
 
     @Test
     void listEnrichmentCalculatesFulfillmentOnceForTheWholeCollection() {

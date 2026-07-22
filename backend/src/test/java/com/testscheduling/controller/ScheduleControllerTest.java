@@ -260,6 +260,23 @@ class ScheduleControllerTest {
     }
 
     @Test
+    void movePublishedScheduleReturnsStableBusinessErrorShape() throws Exception {
+        doThrow(new BusinessException(
+            "SCHEDULE_PUBLISHED_MOVE_FORBIDDEN", "已发布排班不可移动"))
+            .when(service).move(9L, 108L, LocalDate.of(2026, 7, 23), 40);
+
+        mockMvc.perform(authorized(post("/api/schedules/{id}/move", 9L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"staffId":108,"date":"2026-07-23","percentage":40}
+                    """), "resourceManager"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.data.errorCode")
+                .value("SCHEDULE_PUBLISHED_MOVE_FORBIDDEN"));
+    }
+
+    @Test
     void classifyUsesOnlyAttributionIds() throws Exception {
         Schedule classified = schedule();
         classified.setId(9L);

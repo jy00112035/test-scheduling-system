@@ -17,6 +17,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.LongStream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -225,6 +227,35 @@ class DemandSpecialModuleServiceTest {
         writes.verify(specialRepository).deleteByDemandId(77L);
         writes.verify(specialRepository).flush();
         writes.verify(specialRepository).saveAll(anyList());
+    }
+
+    @Test
+    void bulkEnrichmentChunksDemandAndModuleReadsAndPreservesDemandOrder() {
+        List<Long> ids = LongStream.rangeClosed(1, 501).boxed().toList();
+        when(specialRepository.findByDemandIdInOrderByDemandIdAscIdAsc(anyList()))
+            .thenAnswer(invocation -> invocation.<List<Long>>getArgument(0).stream().map(id -> {
+                DemandSpecialModule row = special(id, "1.0");
+                row.setId(id + 1000L);
+                row.setDemandId(id);
+                return row;
+            }).toList());
+        when(moduleRepository.findAllById(anyList())).thenAnswer(invocation ->
+            invocation.<List<Long>>getArgument(0).stream()
+                .map(id -> module(id, "模块 " + id, "功能测试", true))
+                .toList());
+
+        Map<Long, List<DemandSpecialModule>> result = service.findByDemandIds(ids);
+
+        assertEquals(ids, result.keySet().stream().toList());
+        assertEquals(501, result.values().stream().mapToInt(List::size).sum());
+        assertEquals("模块 501", result.get(501L).getFirst().getModuleName());
+        verify(specialRepository).findByDemandIdInOrderByDemandIdAscIdAsc(ids.subList(0, 500));
+        verify(specialRepository).findByDemandIdInOrderByDemandIdAscIdAsc(ids.subList(500, 501));
+        verify(specialRepository, org.mockito.Mockito.times(2))
+            .findByDemandIdInOrderByDemandIdAscIdAsc(anyList());
+        verify(moduleRepository).findAllById(ids.subList(0, 500));
+        verify(moduleRepository).findAllById(ids.subList(500, 501));
+        verify(moduleRepository, org.mockito.Mockito.times(2)).findAllById(anyList());
     }
 
     private static DemandManpowerDetail group(String testType, String manpower) {

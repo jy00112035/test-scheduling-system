@@ -93,8 +93,8 @@ public class DemandSpecialModuleService {
         if (demandIds == null || demandIds.isEmpty()) {
             return Map.of();
         }
-        List<DemandSpecialModule> rows = enrich(
-            specialRepository.findByDemandIdInOrderByDemandIdAscIdAsc(demandIds));
+        List<DemandSpecialModule> rows = enrich(BulkQuerySupport.fetchChunks(
+            demandIds, specialRepository::findByDemandIdInOrderByDemandIdAscIdAsc));
         return rows.stream().collect(Collectors.groupingBy(
             DemandSpecialModule::getDemandId,
             LinkedHashMap::new,
@@ -151,7 +151,8 @@ public class DemandSpecialModuleService {
             return;
         }
 
-        List<TestModuleConfig> configurations = moduleRepository.findAllById(new ArrayList<>(moduleIds));
+        List<TestModuleConfig> configurations = BulkQuerySupport.fetchChunks(
+            new ArrayList<>(moduleIds), moduleRepository::findAllById);
         Map<Long, TestModuleConfig> configurationById = configurations.stream()
             .collect(Collectors.toMap(TestModuleConfig::getId, Function.identity()));
         if (configurationById.size() != moduleIds.size()) {
@@ -231,7 +232,8 @@ public class DemandSpecialModuleService {
             .map(DemandSpecialModule::getModuleId)
             .distinct()
             .toList();
-        Map<Long, TestModuleConfig> configurationById = moduleRepository.findAllById(moduleIds)
+        Map<Long, TestModuleConfig> configurationById = BulkQuerySupport
+            .fetchChunks(moduleIds, moduleRepository::findAllById)
             .stream()
             .collect(Collectors.toMap(TestModuleConfig::getId, Function.identity()));
         if (configurationById.size() != moduleIds.size()) {

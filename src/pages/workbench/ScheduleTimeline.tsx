@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Space, DatePicker, Select, InputNumber, Tag, Button, Popconfirm, Popover, Divider, Tooltip, Checkbox, Modal, Input, Dropdown } from 'antd';
-import { DeleteOutlined, SearchOutlined, DownOutlined } from '@ant-design/icons';
+import { DeleteOutlined, SearchOutlined, DownOutlined, LockOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { AllocationTarget, ScheduleItem, DemandItem, StaffItem, DailyStatusEntry } from './workbenchTypes';
 import {
@@ -669,23 +669,34 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                         <div
                           key={schedule.id}
                           className="schedule-item"
-                          draggable
+                          role="button"
+                          aria-label={`${schedule.published ? '已发布排班' : '编辑排班'} ${schedule.product}`}
+                          aria-disabled={schedule.published}
+                          tabIndex={schedule.published ? -1 : 0}
+                          draggable={!schedule.published}
                           style={{
                             background: `${getVersionTypeColor(schedule.versionType)}20`,
                             borderLeft: `3px solid ${getVersionTypeColor(schedule.versionType)}`,
                             marginBottom: 1,
                             padding: '1px 18px 1px 4px',
                             position: 'relative',
-                            cursor: 'grab',
+                            cursor: schedule.published ? 'default' : 'grab',
+                            opacity: schedule.published ? 0.72 : 1,
                             fontSize: 11,
                             display: 'flex',
                             justifyContent: 'space-between',
                             alignItems: 'center',
                             whiteSpace: 'nowrap',
                           }}
-                          onClick={() => onEditSchedule(schedule)}
-                          onDragStart={(e) => onScheduleDragStart(e, schedule)}
-                          onDragEnd={onScheduleDragEnd}
+                          onClick={schedule.published ? undefined : () => onEditSchedule(schedule)}
+                          onKeyDown={schedule.published ? undefined : (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              onEditSchedule(schedule);
+                            }
+                          }}
+                          onDragStart={schedule.published ? undefined : (e) => onScheduleDragStart(e, schedule)}
+                          onDragEnd={schedule.published ? undefined : onScheduleDragEnd}
                         >
                           <span
                             className="product-name"
@@ -704,6 +715,12 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                               ? `${schedule.percentage}%`
                               : `${schedule.percentage}%`}
                           </span>
+                          {schedule.published && (
+                            <LockOutlined
+                              aria-hidden="true"
+                              style={{ position: 'absolute', top: 2, right: 3, color: '#8c8c8c', fontSize: 10 }}
+                            />
+                          )}
                           {!schedule.published && <div style={{ position: 'absolute', top: 0, right: 0 }}>
                             <Popconfirm
                               title="确定删除？"

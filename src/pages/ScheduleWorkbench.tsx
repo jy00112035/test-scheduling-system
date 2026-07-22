@@ -804,6 +804,10 @@ const ScheduleWorkbench: React.FC = () => {
   // ---- 拖拽：排班卡片 ----
   const handleScheduleDragStart = useCallback((e: React.DragEvent, schedule: ScheduleItem) => {
     e.stopPropagation();
+    if (schedule.published) {
+      message.warning('已发布排班不可移动');
+      return;
+    }
     e.dataTransfer.effectAllowed = 'move';
     resetAllocationSession();
     setDraggedSchedule(schedule);
@@ -868,6 +872,12 @@ const ScheduleWorkbench: React.FC = () => {
     targetDate: string,
   ) => {
     if (!schedule || scheduleMutationIdsRef.current.has(schedule.id)) return;
+    if (schedule.published) {
+      message.warning('已发布排班不可移动');
+      setDraggedSchedule(null);
+      setDragOverCell(null);
+      return;
+    }
     if (schedule.staffId === targetStaff.id && schedule.date === targetDate) {
       setDraggedSchedule(null);
       return;
@@ -1125,6 +1135,10 @@ const ScheduleWorkbench: React.FC = () => {
 
   // ---- 编辑排班 ----
   const handleEditSchedule = (schedule: ScheduleItem) => {
+    if (schedule.published) {
+      message.warning('已发布排班不可编辑');
+      return;
+    }
     setEditingSchedule(schedule);
     setEditPercentage(normalizeSchedulePercentage(schedule.percentage));
     setEditModalVisible(true);
@@ -1132,6 +1146,12 @@ const ScheduleWorkbench: React.FC = () => {
 
   const handleEditConfirm = async () => {
     if (!editingSchedule || scheduleMutationIdsRef.current.has(editingSchedule.id)) return;
+    if (editingSchedule.published) {
+      message.warning('已发布排班不可编辑');
+      setEditModalVisible(false);
+      setEditingSchedule(null);
+      return;
+    }
     scheduleMutationIdsRef.current.add(editingSchedule.id);
     const mutationSession = beginScheduleMutation();
     setEditLoading(true);

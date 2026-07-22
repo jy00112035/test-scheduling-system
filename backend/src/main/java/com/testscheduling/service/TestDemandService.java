@@ -307,8 +307,8 @@ public class TestDemandService {
             return demands;
         }
         List<Long> demandIds = demands.stream().map(TestDemand::getId).toList();
-        Map<Long, List<DemandManpowerDetail>> detailsByDemand = detailRepository
-            .findByDemandIdIn(demandIds).stream()
+        Map<Long, List<DemandManpowerDetail>> detailsByDemand = BulkQuerySupport
+            .fetchChunks(demandIds, detailRepository::findByDemandIdIn).stream()
             .collect(java.util.stream.Collectors.groupingBy(
                 DemandManpowerDetail::getDemandId,
                 LinkedHashMap::new,

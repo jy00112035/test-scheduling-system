@@ -186,7 +186,8 @@ async function renderLoaded(schedules: any[] = [schedule], demandOverrides = {},
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.restoreAllMocks();
+  vi.resetAllMocks();
   const nativeGetComputedStyle = window.getComputedStyle.bind(window);
   vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudoElement) =>
     nativeGetComputedStyle(element, pseudoElement ? null : pseudoElement));
@@ -433,6 +434,18 @@ describe('ScheduleWorkbench backend scheduling flows', () => {
 
     expect(mocks.api.deleteSchedule).not.toHaveBeenCalled();
     expect(mocks.messageWarning).toHaveBeenCalledWith('已发布排班请按需求整体清理');
+  });
+
+  it('defensively refuses editing or moving a published schedule', async () => {
+    await renderLoaded([{ ...schedule, published: true }]);
+
+    fireEvent.click(screen.getByText('编辑排班'));
+    fireEvent.click(screen.getByText('移动排班'));
+
+    expect(screen.queryByRole('dialog', { name: '编辑排班' })).not.toBeInTheDocument();
+    expect(mocks.api.moveSchedule).not.toHaveBeenCalled();
+    expect(mocks.messageWarning).toHaveBeenCalledWith('已发布排班不可编辑');
+    expect(mocks.messageWarning).toHaveBeenCalledWith('已发布排班不可移动');
   });
 
   it('ignores a recommendation response made stale by a schedule mutation', async () => {

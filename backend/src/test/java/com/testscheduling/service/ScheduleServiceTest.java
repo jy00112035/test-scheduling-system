@@ -229,6 +229,33 @@ class ScheduleServiceTest {
     }
 
     @Test
+    void moveRejectsLockedPublishedScheduleWithoutMutationOrValidation() {
+        Schedule published = schedule(10L, 20L, 30L, 50L);
+        published.setId(99L);
+        published.setDate(LocalDate.of(2026, 7, 22));
+        published.setPercentage(100);
+        published.setPublished(true);
+        published.setLockVersion(7L);
+        when(scheduleRepository.findById(99L)).thenReturn(Optional.of(published));
+        when(demandRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(demand(10L)));
+        when(testStaffRepository.findByIdForUpdate(21L)).thenReturn(Optional.of(staff(21L)));
+        when(scheduleRepository.findByIdForUpdate(99L)).thenReturn(Optional.of(published));
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> scheduleService.move(99L, 21L, LocalDate.of(2026, 7, 24), 40));
+
+        assertEquals("SCHEDULE_PUBLISHED_MOVE_FORBIDDEN", error.getErrorCode());
+        assertEquals("已发布排班不可移动", error.getMessage());
+        assertEquals(20L, published.getStaffId());
+        assertEquals(LocalDate.of(2026, 7, 22), published.getDate());
+        assertEquals(100, published.getPercentage());
+        assertEquals(7L, published.getLockVersion());
+        verify(scheduleRepository).findByIdForUpdate(99L);
+        verify(eligibilityService, never()).validate(any(), any());
+        verify(scheduleRepository, never()).save(any());
+    }
+
+    @Test
     void validateOnlyNeverWrites() {
         Schedule schedule = schedule(10L, 20L, 30L, null);
 
