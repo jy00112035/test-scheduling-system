@@ -120,6 +120,22 @@ describe('DemandApproval edit loading', () => {
     expect(screen.queryByText('已停用')).not.toBeInTheDocument();
   });
 
+  it('keeps fresh disabled detail metadata when the base module list resolves later', async () => {
+    const baseModules = deferred<any[]>();
+    const full = { ...demand(8, '反向竞态'), specialModuleDemands: [{ id: 1, demandId: 8, moduleId: 11, moduleName: '支付模块', testType: '功能测试', enabled: false, manpowerDemand: 1, createdAt: '', updatedAt: '', allocatedManpower: null, remainingManpower: null }] };
+    vi.spyOn(api, 'getPendingDemandApprovals').mockResolvedValue([full]);
+    vi.spyOn(api, 'getFieldConfigs').mockResolvedValue([{ fieldName: 'testType', options: '功能测试' }, { fieldName: 'priority', options: '高' }]);
+    vi.spyOn(api, 'getTestModules').mockReturnValue(baseModules.promise);
+    vi.spyOn(api, 'getDemand').mockResolvedValue(full);
+    render(<DemandApproval />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /修改后批准/ }));
+    expect(await screen.findByText('已停用')).toBeInTheDocument();
+    baseModules.resolve([{ id: 11, moduleName: '支付模块', testType: '功能测试', enabled: true, sortOrder: 0, lockVersion: 0, createdAt: '', updatedAt: '', referenced: true }]);
+    await waitFor(() => expect(screen.getByRole('spinbutton', { name: '人力需求 1' })).toBeDisabled());
+    expect(screen.getByText('已停用')).toBeInTheDocument();
+  });
+
   it('focuses and scrolls to the first invalid special row without approving', async () => {
     const full = { ...demand(7, '校验需求'), specialModuleDemands: [] };
     vi.spyOn(api, 'getPendingDemandApprovals').mockResolvedValue([full]);

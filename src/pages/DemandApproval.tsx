@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Table, Button, Space, Popconfirm, message, Tag, Modal, DatePicker, InputNumber, Divider, Select } from 'antd';
 import { CheckOutlined, CloseOutlined, EditOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -6,6 +6,7 @@ import { api } from '../services/api';
 import { DemandManpowerDetail, SpecialModuleDemandInput, TestModule } from '../types';
 import SpecialModuleDemandEditor from '../components/SpecialModuleDemandEditor';
 import { calculateManpowerSummary, validateSpecialModuleRows } from '../utils/specialModuleCalculations';
+import { buildSpecialModuleWriteRequests } from '../utils/specialModuleWriteRequest';
 
 const { RangePicker } = DatePicker;
 
@@ -25,13 +26,19 @@ const DemandApproval: React.FC = () => {
   const [originalPriority, setOriginalPriority] = useState<string>('');
   const [editPriority, setEditPriority] = useState<string>('');
   const [priorityOptions, setPriorityOptions] = useState<string[]>([]);
-  const [modules, setModules] = useState<TestModule[]>([]);
+  const [baseModules, setBaseModules] = useState<TestModule[]>([]);
+  const [activeDetailModuleOverrides, setActiveDetailModuleOverrides] = useState<TestModule[]>([]);
   const [modulesAvailable, setModulesAvailable] = useState(true);
   const [editSpecialModuleRows, setEditSpecialModuleRows] = useState<SpecialModuleDemandInput[]>([]);
   const specialModuleEditorRef = useRef<HTMLDivElement>(null);
   const [editManpowerRemarks, setEditManpowerRemarks] = useState<Record<string, string | undefined>>({});
   const editRequestSequence = useRef(0);
   const mountedRef = useRef(true);
+  const modules = useMemo(() => {
+    const byId = new Map(baseModules.map((module) => [module.id, module]));
+    activeDetailModuleOverrides.forEach((module) => byId.set(module.id, module));
+    return Array.from(byId.values());
+  }, [baseModules, activeDetailModuleOverrides]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -39,7 +46,7 @@ const DemandApproval: React.FC = () => {
     fetchTestTypes();
     let active = true;
     api.getTestModules().then((items) => {
-      if (active) setModules(items);
+      if (active) setBaseModules(items);
     }).catch((error: any) => {
       if (active) message.error(error.message || '获取特殊模块配置失败');
       if (active) setModulesAvailable(false);
@@ -104,6 +111,7 @@ const DemandApproval: React.FC = () => {
 
   const openEditModal = async (record: any) => {
     const requestSequence = ++editRequestSequence.current;
+    setActiveDetailModuleOverrides([]);
     let details: DemandManpowerDetail[] = [];
     let specialMetadata = record.specialModuleDemands ?? [];
     let specialRows: SpecialModuleDemandInput[] = specialMetadata.map((row: any) => ({
@@ -142,11 +150,7 @@ const DemandApproval: React.FC = () => {
       id: row.moduleId, moduleName: row.moduleName, testType: row.testType, enabled: row.enabled,
       sortOrder: 0, lockVersion: 0, createdAt: row.createdAt ?? '', updatedAt: row.updatedAt ?? '', referenced: true,
     }));
-    setModules((current) => {
-      const byId = new Map(current.map((module) => [module.id, module]));
-      enrichedModules.forEach((module: TestModule) => byId.set(module.id, module));
-      return Array.from(byId.values());
-    });
+    setActiveDetailModuleOverrides(enrichedModules);
     setEditingDemand(record);
     setEditDateRange([dayjs(record.startDate), dayjs(record.endDate)]);
     setOriginalManpower(orig);
@@ -194,10 +198,7 @@ const DemandApproval: React.FC = () => {
         startDate: editDateRange[0].format('YYYY-MM-DDTHH:mm:ss'),
         endDate: editDateRange[1].format('YYYY-MM-DDTHH:mm:ss'),
         manpowerDetails,
-        specialModuleDemands: editSpecialModuleRows.map((row) => ({
-          moduleId: row.moduleId as number,
-          manpowerDemand: row.manpowerDemand as number,
-        })),
+        specialModuleDemands: buildSpecialModuleWriteRequests(editSpecialModuleRows),
         priority: editPriority,
       });
       message.success('修改并批准成功');
@@ -357,7 +358,7 @@ const DemandApproval: React.FC = () => {
       <Modal
         title="修改并批准测试需求"
         open={editModalOpen}
-        onCancel={() => { editRequestSequence.current += 1; setEditModalOpen(false); setEditingDemand(null); }}
+        onCancel={() => { editRequestSequence.current += 1; setActiveDetailModuleOverrides([]); setEditModalOpen(false); setEditingDemand(null); }}
         footer={null}
         width={600}
         destroyOnClose
@@ -498,7 +499,7 @@ const DemandApproval: React.FC = () => {
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
-              <Button onClick={() => { editRequestSequence.current += 1; setEditModalOpen(false); setEditingDemand(null); }}>
+              <Button onClick={() => { editRequestSequence.current += 1; setActiveDetailModuleOverrides([]); setEditModalOpen(false); setEditingDemand(null); }}>
                 取消
               </Button>
               <Button type="primary" loading={editLoading} onClick={handleEditApprove}>

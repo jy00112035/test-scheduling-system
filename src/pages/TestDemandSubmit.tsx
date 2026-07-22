@@ -24,6 +24,7 @@ import { useUserRole } from '../context/UserRoleContext';
 import SpecialModuleDemandEditor from '../components/SpecialModuleDemandEditor';
 import { calculateManpowerSummary, validateSpecialModuleRows } from '../utils/specialModuleCalculations';
 import { mergeEditDraftSpecialRows } from '../utils/specialModuleDraftContext';
+import { buildSpecialModuleWriteRequests } from '../utils/specialModuleWriteRequest';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -232,10 +233,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         startDate: values.dateRange[0].format('YYYY-MM-DDTHH:mm'),
         endDate: values.dateRange[1].format('YYYY-MM-DDTHH:mm'),
         manpowerDetails,
-        specialModuleDemands: specialModuleRows.map((row) => ({
-          moduleId: row.moduleId as number,
-          manpowerDemand: row.manpowerDemand as number,
-        })),
+        specialModuleDemands: buildSpecialModuleWriteRequests(specialModuleRows),
         versionType: values.versionType,
         versionPhase: values.versionPhase,
         description: values.description || '',
