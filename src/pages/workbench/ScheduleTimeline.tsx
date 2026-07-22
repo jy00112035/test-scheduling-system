@@ -191,7 +191,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
         <Space size={8}>
           <span>人力排布视图</span>
           {/* 垃圾桶拖放区域 */}
-          {draggedSchedule && (
+          {draggedSchedule && !draggedSchedule.published && (
             <div
               onDrop={(e) => {
                 e.preventDefault();
@@ -555,6 +555,8 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                   let cellCursor: React.CSSProperties['cursor'] = 'default';
                   if (draggedAllocationTarget) {
                     cellCursor = canDropAllocation ? 'copy' : 'not-allowed';
+                  } else if (draggedSchedule) {
+                    cellCursor = 'not-allowed';
                   } else if (selectedDemand) {
                     cellCursor = canAssign ? 'copy' : 'not-allowed';
                   } else if (canManageDailyAvailability) {
@@ -702,7 +704,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                               ? `${schedule.percentage}%`
                               : `${schedule.percentage}%`}
                           </span>
-                          <div style={{ position: 'absolute', top: 0, right: 0 }}>
+                          {!schedule.published && <div style={{ position: 'absolute', top: 0, right: 0 }}>
                             <Popconfirm
                               title="确定删除？"
                               onConfirm={(e) => {
@@ -713,6 +715,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                               cancelText="取消"
                             >
                               <Button
+                                aria-label={`删除排班 ${schedule.product}`}
                                 type="text"
                                 size="small"
                                 danger
@@ -721,15 +724,18 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                                 onClick={(e) => e.stopPropagation()}
                               />
                             </Popconfirm>
-                          </div>
+                          </div>}
                         </div>
                       ))}
                     </div>
                   );
 
                   const cellKey = `${staff.id}-${dateStr}`;
-                  const cellAcceptsDrop = Boolean(draggedSchedule)
-                    || (draggedAllocationTarget ? canDropAllocation : Boolean(selectedDemand && canAssign));
+                  const cellAcceptsDrop = draggedSchedule
+                    ? Boolean(draggedAllocationTarget && canDropAllocation)
+                    : (draggedAllocationTarget
+                      ? canDropAllocation
+                      : Boolean(selectedDemand && canAssign));
 
                   const cell = (
                     <td
@@ -738,14 +744,18 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                         ? `${staff.name}：${canDropAllocation
                           ? `可分配${draggedAllocationTarget.kind === 'special' ? draggedAllocationTarget.moduleName : `${draggedAllocationTarget.testType}通用人力`}`
                           : allocationReason || '当前不可分配'}`
-                        : undefined}
+                        : draggedSchedule ? `${staff.name}：排班需先归类` : undefined}
+                      aria-disabled={draggedAllocationTarget && !draggedSchedule
+                        ? !canDropAllocation : undefined}
+                      tabIndex={draggedAllocationTarget && !draggedSchedule
+                        ? (canDropAllocation ? 0 : -1) : undefined}
                       style={{
                         background: cellBackground,
                         cursor: cellCursor,
                         padding: 0,
                       }}
                       onDrop={() => {
-                        if (draggedSchedule) {
+                        if (draggedSchedule && cellAcceptsDrop) {
                           onCellDragOver(null);
                           onScheduleTransfer(draggedSchedule, staff, dateStr);
                         } else if (cellAcceptsDrop) {
@@ -757,6 +767,13 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                         if (cellAcceptsDrop) {
                           e.preventDefault();
                           onCellDragOver(cellKey);
+                        }
+                      }}
+                      onKeyDown={(event) => {
+                        if (!draggedSchedule && draggedAllocationTarget && canDropAllocation
+                            && (event.key === 'Enter' || event.key === ' ')) {
+                          event.preventDefault();
+                          onDrop(staff, dateStr);
                         }
                       }}
                     >

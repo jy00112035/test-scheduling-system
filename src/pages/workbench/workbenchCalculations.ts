@@ -12,6 +12,66 @@ export function normalizeSchedulePercentage(value: number | null | undefined): n
   return Math.min(100, Math.max(10, Math.round(numeric / 10) * 10));
 }
 
+export function groupSchedulesByDemandOwnership(
+  demand: DemandItem,
+  schedules: ScheduleItem[],
+): { allocatedByDetailId: Record<number, number>; unclassifiedSchedules: ScheduleItem[] } {
+  const details = demand.manpowerDetails || [];
+  const detailById = new Map(details.filter(detail => detail.id != null).map(detail => [detail.id!, detail]));
+  const detailByTestType = new Map(details.filter(detail => detail.id != null)
+    .map(detail => [detail.testType, detail]));
+  const specialById = new Map((demand.specialModuleDemands || []).map(module => [module.id, module]));
+  const allocatedByDetailId: Record<number, number> = {};
+  const unclassifiedSchedules: ScheduleItem[] = [];
+
+  schedules.filter(schedule => schedule.demandId === demand.id).forEach(schedule => {
+    const explicitDetail = schedule.demandManpowerDetailId == null
+      ? undefined : detailById.get(schedule.demandManpowerDetailId);
+    const special = schedule.demandSpecialModuleId == null
+      ? undefined : specialById.get(schedule.demandSpecialModuleId);
+    const owningDetail = explicitDetail || (special ? detailByTestType.get(special.testType) : undefined);
+    if (owningDetail?.id == null) {
+      unclassifiedSchedules.push(schedule);
+      return;
+    }
+    allocatedByDetailId[owningDetail.id] = (allocatedByDetailId[owningDetail.id] || 0)
+      + schedule.percentage / 100;
+  });
+
+  return { allocatedByDetailId, unclassifiedSchedules };
+}
+
+export function getAllocationTargetForSchedule(
+  demands: DemandItem[],
+  schedule: ScheduleItem,
+): AllocationTarget | null {
+  if (schedule.demandId == null || schedule.demandManpowerDetailId == null) return null;
+  const demand = demands.find(item => item.id === schedule.demandId);
+  const detail = demand?.manpowerDetails?.find(item => item.id === schedule.demandManpowerDetailId);
+  if (!demand || !detail?.id) return null;
+  if (schedule.demandSpecialModuleId != null) {
+    const special = demand.specialModuleDemands?.find(item => item.id === schedule.demandSpecialModuleId);
+    if (!special) return null;
+    return {
+      kind: 'special',
+      demandId: demand.id,
+      demandManpowerDetailId: detail.id,
+      demandSpecialModuleId: special.id,
+      testType: detail.testType,
+      moduleId: special.moduleId,
+      moduleName: special.moduleName,
+      remainingManpower: Number(special.remainingManpower || 0),
+    };
+  }
+  return {
+    kind: 'general',
+    demandId: demand.id,
+    demandManpowerDetailId: detail.id,
+    testType: detail.testType,
+    remainingManpower: 0,
+  };
+}
+
 // ---- 常量 ----
 
 export const DAY_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];

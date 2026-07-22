@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   },
   confirm: vi.fn(),
   warning: vi.fn(),
+  messageSuccess: vi.fn(),
+  messageWarning: vi.fn(),
   messageError: vi.fn(),
 }));
 
@@ -90,8 +92,8 @@ vi.mock('antd', async importOriginal => {
     message: {
       ...actual.message,
       loading: () => vi.fn(),
-      success: vi.fn(),
-      warning: vi.fn(),
+      success: mocks.messageSuccess,
+      warning: mocks.messageWarning,
       info: vi.fn(),
       error: mocks.messageError,
     },
@@ -348,6 +350,15 @@ describe('ScheduleWorkbench backend scheduling flows', () => {
     expect(mocks.api.createSchedule).not.toHaveBeenCalled();
   });
 
+  it('does not dispatch an existing special move to unfamiliar staff', async () => {
+    await renderLoaded([schedule], {}, { familiarModules: [] });
+
+    fireEvent.click(screen.getByText('移动排班'));
+
+    expect(mocks.api.moveSchedule).not.toHaveBeenCalled();
+    expect(screen.getByTestId('schedule-count')).toHaveTextContent('1');
+  });
+
   it('guards duplicate moves and preserves the schedule after failure', async () => {
     const moving = deferred<any>();
     mocks.api.moveSchedule.mockReturnValue(moving.promise);
@@ -379,6 +390,46 @@ describe('ScheduleWorkbench backend scheduling flows', () => {
     await waitFor(() => expect(mocks.api.getSchedules.mock.calls.length).toBeGreaterThan(fetchesBeforeDelete));
     expect(screen.getByTestId('fulfillment-count')).toHaveTextContent('0');
     expect(screen.getByTestId('schedule-count')).toHaveTextContent('0');
+  });
+
+  it('retries only refresh when delete succeeded but reconciliation failed', async () => {
+    await renderLoaded();
+    mocks.api.getSchedules.mockResolvedValue([]);
+    mocks.api.getPendingDemands.mockRejectedValueOnce(new Error('删除刷新失败'));
+
+    fireEvent.click(screen.getByText('删除排班'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('数据刷新失败：删除刷新失败');
+    expect(mocks.messageSuccess).not.toHaveBeenCalledWith('已删除排班');
+    expect(mocks.messageWarning).toHaveBeenCalledWith('排班已删除，但数据刷新失败，请重试刷新');
+    fireEvent.click(screen.getByRole('button', { name: '重试刷新' }));
+    await waitFor(() => expect(screen.queryByText(/数据刷新失败/)).not.toBeInTheDocument());
+    expect(mocks.api.deleteSchedule).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('schedule-count')).toHaveTextContent('0');
+  });
+
+  it('does not claim reconciliation when refreshed staff availability fails', async () => {
+    await renderLoaded();
+    mocks.api.getSchedules.mockResolvedValue([]);
+    mocks.api.getDailyStatuses.mockRejectedValueOnce(new Error('可用状态刷新失败'));
+
+    fireEvent.click(screen.getByText('删除排班'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('数据刷新失败：可用状态刷新失败');
+    expect(mocks.messageSuccess).not.toHaveBeenCalledWith('已删除排班');
+    expect(mocks.messageWarning).toHaveBeenCalledWith('排班已删除，但数据刷新失败，请重试刷新');
+    fireEvent.click(screen.getByRole('button', { name: '重试刷新' }));
+    await waitFor(() => expect(screen.queryByText(/数据刷新失败/)).not.toBeInTheDocument());
+    expect(mocks.api.deleteSchedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('defensively refuses individual deletion of a published schedule', async () => {
+    await renderLoaded([{ ...schedule, published: true }]);
+
+    fireEvent.click(screen.getByText('删除排班'));
+
+    expect(mocks.api.deleteSchedule).not.toHaveBeenCalled();
+    expect(mocks.messageWarning).toHaveBeenCalledWith('已发布排班请按需求整体清理');
   });
 
   it('ignores a recommendation response made stale by a schedule mutation', async () => {
@@ -413,16 +464,34 @@ describe('ScheduleWorkbench backend scheduling flows', () => {
   });
 
   it('refreshes schedules and enriched demands after clearing one demand', async () => {
-    await renderLoaded();
+    const published = { ...schedule, id: 9002, published: true };
+    await renderLoaded([schedule, published]);
     const scheduleFetches = mocks.api.getSchedules.mock.calls.length;
     const demandFetches = mocks.api.getPendingDemands.mock.calls.length;
     mocks.api.getSchedules.mockResolvedValue([]);
 
     fireEvent.click(screen.getByText('清除需求'));
 
-    await waitFor(() => expect(mocks.api.deleteSchedule).toHaveBeenCalledWith(9001));
+    await waitFor(() => expect(mocks.api.deleteSchedulesByDemand).toHaveBeenCalledWith(1001, 'all'));
+    expect(mocks.api.deleteSchedulesByDemand).toHaveBeenCalledTimes(1);
+    expect(mocks.api.deleteSchedule).not.toHaveBeenCalled();
     await waitFor(() => expect(mocks.api.getSchedules.mock.calls.length).toBeGreaterThan(scheduleFetches));
     expect(mocks.api.getPendingDemands.mock.calls.length).toBeGreaterThan(demandFetches);
+  });
+
+  it('keeps authoritative rows when atomic demand clear fails', async () => {
+    const published = { ...schedule, id: 9002, published: true };
+    mocks.api.deleteSchedulesByDemand.mockRejectedValue(new Error('无权清理已发布排班'));
+    await renderLoaded([schedule, published]);
+    const scheduleFetches = mocks.api.getSchedules.mock.calls.length;
+
+    fireEvent.click(screen.getByText('清除需求'));
+
+    await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith('无权清理已发布排班'));
+    expect(mocks.api.deleteSchedulesByDemand).toHaveBeenCalledTimes(1);
+    expect(mocks.api.deleteSchedule).not.toHaveBeenCalled();
+    expect(screen.getByTestId('schedule-count')).toHaveTextContent('2');
+    expect(mocks.api.getSchedules.mock.calls.length).toBeGreaterThan(scheduleFetches);
   });
 
   it('single publish is guarded and refreshes backend authority', async () => {
@@ -529,6 +598,22 @@ describe('ScheduleWorkbench backend scheduling flows', () => {
     expect(mocks.api.getPendingDemands).toHaveBeenCalledTimes(initialFetches);
   });
 
+  it('shows retry without a success claim when recommendation refresh fails', async () => {
+    await renderLoaded([]);
+    mocks.api.getPendingDemands.mockRejectedValueOnce(new Error('需求刷新失败'));
+
+    fireEvent.click(screen.getByText('选择需求'));
+    fireEvent.click(screen.getByText('按全部需求排班'));
+    fireEvent.click((await screen.findAllByText('开始排班'))[0]);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('数据刷新失败：需求刷新失败');
+    expect(mocks.messageSuccess).not.toHaveBeenCalledWith(expect.stringContaining('推荐排班完成'));
+    expect(mocks.messageWarning).toHaveBeenCalledWith('推荐排班已生成，但数据刷新失败，请重试刷新');
+    fireEvent.click(screen.getByRole('button', { name: '重试刷新' }));
+    await waitFor(() => expect(screen.queryByText(/数据刷新失败/)).not.toBeInTheDocument());
+    expect(mocks.api.recommendScheduleDraft).toHaveBeenCalledTimes(1);
+  });
+
   it('batch publishes once and shows backend reason code and reason', async () => {
     mocks.api.batchPublishSchedules.mockResolvedValue({
       success: [],
@@ -578,5 +663,30 @@ describe('ScheduleWorkbench backend scheduling flows', () => {
     expect(mocks.api.classifySchedule.mock.calls[0][1]).not.toHaveProperty('percentage');
     expect(mocks.api.classifySchedule).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(mocks.api.getPendingDemands.mock.calls.length).toBeGreaterThan(demandFetches));
+  });
+
+  it('retries only refresh when classification was saved but reconciliation failed', async () => {
+    const historical = {
+      ...schedule,
+      id: 9002,
+      demandManpowerDetailId: null,
+      demandSpecialModuleId: null,
+    };
+    mocks.api.classifySchedule.mockResolvedValue({
+      ...historical,
+      demandManpowerDetailId: 301,
+    });
+    await renderLoaded([historical], { requiresHistoricalClassification: true });
+    mocks.api.getPendingDemands.mockRejectedValueOnce(new Error('归类刷新失败'));
+
+    fireEvent.click(screen.getByText('查看需求'));
+    fireEvent.click(await screen.findByRole('button', { name: '归类排班 9002' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('数据刷新失败：归类刷新失败');
+    expect(mocks.messageSuccess).not.toHaveBeenCalledWith('历史排班已归类');
+    expect(mocks.messageWarning).toHaveBeenCalledWith('历史排班归类已保存，但数据刷新失败，请重试刷新');
+    fireEvent.click(screen.getByRole('button', { name: '重试刷新' }));
+    await waitFor(() => expect(screen.queryByText(/数据刷新失败/)).not.toBeInTheDocument());
+    expect(mocks.api.classifySchedule).toHaveBeenCalledTimes(1);
   });
 });

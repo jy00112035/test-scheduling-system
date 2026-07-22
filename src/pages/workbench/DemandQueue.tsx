@@ -37,6 +37,8 @@ interface DemandQueueProps {
   onPriorityChange: (demandId: number, priority: string) => void;
   onAllocationTargetDragStart: (e: React.DragEvent, target: AllocationTarget) => void;
   onAllocationTargetDragEnd: () => void;
+  selectedAllocationTarget?: AllocationTarget | null;
+  onAllocationTargetSelect?: (target: AllocationTarget) => void;
 }
 
 const DemandQueue: React.FC<DemandQueueProps> = ({
@@ -58,6 +60,8 @@ const DemandQueue: React.FC<DemandQueueProps> = ({
   onPriorityChange,
   onAllocationTargetDragStart,
   onAllocationTargetDragEnd,
+  selectedAllocationTarget,
+  onAllocationTargetSelect,
 }) => {
   const staffIds = useMemo(() => staffs.map(s => s.id), [staffs]);
 
@@ -244,6 +248,12 @@ const DemandQueue: React.FC<DemandQueueProps> = ({
         {allocationTargets.length > 0 && (
           <div style={{ marginTop: 4, display: 'grid', gap: 3 }}>
             {allocationTargets.map(target => {
+              const selected = selectedAllocationTarget?.kind === target.kind
+                && selectedAllocationTarget.demandId === target.demandId
+                && (target.kind === 'special'
+                  ? selectedAllocationTarget.kind === 'special'
+                    && selectedAllocationTarget.demandSpecialModuleId === target.demandSpecialModuleId
+                  : selectedAllocationTarget.demandManpowerDetailId === target.demandManpowerDetailId);
               const label = target.kind === 'special'
                 ? `分配${target.moduleName}，剩余 ${target.remainingManpower} 人天`
                 : `分配${target.testType}通用人力，剩余 ${target.remainingManpower} 人天`;
@@ -256,8 +266,19 @@ const DemandQueue: React.FC<DemandQueueProps> = ({
                   role="button"
                   tabIndex={0}
                   aria-label={label}
+                  aria-pressed={selected}
                   draggable
-                  onClick={event => event.stopPropagation()}
+                  onClick={event => {
+                    event.stopPropagation();
+                    onAllocationTargetSelect?.(target);
+                  }}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onAllocationTargetSelect?.(target);
+                    }
+                  }}
                   onDragStart={event => onAllocationTargetDragStart(event, target)}
                   onDragEnd={onAllocationTargetDragEnd}
                   style={{
@@ -266,9 +287,9 @@ const DemandQueue: React.FC<DemandQueueProps> = ({
                     gap: 4,
                     minHeight: 24,
                     padding: '2px 5px',
-                    border: '1px solid #d9d9d9',
+                    border: `1px solid ${selected ? '#1677ff' : '#d9d9d9'}`,
                     borderRadius: 3,
-                    background: '#fff',
+                    background: selected ? '#e6f4ff' : '#fff',
                     cursor: 'grab',
                   }}
                 >

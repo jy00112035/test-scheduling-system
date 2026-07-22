@@ -146,6 +146,7 @@ describe('DemandQueue allocation targets', () => {
       }],
     });
     const onAllocationTargetDragStart = vi.fn();
+    const onAllocationTargetSelect = vi.fn();
 
     render(<DemandQueue
       demands={[item]}
@@ -168,6 +169,12 @@ describe('DemandQueue allocation targets', () => {
       onPriorityChange={vi.fn()}
       onAllocationTargetDragStart={onAllocationTargetDragStart}
       onAllocationTargetDragEnd={vi.fn()}
+      selectedAllocationTarget={{
+        kind: 'special', demandId: 1001, demandManpowerDetailId: 301,
+        demandSpecialModuleId: 501, testType: '功能测试', moduleId: 11,
+        moduleName: '支付模块', remainingManpower: 1,
+      }}
+      onAllocationTargetSelect={onAllocationTargetSelect}
     />);
 
     const special = screen.getByRole('button', { name: '分配支付模块，剩余 1 人天' });
@@ -175,6 +182,14 @@ describe('DemandQueue allocation targets', () => {
 
     expect(special).toHaveAttribute('draggable', 'true');
     expect(general).toHaveAttribute('draggable', 'true');
+    expect(special).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(special);
+    fireEvent.keyDown(general, { key: 'Enter' });
+    fireEvent.keyDown(general, { key: ' ' });
+    expect(onAllocationTargetSelect).toHaveBeenNthCalledWith(1, expect.objectContaining({ kind: 'special' }));
+    expect(onAllocationTargetSelect).toHaveBeenNthCalledWith(2, expect.objectContaining({ kind: 'general' }));
+    expect(onAllocationTargetSelect).toHaveBeenNthCalledWith(3, expect.objectContaining({ kind: 'general' }));
 
     fireEvent.dragStart(special);
     expect(onAllocationTargetDragStart).toHaveBeenLastCalledWith(expect.anything(), {

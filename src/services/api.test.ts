@@ -315,4 +315,16 @@ describe('ApiService special-module contracts', () => {
       }),
     }));
   });
+
+  it('clears demand schedules with default draft-only and explicit all scopes', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => respond(null));
+
+    await api.deleteSchedulesByDemand(10);
+    await api.deleteSchedulesByDemand(11, 'all');
+
+    expect(fetchMock.mock.calls.map(([url, options]) => [url, options?.method])).toEqual([
+      ['/api/schedules/demand/10', 'DELETE'],
+      ['/api/schedules/demand/11?scope=all', 'DELETE'],
+    ]);
+  });
 });

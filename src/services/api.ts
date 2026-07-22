@@ -279,8 +279,12 @@ class ApiService {
     return this.request<any[]>('/schedules/gantt-view');
   }
 
-  async deleteSchedulesByDemand(demandId: number) {
-    return this.request<void>(`/schedules/demand/${demandId}`, {
+  async deleteSchedulesByDemand(
+    demandId: number,
+    scope: 'draft_only' | 'all' = 'draft_only',
+  ) {
+    const query = scope === 'all' ? '?scope=all' : '';
+    return this.request<void>(`/schedules/demand/${demandId}${query}`, {
       method: 'DELETE',
     });
   }

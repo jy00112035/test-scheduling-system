@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Button, Tag, Space, Modal, message, InputNumber, Descriptions, Divider,
-  DatePicker, Checkbox, Card, Select,
+  DatePicker, Checkbox, Card, Select, Alert,
 } from 'antd';
 import { CheckOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -38,6 +38,8 @@ import {
   loadDraftFromLocalStorage,
   clearDraftFromLocalStorage,
   normalizeSchedulePercentage,
+  getAllocationTargetForSchedule,
+  groupSchedulesByDemandOwnership,
 } from './workbench/workbenchCalculations';
 
 import type {
@@ -119,6 +121,8 @@ const ScheduleWorkbench: React.FC = () => {
   const [unfulfilledDetails, setUnfulfilledDetails] = useState<UnfulfilledDetail[]>([]);
   const [recommendationFulfillment, setRecommendationFulfillment] = useState<ScheduleRecommendationResponse['fulfillment']>([]);
   const [publishFailures, setPublishFailures] = useState<Array<{ demandId: number; reasonCode: string; reason: string }>>([]);
+  const [refreshFailure, setRefreshFailure] = useState<string | null>(null);
+  const [refreshRetryLoading, setRefreshRetryLoading] = useState(false);
 
   // 风险详情弹窗
   const [riskModalOpen, setRiskModalOpen] = useState(false);
@@ -144,7 +148,8 @@ const ScheduleWorkbench: React.FC = () => {
   const classificationIdsRef = useRef(new Set<number>());
   const manualCreateRef = useRef(false);
   const dropValidationRef = useRef<number | null>(null);
-  const allocationPhaseRef = useRef<'idle' | 'dragging' | 'validating' | 'modal' | 'submitting'>('idle');
+  const allocationPhaseRef = useRef<'idle' | 'selected' | 'dragging' | 'validating' | 'modal' | 'submitting'>('idle');
+  const refreshRetryRef = useRef(false);
 
   const resetAllocationSession = useCallback(() => {
     allocationPhaseRef.current = 'idle';
@@ -169,11 +174,12 @@ const ScheduleWorkbench: React.FC = () => {
     manualCreateRef.current = false;
     dropValidationRef.current = null;
     allocationPhaseRef.current = 'idle';
+    refreshRetryRef.current = false;
   }, []);
 
   // ---- 页面初始化 ----
   useEffect(() => {
-    refreshAuthoritativeData();
+    void refreshAuthoritativeData().catch(() => {});
     fetchPriorityOptions();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Legacy dependency behavior; refactor under dedicated tests.
   }, []);
@@ -253,11 +259,16 @@ const ScheduleWorkbench: React.FC = () => {
     if (options.invalidateDiagnostics) invalidateSchedulingDiagnostics();
     const fetchSession = ++fetchGenerationRef.current;
     try {
-      const [demandsData, schedulesData, staffData] = await Promise.all([
+      const weekDates = getWeekDates(weekViewDate);
+      const startStr = weekDates[0].format('YYYY-MM-DD');
+      const endStr = weekDates[weekDates.length - 1].format('YYYY-MM-DD');
+      const [demandsData, schedulesData, staffData, statuses] = await Promise.all([
         api.getPendingDemands(),
         api.getSchedules(),
         api.getStaff(),
+        api.getDailyStatuses(startStr, endStr),
       ]);
+      if (!mountedRef.current || fetchGenerationRef.current !== fetchSession) return false;
       const normalizedSchedules: ScheduleItem[] = schedulesData.map((s: any) => {
         const demand = demandsData.find((item: DemandItem) => item.id === s.demandId);
         return {
@@ -279,35 +290,62 @@ const ScheduleWorkbench: React.FC = () => {
         ...staff,
         familiarModules: Array.isArray(staff.familiarModules) ? staff.familiarModules : [],
       }));
-      if (!mountedRef.current || fetchGenerationRef.current !== fetchSession) return;
+      const statusMap = new Map<string, DailyStatusEntry>();
+      statuses.forEach((status: any) => statusMap.set(
+        `${status.staffId}-${status.date}`,
+        { status: status.status, percentage: status.percentage ?? 100 },
+      ));
       setDemands(normalizedDemands);
       setSchedules(normalizedSchedules);
       setStaffs(normalizedStaffs);
+      setDailyStatuses(statusMap);
       setSelectedDemand(current => current
         ? normalizedDemands.find(demand => demand.id === current.id) || null
         : null);
       setDetailDemand(current => current
         ? normalizedDemands.find(demand => demand.id === current.id) || null
         : null);
-
-      // 加载每日可用状态
-      try {
-        const weekDates = getWeekDates(weekViewDate);
-        const startStr = weekDates[0].format('YYYY-MM-DD');
-        const endStr = weekDates[weekDates.length - 1].format('YYYY-MM-DD');
-        const statuses = await api.getDailyStatuses(startStr, endStr);
-        const map = new Map<string, DailyStatusEntry>();
-        statuses.forEach((s: any) =>
-          map.set(`${s.staffId}-${s.date}`, { status: s.status, percentage: s.percentage ?? 100 })
-        );
-        if (mountedRef.current && fetchGenerationRef.current === fetchSession) {
-          setDailyStatuses(map);
-        }
-      } catch { /* 非关键 */ }
+      setRefreshFailure(null);
+      return true;
     } catch (error: any) {
-      if (mountedRef.current && fetchGenerationRef.current === fetchSession) {
-        message.error(error.message || '获取数据失败');
-      }
+      if (!mountedRef.current || fetchGenerationRef.current !== fetchSession) return false;
+      setRefreshFailure(error?.message || '获取数据失败');
+      throw error;
+    }
+  };
+
+  const reconcileAfterMutation = async (
+    successMessage: string | null,
+    staleWarning: string,
+    options: { invalidateDiagnostics?: boolean } = { invalidateDiagnostics: true },
+  ) => {
+    try {
+      const reconciled = await refreshAuthoritativeData(options);
+      if (reconciled && mountedRef.current && successMessage) message.success(successMessage);
+      return reconciled;
+    } catch {
+      if (mountedRef.current) message.warning(staleWarning);
+      return false;
+    }
+  };
+
+  const refreshAfterMutationFailure = async () => {
+    try {
+      await refreshAuthoritativeData({ invalidateDiagnostics: true });
+    } catch { /* refresh alert owns the retry path */ }
+  };
+
+  const handleRetryRefresh = async () => {
+    if (refreshRetryRef.current) return;
+    refreshRetryRef.current = true;
+    setRefreshRetryLoading(true);
+    try {
+      await refreshAuthoritativeData();
+    } catch {
+      // The latest owned failure remains visible in the alert.
+    } finally {
+      refreshRetryRef.current = false;
+      if (mountedRef.current) setRefreshRetryLoading(false);
     }
   };
 
@@ -330,35 +368,8 @@ const ScheduleWorkbench: React.FC = () => {
 
   const timelineAllocationTarget = useMemo<AllocationTarget | null>(() => {
     if (draggedAllocationTarget) return draggedAllocationTarget;
-    if (!draggedSchedule || draggedSchedule.demandManpowerDetailId == null) return null;
-    const demand = demands.find(item => item.id === draggedSchedule.demandId);
-    const detail = demand?.manpowerDetails?.find(
-      item => item.id === draggedSchedule.demandManpowerDetailId,
-    );
-    if (!demand || !detail) return null;
-    if (draggedSchedule.demandSpecialModuleId != null) {
-      const special = demand.specialModuleDemands?.find(
-        item => item.id === draggedSchedule.demandSpecialModuleId,
-      );
-      if (!special) return null;
-      return {
-        kind: 'special',
-        demandId: demand.id,
-        demandManpowerDetailId: detail.id!,
-        demandSpecialModuleId: special.id,
-        testType: detail.testType,
-        moduleId: special.moduleId,
-        moduleName: special.moduleName,
-        remainingManpower: Number(special.remainingManpower || 0),
-      };
-    }
-    return {
-      kind: 'general',
-      demandId: demand.id,
-      demandManpowerDetailId: detail.id!,
-      testType: detail.testType,
-      remainingManpower: 0,
-    };
+    if (!draggedSchedule) return null;
+    return getAllocationTargetForSchedule(demands, draggedSchedule);
   }, [demands, draggedAllocationTarget, draggedSchedule]);
 
   // ---- 每日状态操作 ----
@@ -457,13 +468,17 @@ const ScheduleWorkbench: React.FC = () => {
           };
         }));
 
-      await refreshAuthoritativeData();
-      if (!mountedRef.current || recommendationRunRef.current !== session) return;
-      message.success(`推荐排班完成：共生成 ${result.generatedSchedules.length} 条草稿排班`);
+      await reconcileAfterMutation(
+        `推荐排班完成：共生成 ${result.generatedSchedules.length} 条草稿排班`,
+        '推荐排班已生成，但数据刷新失败，请重试刷新',
+        {},
+      );
     } catch (error: any) {
       if (!mountedRef.current || recommendationRunRef.current !== session) return;
       message.error(error?.message || '推荐排班失败');
-      await refreshAuthoritativeData({ invalidateDiagnostics: true });
+      try {
+        await refreshAuthoritativeData({ invalidateDiagnostics: true });
+      } catch { /* refresh alert owns the retry path */ }
     } finally {
       stopLoading();
       if (recommendationRunRef.current === session) {
@@ -505,11 +520,13 @@ const ScheduleWorkbench: React.FC = () => {
           setPendingChangeDemandIds(new Set());
           setConflictDetails([]);
           clearDraftFromLocalStorage();
-          message.success(`已清除 ${unpublishdSchedules.length} 条未发布排班`);
-          await refreshAuthoritativeData({ invalidateDiagnostics: true });
+          await reconcileAfterMutation(
+            `已清除 ${unpublishdSchedules.length} 条未发布排班`,
+            '排班已清除，但数据刷新失败，请重试刷新',
+          );
         } catch (err: any) {
           message.error(err.message || '清除失败');
-          await refreshAuthoritativeData({ invalidateDiagnostics: true });
+          await refreshAfterMutationFailure();
         }
       },
     });
@@ -567,17 +584,19 @@ const ScheduleWorkbench: React.FC = () => {
                 </div>
               ),
             });
-          } else {
-            message.success(`已成功发布 ${result.success.length} 个需求的排班`);
           }
-          await refreshAuthoritativeData({ invalidateDiagnostics: true });
+          await reconcileAfterMutation(
+            result.failed.length === 0
+              ? `已成功发布 ${result.success.length} 个需求的排班` : null,
+            '批量发布已处理，但数据刷新失败，请重试刷新',
+          );
           if (mountedRef.current && publishRunRef.current === session) {
             setPublishFailures(result.failed);
           }
         } catch (error: any) {
           if (mountedRef.current && publishRunRef.current === session) {
             message.error(error?.message || '发布失败');
-            await refreshAuthoritativeData({ invalidateDiagnostics: true });
+            await refreshAfterMutationFailure();
           }
         } finally {
           if (publishRunRef.current === session) {
@@ -617,12 +636,14 @@ const ScheduleWorkbench: React.FC = () => {
         next.delete(demandId);
         return next;
       });
-      message.success('排期已发布');
-      await refreshAuthoritativeData({ invalidateDiagnostics: true });
+      await reconcileAfterMutation(
+        '排期已发布',
+        '排期已发布，但数据刷新失败，请重试刷新',
+      );
     } catch (error: any) {
       if (mountedRef.current && publishRunRef.current === session) {
         message.error(error?.message || '发布失败');
-        await refreshAuthoritativeData({ invalidateDiagnostics: true });
+        await refreshAfterMutationFailure();
       }
     } finally {
       if (publishRunRef.current === session) publishRunRef.current = null;
@@ -635,9 +656,14 @@ const ScheduleWorkbench: React.FC = () => {
     const pubCount = demandSchedules.filter(s => s.published).length;
     const draftCount = demandSchedules.length - pubCount;
     const hasPendingChanges = pendingChangeDemandIds.has(demandId);
+    const canClearPublished = hasRole('resourceManager') || hasRole('fieldAdmin');
 
     if (demandSchedules.length === 0 && !hasPendingChanges) {
       message.info('该需求暂无排班数据');
+      return;
+    }
+    if (pubCount > 0 && !canClearPublished) {
+      message.warning('仅资源经理或字段管理员可清理已发布排班');
       return;
     }
 
@@ -655,16 +681,15 @@ const ScheduleWorkbench: React.FC = () => {
       cancelText: '取消',
       onOk: async () => {
         try {
-          for (const s of demandSchedules) {
-            await api.deleteSchedule(s.id);
-          }
-          setSchedules(prev => prev.filter(s => s.demandId !== demandId));
+          await api.deleteSchedulesByDemand(demandId, pubCount > 0 ? 'all' : 'draft_only');
           setPendingChangeDemandIds(prev => { const next = new Set(prev); next.delete(demandId); return next; });
-          message.success(`已清除 ${demandSchedules.length} 条排班`);
-          await refreshAuthoritativeData({ invalidateDiagnostics: true });
+          await reconcileAfterMutation(
+            `已清除 ${demandSchedules.length} 条排班`,
+            '需求排班已清除，但数据刷新失败，请重试刷新',
+          );
         } catch (err: any) {
           message.error(err.message || '清除失败');
-          await refreshAuthoritativeData({ invalidateDiagnostics: true });
+          await refreshAfterMutationFailure();
         }
       },
     });
@@ -680,6 +705,15 @@ const ScheduleWorkbench: React.FC = () => {
     allocationPhaseRef.current = 'dragging';
     setDraggedAllocationTarget(target);
     setSelectedDemand(demands.find(demand => demand.id === target.demandId) || null);
+  }, [demands]);
+
+  const handleAllocationTargetSelect = useCallback((target: AllocationTarget) => {
+    allocationPhaseRef.current = 'selected';
+    dropValidationRef.current = null;
+    setDraggedSchedule(null);
+    setDraggedAllocationTarget(target);
+    setSelectedDemand(demands.find(demand => demand.id === target.demandId) || null);
+    setDragOverCell(null);
   }, [demands]);
 
   // ---- 拖拽：排班卡片 ----
@@ -753,6 +787,21 @@ const ScheduleWorkbench: React.FC = () => {
       setDraggedSchedule(null);
       return;
     }
+    const allocationTarget = getAllocationTargetForSchedule(demands, schedule);
+    if (!allocationTarget) {
+      message.warning('历史排班需先完成人力归类后再移动');
+      setDraggedSchedule(null);
+      setDragOverCell(null);
+      return;
+    }
+    if (!isStaffEligibleForAllocationTarget(targetStaff, allocationTarget)) {
+      message.warning(allocationTarget.kind === 'special'
+        ? `${targetStaff.name}不熟悉${allocationTarget.moduleName}`
+        : `${targetStaff.name}不属于${allocationTarget.testType}`);
+      setDraggedSchedule(null);
+      setDragOverCell(null);
+      return;
+    }
 
     const overloadDates = getDeviceOverloadDates(
       schedule.demandId,
@@ -795,12 +844,14 @@ const ScheduleWorkbench: React.FC = () => {
           published: moved.published ?? item.published,
         }
         : item));
-      message.success(`已转移至 ${targetStaff.name}`);
-      await refreshAuthoritativeData({ invalidateDiagnostics: true });
+      await reconcileAfterMutation(
+        `已转移至 ${targetStaff.name}`,
+        '排班移动已保存，但数据刷新失败，请重试刷新',
+      );
     } catch (error: any) {
       if (mountedRef.current) {
         message.error(error?.message || '转移失败');
-        await refreshAuthoritativeData({ invalidateDiagnostics: true });
+        await refreshAfterMutationFailure();
       }
     } finally {
       scheduleMutationIdsRef.current.delete(schedule.id);
@@ -859,7 +910,7 @@ const ScheduleWorkbench: React.FC = () => {
       if (mountedRef.current && dropValidationRef.current === session) {
         message.error(error?.message || '排班校验失败');
         resetAllocationSession();
-        await refreshAuthoritativeData({ invalidateDiagnostics: true });
+        await refreshAfterMutationFailure();
       }
     } finally {
       if (dropValidationRef.current === session) dropValidationRef.current = null;
@@ -938,14 +989,16 @@ const ScheduleWorkbench: React.FC = () => {
           published: schedule.published ?? false,
         })),
       ]);
-      message.success('分配成功');
       resetAllocationSession();
-      await refreshAuthoritativeData({ invalidateDiagnostics: true });
+      await reconcileAfterMutation(
+        '分配成功',
+        '排班分配已保存，但数据刷新失败，请重试刷新',
+      );
     } catch (error: any) {
       if (mountedRef.current) {
         message.error(error?.message || '分配失败');
         resetAllocationSession();
-        await refreshAuthoritativeData({ invalidateDiagnostics: true });
+        await refreshAfterMutationFailure();
       }
     } finally {
       manualCreateRef.current = false;
@@ -955,18 +1008,24 @@ const ScheduleWorkbench: React.FC = () => {
 
   // ---- 删除排班 ----
   const handleDeleteSchedule = async (schedule: ScheduleItem) => {
+    if (schedule.published) {
+      message.warning('已发布排班请按需求整体清理');
+      return;
+    }
     if (scheduleMutationIdsRef.current.has(schedule.id)) return;
     scheduleMutationIdsRef.current.add(schedule.id);
     try {
       await api.deleteSchedule(schedule.id);
       if (!mountedRef.current) return;
       setSchedules(prev => prev.filter(s => s.id !== schedule.id));
-      message.success('已删除排班');
-      await refreshAuthoritativeData({ invalidateDiagnostics: true });
+      await reconcileAfterMutation(
+        '已删除排班',
+        '排班已删除，但数据刷新失败，请重试刷新',
+      );
     } catch (error: any) {
       if (mountedRef.current) {
         message.error(error.message || '删除失败');
-        await refreshAuthoritativeData({ invalidateDiagnostics: true });
+        await refreshAfterMutationFailure();
       }
     } finally {
       scheduleMutationIdsRef.current.delete(schedule.id);
@@ -1006,14 +1065,16 @@ const ScheduleWorkbench: React.FC = () => {
           published: moved.published ?? schedule.published,
         }
         : schedule));
-      message.success('排班已更新');
       setEditModalVisible(false);
       setEditingSchedule(null);
-      await refreshAuthoritativeData({ invalidateDiagnostics: true });
+      await reconcileAfterMutation(
+        '排班已更新',
+        '排班更新已保存，但数据刷新失败，请重试刷新',
+      );
     } catch (error: any) {
       if (mountedRef.current) {
         message.error(error.message || '更新失败');
-        await refreshAuthoritativeData({ invalidateDiagnostics: true });
+        await refreshAfterMutationFailure();
       }
     } finally {
       scheduleMutationIdsRef.current.delete(editingSchedule.id);
@@ -1038,12 +1099,16 @@ const ScheduleWorkbench: React.FC = () => {
         demandSpecialModuleId: draft?.demandSpecialModuleId ?? null,
       });
       if (!mountedRef.current) return;
-      message.success('历史排班已归类');
-      await refreshAuthoritativeData({ invalidateDiagnostics: true });
+      await reconcileAfterMutation(
+        '历史排班已归类',
+        '历史排班归类已保存，但数据刷新失败，请重试刷新',
+      );
     } catch (error: any) {
       if (mountedRef.current) {
         message.error(error?.message || '归类失败');
-        await refreshAuthoritativeData({ invalidateDiagnostics: true });
+        try {
+          await refreshAuthoritativeData({ invalidateDiagnostics: true });
+        } catch { /* refresh alert owns the retry path */ }
       }
     } finally {
       classificationIdsRef.current.delete(schedule.id);
@@ -1168,6 +1233,23 @@ const ScheduleWorkbench: React.FC = () => {
     <div style={{ height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       {/* 顶部区域：总览条 + 冲突/缺口面板 */}
       <div style={{ flexShrink: 0, background: '#f0f2f5', paddingBottom: 8 }}>
+        {refreshFailure && (
+          <Alert
+            type="error"
+            showIcon
+            message={`数据刷新失败：${refreshFailure}`}
+            action={(
+              <Button
+                size="small"
+                loading={refreshRetryLoading}
+                onClick={handleRetryRefresh}
+              >
+                重试刷新
+              </Button>
+            )}
+            style={{ marginBottom: 8 }}
+          />
+        )}
         <WorkbenchSummaryBar
           metrics={batchMetrics}
           hasDrafts={hasDraftSchedules}
@@ -1224,6 +1306,8 @@ const ScheduleWorkbench: React.FC = () => {
               resetAllocationSession();
             }
           }}
+          selectedAllocationTarget={draggedSchedule ? null : draggedAllocationTarget}
+          onAllocationTargetSelect={handleAllocationTargetSelect}
         />
 
         <ScheduleTimeline
@@ -1754,17 +1838,8 @@ const ScheduleWorkbench: React.FC = () => {
             {detailDemand.manpowerDetails && detailDemand.manpowerDetails.length > 0 && (
               <Descriptions.Item label="测试类型明细" span={2}>
                 {(() => {
-                  const demandTestTypes = new Set(detailDemand.manpowerDetails.map((md: any) => md.testType));
                   const demandSchedules = schedules.filter(s => s.demandId === detailDemand.id);
-                  // 协调人力：按非需求测试类型分组
-                  const coordMap = new Map<string, number>();
-                  demandSchedules.forEach(s => {
-                    const st = staffs.find(st => st.id === s.staffId);
-                    if (st?.testType && !demandTestTypes.has(st.testType)) {
-                      coordMap.set(st.testType, (coordMap.get(st.testType) || 0) + s.percentage / 100);
-                    }
-                  });
-                  const coordRows = Array.from(coordMap.entries());
+                  const ownership = groupSchedulesByDemandOwnership(detailDemand, demandSchedules);
                   return (
                     <>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
@@ -1796,43 +1871,31 @@ const ScheduleWorkbench: React.FC = () => {
                     </div>
                     <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                       <colgroup>
-                        <col style={{ width: '12%' }} /><col style={{ width: '12%' }} /><col style={{ width: '12%' }} /><col style={{ width: '12%' }} /><col style={{ width: '52%' }} />
+                        <col style={{ width: '14%' }} /><col style={{ width: '14%' }} /><col style={{ width: '14%' }} /><col style={{ width: '14%' }} /><col style={{ width: '44%' }} />
                       </colgroup>
                       <thead>
                         <tr style={{ background: '#fafafa' }}>
                           <th style={{ padding: '2px 6px', textAlign: 'left', borderBottom: '1px solid #f0f0f0' }}>测试类型</th>
                           <th style={{ padding: '2px 6px', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>人力需求</th>
+                          <th style={{ padding: '2px 6px', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>已分配</th>
                           <th style={{ padding: '2px 6px', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>需求缺口</th>
-                          <th style={{ padding: '2px 6px', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>协调人力</th>
                           <th style={{ padding: '2px 6px', textAlign: 'left', borderBottom: '1px solid #f0f0f0' }}>所需模块</th>
                         </tr>
                       </thead>
                       <tbody>
                         {detailDemand.manpowerDetails.map((md: any, idx: number) => {
-                          const typeAllocated = demandSchedules
-                            .filter(s => staffs.find(st => st.id === s.staffId)?.testType === md.testType)
-                            .reduce((sum, s) => sum + s.percentage / 100, 0);
-                          const gap = Number(md.manpowerDemand || 0) - typeAllocated;
-                          const coordVal = coordMap.get(md.testType) || 0;
+                          const typeAllocated = md.id == null ? 0 : ownership.allocatedByDetailId[md.id] || 0;
+                          const gap = Math.max(0, Number(md.manpowerDemand || 0) - typeAllocated);
                           return (
                             <tr key={idx}>
                               <td style={{ padding: '2px 6px', color: '#1890ff' }}>{md.testType}</td>
                               <td style={{ padding: '2px 6px', textAlign: 'right' }}>{Number(md.manpowerDemand || 0).toFixed(1)}</td>
+                              <td style={{ padding: '2px 6px', textAlign: 'right' }}>{typeAllocated.toFixed(1)}</td>
                               <td style={{ padding: '2px 6px', textAlign: 'right', color: gap > 0 ? '#faad14' : '#52c41a', fontWeight: 500 }}>{gap.toFixed(1)}</td>
-                              <td style={{ padding: '2px 6px', textAlign: 'right' }}>{coordVal > 0 ? coordVal.toFixed(1) : '-'}</td>
                               <td style={{ padding: '2px 6px', color: '#888', wordBreak: 'break-word' }}>{md.remark || '-'}</td>
                             </tr>
                           );
                         })}
-                        {coordRows.map(([testType, val], idx) => (
-                          <tr key={`coord-${idx}`}>
-                            <td style={{ padding: '2px 6px', color: '#ff4d4f', fontWeight: 500 }}>{testType}</td>
-                            <td style={{ padding: '2px 6px', textAlign: 'right' }}>-</td>
-                            <td style={{ padding: '2px 6px', textAlign: 'right' }}>-</td>
-                            <td style={{ padding: '2px 6px', textAlign: 'right', color: '#ff4d4f', fontWeight: 500 }}>{val.toFixed(1)}</td>
-                            <td style={{ padding: '2px 6px', color: '#888' }}>协调</td>
-                          </tr>
-                        ))}
                       </tbody>
                     </table>
                     </>
