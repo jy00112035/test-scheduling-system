@@ -84,6 +84,39 @@ class SchedulePublishIntegrationTest {
     }
 
     @Test
+    void republishRevalidatesButDoesNotWriteOrDuplicateSuccessAudit() {
+        TestDemand demand = demand("republish", 0.5);
+        DemandManpowerDetail detail = detail(demand, 0.5);
+        TestStaff staff = staff("republish");
+        create(schedule(demand, staff, detail, null, 50));
+
+        publishService.publishOne(demand.getId());
+        long auditCount = audits(demand).stream()
+            .filter(a -> "SCHEDULE_PUBLISHED".equals(a.getActionType())).count();
+        publishService.publishOne(demand.getId());
+
+        assertEquals(auditCount, audits(demand).stream()
+            .filter(a -> "SCHEDULE_PUBLISHED".equals(a.getActionType())).count());
+    }
+
+    @Test
+    void mixedPublishedAndDraftRowsPublishOnlyDraftRowsWithOneAudit() {
+        TestDemand demand = demand("mixed-republish", 1.0);
+        DemandManpowerDetail detail = detail(demand, 1.0);
+        Schedule published = create(schedule(demand, staff("mixed-one"), detail, null, 50));
+        Schedule draft = create(schedule(demand, staff("mixed-two"), detail, null, 50));
+        published.setPublished(true);
+        scheduleRepository.saveAndFlush(published);
+
+        publishService.publishOne(demand.getId());
+
+        assertTrue(scheduleRepository.findById(published.getId()).orElseThrow().getPublished());
+        assertTrue(scheduleRepository.findById(draft.getId()).orElseThrow().getPublished());
+        assertEquals(1, audits(demand).stream()
+            .filter(a -> "SCHEDULE_PUBLISHED".equals(a.getActionType())).count());
+    }
+
+    @Test
     void removedFamiliarModuleIsRejectedAndRowsRemainDraft() {
         TestDemand demand = demand("removed-familiar", 1.0);
         DemandManpowerDetail detail = detail(demand, 1.0);
@@ -100,6 +133,14 @@ class SchedulePublishIntegrationTest {
 
         assertEquals("STAFF_MODULE_NOT_FAMILIAR", error.getErrorCode());
         assertFalse(scheduleRepository.findById(specialRow.getId()).orElseThrow().getPublished());
+        var failure = audits(demand).stream().filter(a ->
+            "SCHEDULE_PUBLISH_FAILED".equals(a.getActionType())).findFirst().orElseThrow();
+        assertTrue(failure.getAfterValue().contains("\"scheduleId\":" + specialRow.getId()));
+        assertTrue(failure.getAfterValue().contains("\"staffId\":" + staff.getId()));
+        assertTrue(failure.getAfterValue().contains("\"demandManpowerDetailId\":" + detail.getId()));
+        assertTrue(failure.getAfterValue().contains("\"demandSpecialModuleId\":" + special.getId()));
+        assertTrue(failure.getAfterValue().contains("\"moduleId\":" + module.getId()));
+        assertTrue(failure.getAfterValue().contains("\"moduleName\":\"" + module.getModuleName()));
     }
 
     @Test
@@ -191,6 +232,38 @@ class SchedulePublishIntegrationTest {
             () -> publishService.publishOne(demand.getId()));
 
         assertEquals("SCHEDULE_NOT_FOUND", error.getErrorCode());
+        var failure = audits(demand).stream().filter(a ->
+            "SCHEDULE_PUBLISH_FAILED".equals(a.getActionType())).findFirst().orElseThrow();
+        assertTrue(failure.getAfterValue().contains("\"demandId\":" + demand.getId()));
+        assertTrue(failure.getAfterValue().contains("\"schedules\":[]"));
+    }
+
+    @Test
+    void missingDemandFailureAuditUsesEmptyContext() {
+        long missingDemandId = 900_000_000L;
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> publishService.publishOne(missingDemandId));
+
+        assertEquals("DEMAND_NOT_FOUND", error.getErrorCode());
+        var failure = auditsById(missingDemandId).stream().filter(a ->
+            "SCHEDULE_PUBLISH_FAILED".equals(a.getActionType())).findFirst().orElseThrow();
+        assertTrue(failure.getAfterValue().contains("\"demandId\":" + missingDemandId));
+        assertTrue(failure.getAfterValue().contains("\"schedules\":[]"));
+    }
+
+    @Test
+    void legacyPublishDelegationPersistsFailureAuditOutsideCaller() {
+        TestDemand demand = demand("legacy-failure", 1.0);
+        DemandManpowerDetail detail = detail(demand, 1.0);
+        create(schedule(demand, staff("legacy-failure"), detail, null, 50));
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> scheduleService.publishByDemandId(demand.getId()));
+
+        assertEquals("GENERAL_MANPOWER_UNFULFILLED", error.getErrorCode());
+        assertTrue(audits(demand).stream().anyMatch(a ->
+            "SCHEDULE_PUBLISH_FAILED".equals(a.getActionType())));
     }
 
     @Test
@@ -233,8 +306,12 @@ class SchedulePublishIntegrationTest {
     }
 
     private List<com.testscheduling.entity.AuditLog> audits(TestDemand demand) {
+        return auditsById(demand.getId());
+    }
+
+    private List<com.testscheduling.entity.AuditLog> auditsById(Long demandId) {
         return auditLogRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc(
-            "SCHEDULE", demand.getId().toString());
+            "SCHEDULE", demandId.toString());
     }
 
     private void await(CountDownLatch latch) {

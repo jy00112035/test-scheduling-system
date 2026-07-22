@@ -177,6 +177,14 @@ class ScheduleControllerTest {
             .andExpect(jsonPath("$.data.errorCode").value("BATCH_PUBLISH_REQUEST_INVALID"));
     }
 
+    @Test
+    void malformedNonBatchScheduleBodyUsesGenericStableCode() throws Exception {
+        mockMvc.perform(authorized(post("/api/schedules")
+                .contentType(MediaType.APPLICATION_JSON).content("{"), "projectManager"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.data.errorCode").value("REQUEST_BODY_INVALID"));
+    }
+
     private void useRealPublishValidationService() {
         ReflectionTestUtils.setField(controller, "publishService",
             new SchedulePublishService(mock(SchedulePublishTransactionService.class),

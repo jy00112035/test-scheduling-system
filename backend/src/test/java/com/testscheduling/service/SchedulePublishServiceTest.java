@@ -30,6 +30,12 @@ class SchedulePublishServiceTest {
         assertThrows(BusinessException.class, () -> service.publishBatch(new BatchPublishRequest(List.of())));
         assertThrows(BusinessException.class, () -> service.publishBatch(new BatchPublishRequest(
             java.util.stream.LongStream.rangeClosed(1, 501).boxed().toList())));
+        BusinessException zero = assertThrows(BusinessException.class,
+            () -> service.publishBatch(new BatchPublishRequest(List.of(0L))));
+        assertEquals("BATCH_PUBLISH_ID_INVALID", zero.getErrorCode());
+        BusinessException negative = assertThrows(BusinessException.class,
+            () -> service.publishBatch(new BatchPublishRequest(List.of(-1L))));
+        assertEquals("BATCH_PUBLISH_ID_INVALID", negative.getErrorCode());
     }
 
     @Test

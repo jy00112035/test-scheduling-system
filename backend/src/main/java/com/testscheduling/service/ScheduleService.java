@@ -188,7 +188,6 @@ public class ScheduleService {
         return scheduleRepository.findByPublishedTrue();
     }
 
-    @Transactional
     public void publishByDemandId(Long demandId) {
         publishService.publishOne(demandId);
     }

@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -19,11 +20,20 @@ public class GlobalExceptionHandler {
         return new ApiResponse<>(400, e.getMessage(), new ErrorData(e.getErrorCode()));
     }
 
-    @ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentNotValidException.class})
+    @ExceptionHandler(HttpMessageNotReadableException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public ApiResponse<ErrorData> handleInvalidRequest(Exception e) {
-        return new ApiResponse<>(400, "批量发布请求格式无效",
-            new ErrorData("BATCH_PUBLISH_REQUEST_INVALID"));
+    public ApiResponse<ErrorData> handleUnreadableRequest(
+            HttpMessageNotReadableException e, HttpServletRequest request) {
+        boolean batchPublish = "/api/schedules/batch-publish".equals(request.getRequestURI());
+        String code = batchPublish ? "BATCH_PUBLISH_REQUEST_INVALID" : "REQUEST_BODY_INVALID";
+        return new ApiResponse<>(400, "请求体格式无效", new ErrorData(code));
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiResponse<ErrorData> handleValidationError(MethodArgumentNotValidException e) {
+        return new ApiResponse<>(400, "请求参数校验失败",
+            new ErrorData("REQUEST_VALIDATION_FAILED"));
     }
 
     @ExceptionHandler(RuntimeException.class)

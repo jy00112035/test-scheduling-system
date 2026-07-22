@@ -126,6 +126,28 @@ class SchedulePublishTransactionServiceTest {
     }
 
     @Test
+    void alreadyPublishedRowsAreRevalidatedWithoutWriteOrDuplicateAudit() {
+        TestDemand demand = demand(10L);
+        Schedule row = schedule(1L, 10L, 20L);
+        row.setPublished(true);
+        TestStaff staff = new TestStaff();
+        staff.setId(20L);
+        List<Schedule> rows = List.of(row);
+        when(demandRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(demand));
+        when(scheduleRepository.findByDemandId(10L)).thenReturn(rows);
+        when(staffRepository.findAllByIdInForUpdate(List.of(20L))).thenReturn(List.of(staff));
+        when(scheduleRepository.findByDemandIdForUpdate(10L)).thenReturn(rows);
+        when(fulfillmentService.calculate(10L)).thenReturn(satisfied(10L));
+        when(eligibilityService.prepareContext(rows))
+            .thenReturn(new ScheduleEligibilityService.ValidationContext());
+
+        assertEquals(1, service().publishInNewTransaction(10L));
+
+        verify(scheduleRepository, never()).saveAllAndFlush(any());
+        verify(auditLogService, never()).record(any(), any(), any(), any(), any());
+    }
+
+    @Test
     void missingModuleLockRowUsesStableModuleError() {
         TestDemand demand = demand(10L);
         Schedule row = schedule(1L, 10L, 20L);
