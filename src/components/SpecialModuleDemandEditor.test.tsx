@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
-import SpecialModuleDemandEditor from './SpecialModuleDemandEditor';
+import SpecialModuleDemandEditor, { resetSpecialModuleRowForTestType } from './SpecialModuleDemandEditor';
 import type { SpecialModuleDemandInput, TestModule } from '../types';
 
 const moduleFixture = (overrides: Partial<TestModule> = {}): TestModule => ({
@@ -133,5 +133,15 @@ describe('SpecialModuleDemandEditor', () => {
     );
     await user.click(screen.getByRole('button', { name: '删除特殊模块需求 1' }));
     expect(onChange).toHaveBeenLastCalledWith([]);
+  });
+
+  it('clears module and manpower when its group changes', () => {
+    expect(resetSpecialModuleRowForTestType('性能测试')).toEqual({ testType: '性能测试' });
+  });
+
+  it('marks every overflow row invalid', () => {
+    render(<SpecialModuleDemandEditor rows={[{ testType: '功能测试', moduleId: 11, manpowerDemand: 2 }, { testType: '功能测试', moduleId: 12, manpowerDemand: 2 }]} modules={[moduleFixture(), moduleFixture({ id: 12, moduleName: '搜索模块' })]} manpowerByTestType={{ 功能测试: 3 }} onChange={() => undefined} />);
+    expect(screen.getByRole('combobox', { name: '特殊模块 1' })).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('combobox', { name: '特殊模块 2' })).toHaveAttribute('aria-invalid', 'true');
   });
 });

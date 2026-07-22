@@ -12,6 +12,9 @@ interface SpecialModuleDemandEditorProps {
   canEditModules?: boolean;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- Exported pure interaction contract for focused editor tests.
+export const resetSpecialModuleRowForTestType = (testType: string): SpecialModuleDemandInput => ({ testType });
+
 const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
   rows,
   modules,
@@ -49,7 +52,7 @@ const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
               status={rowInvalid ? 'error' : undefined}
               aria-invalid={rowInvalid}
               aria-describedby={rowInvalid ? rowErrorId : undefined}
-              onChange={(testType) => updateRow(index, { testType })}
+              onChange={(testType) => updateRow(index, resetSpecialModuleRowForTestType(testType))}
               disabled={disabled || !canEditModules}
               options={Object.entries(manpowerByTestType)
                 .filter(([, manpower]) => manpower > 0)
