@@ -61,6 +61,9 @@ class StaffModuleServiceTest {
                 staff.setId(invocation.getArgument(0));
                 return java.util.Optional.of(staff);
             });
+        lenient().when(moduleRepository.findByIdForUpdate(any()))
+            .thenAnswer(invocation -> moduleRepository.findAllById(
+                    List.of(invocation.getArgument(0, Long.class))).stream().findFirst());
     }
 
     @Test
@@ -139,6 +142,10 @@ class StaffModuleServiceTest {
             .thenReturn(List.of(7L, 11L));
         when(moduleRepository.findAllById(List.of(11L, 12L))).thenReturn(List.of(
             module(11L, "保留模块", true), module(12L, "新增模块", true)));
+        when(moduleRepository.findAllById(List.of(11L))).thenReturn(List.of(
+            module(11L, "保留模块", true)));
+        when(moduleRepository.findAllById(List.of(12L))).thenReturn(List.of(
+            module(12L, "新增模块", true)));
 
         service.replaceModules(staff, List.of(11L, 12L));
 

@@ -2,14 +2,21 @@ package com.testscheduling.repository;
 
 import com.testscheduling.entity.TestModuleConfig;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import jakarta.persistence.LockModeType;
+import java.util.Optional;
 
 import java.util.List;
 
 @Repository
 public interface TestModuleConfigRepository extends JpaRepository<TestModuleConfig, Long> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select m from TestModuleConfig m where m.id = :moduleId")
+    Optional<TestModuleConfig> findByIdForUpdate(@Param("moduleId") Long moduleId);
 
     boolean existsByModuleName(String moduleName);
 

@@ -157,6 +157,12 @@ public class TestStaffService {
             }
         }
 
+        if (request.getFamiliarModuleIds() != null) {
+            staffModuleService.replaceModules(existing, request.getFamiliarModuleIds());
+        }
+        existing = testStaffRepository.findByIdForUpdate(id)
+            .orElseThrow(() -> new RuntimeException("人员不存在"));
+
         existing.setName(request.getName());
         existing.setEmpNo(request.getEmpNo());
         existing.setJoinDate(request.getJoinDate());
@@ -192,9 +198,6 @@ public class TestStaffService {
         user.setConfidentialClearance(request.getConfidentialClearance() != null ? request.getConfidentialClearance() : false);
         userRepository.save(user);
 
-        if (request.getFamiliarModuleIds() != null) {
-            staffModuleService.replaceModules(saved, request.getFamiliarModuleIds());
-        }
         enrichWithRole(saved);
 
         return saved;
@@ -206,7 +209,8 @@ public class TestStaffService {
 
     @Transactional
     public void delete(Long id) {
-        TestStaff staff = findById(id);
+        TestStaff staff = testStaffRepository.findByIdForUpdate(id)
+            .orElseThrow(() -> new RuntimeException("人员不存在"));
         staffModuleService.deleteForStaff(id);
         userRepository.findByUsername(staff.getEmpNo()).ifPresent(user -> userRepository.delete(user));
         testStaffRepository.deleteById(id);
@@ -214,6 +218,9 @@ public class TestStaffService {
 
     @Transactional
     public void deleteBatch(List<Long> ids) {
+        ids.stream().filter(Objects::nonNull).distinct().sorted()
+            .forEach(id -> testStaffRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new RuntimeException("人员不存在")));
         List<String> empNos = testStaffRepository.findAllById(ids).stream()
             .map(TestStaff::getEmpNo)
             .collect(Collectors.toList());

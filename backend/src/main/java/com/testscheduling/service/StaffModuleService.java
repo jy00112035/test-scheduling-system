@@ -47,9 +47,10 @@ public class StaffModuleService {
     @Transactional
     public List<TestModuleConfig> replaceModules(TestStaff staff, List<Long> requestedModuleIds) {
         Long staffId = requireStaffId(staff);
+        List<Long> requestedIds = distinctIds(requestedModuleIds);
+        lockModuleIds(requestedIds);
         lockStaffIds(List.of(staffId));
         List<Long> existingIds = staffModuleRepository.findModuleIdsByStaffId(staffId);
-        List<Long> requestedIds = distinctIds(requestedModuleIds);
         Map<Long, TestModuleConfig> modulesById = loadRequestedModules(requestedIds);
 
         Set<Long> existingIdSet = new LinkedHashSet<>(existingIds);
@@ -236,6 +237,12 @@ public class StaffModuleService {
         if (staffIds.stream().anyMatch(Objects::isNull)) {
             throw new BusinessException("STAFF_NOT_FOUND", "测试人员不存在");
         }
+    }
+
+    private void lockModuleIds(List<Long> moduleIds) {
+        moduleIds.stream().filter(Objects::nonNull).distinct().sorted()
+            .forEach(moduleId -> moduleRepository.findByIdForUpdate(moduleId)
+                .orElseThrow(() -> new BusinessException("MODULE_NOT_FOUND", "模块不存在")));
     }
 
     private List<Long> distinctIds(List<Long> ids) {

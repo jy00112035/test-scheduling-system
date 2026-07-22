@@ -30,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -59,6 +60,8 @@ class TestStaffServiceTest {
         request.setName("张三");
         request.setEmpNo("T1001");
         request.setFamiliarModules("支付模块");
+        lenient().when(testStaffRepository.findByIdForUpdate(any()))
+            .thenAnswer(invocation -> testStaffRepository.findById(invocation.getArgument(0)));
     }
 
     @Test

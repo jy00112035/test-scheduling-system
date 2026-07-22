@@ -132,7 +132,7 @@ public class TestModuleService {
     }
 
     private TestModuleConfig findById(Long id) {
-        return moduleRepository.findById(id)
+        return moduleRepository.findByIdForUpdate(id)
             .orElseThrow(() -> new BusinessException("MODULE_NOT_FOUND", "模块不存在"));
     }
 

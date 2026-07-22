@@ -5,6 +5,7 @@ import com.testscheduling.entity.TestModuleConfig;
 import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.TestModuleConfigRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -26,6 +27,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class TestModuleServiceTest {
@@ -38,6 +40,12 @@ class TestModuleServiceTest {
 
     @InjectMocks
     private TestModuleService service;
+
+    @BeforeEach
+    void allowExistingModuleLocks() {
+        lenient().when(moduleRepository.findByIdForUpdate(any()))
+            .thenAnswer(invocation -> moduleRepository.findById(invocation.getArgument(0)));
+    }
 
     @Test
     void rejectsDuplicateTrimmedModuleName() {

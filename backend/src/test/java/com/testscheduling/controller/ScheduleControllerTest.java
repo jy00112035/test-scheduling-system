@@ -278,6 +278,19 @@ class ScheduleControllerTest {
     }
 
     @Test
+    void recommendationEndpointReturnsStableDataChangedErrorShape() throws Exception {
+        doThrow(new BusinessException("DATA_CHANGED_RETRY", "排班数据已变化，请刷新后重试"))
+            .when(recommendationService).recommend(any());
+
+        mockMvc.perform(authorized(post("/api/schedules/recommend/draft"), "resourceManager")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"mode\":\"FULL_DEMAND\",\"demandIds\":[10]}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.data.errorCode").value("DATA_CHANGED_RETRY"));
+    }
+
+    @Test
     void publishedSingleDeleteErrorUsesGlobalErrorShape() throws Exception {
         org.mockito.Mockito.doThrow(new BusinessException(
                 "PUBLISHED_SCHEDULE_PROTECTED", "已发布排班受保护"))

@@ -22,9 +22,11 @@ import com.testscheduling.repository.TestModuleConfigRepository;
 import com.testscheduling.repository.TestStaffModuleRepository;
 import com.testscheduling.repository.TestStaffRepository;
 import com.testscheduling.repository.UserRepository;
-import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.ConcurrencyFailureException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -57,6 +59,7 @@ public class ScheduleRecommendationService {
     private final StaffDailyStatusRepository statusRepository;
     private final UserRepository userRepository;
     private final ScheduleEligibilityService eligibilityService;
+    private final TransactionTemplate transactionTemplate;
 
     public ScheduleRecommendationService(TestDemandRepository demandRepository,
             DemandManpowerDetailRepository detailRepository,
@@ -67,7 +70,8 @@ public class ScheduleRecommendationService {
             ScheduleRepository scheduleRepository,
             StaffDailyStatusRepository statusRepository,
             UserRepository userRepository,
-            ScheduleEligibilityService eligibilityService) {
+            ScheduleEligibilityService eligibilityService,
+            PlatformTransactionManager transactionManager) {
         this.demandRepository = demandRepository;
         this.detailRepository = detailRepository;
         this.specialRepository = specialRepository;
@@ -78,98 +82,120 @@ public class ScheduleRecommendationService {
         this.statusRepository = statusRepository;
         this.userRepository = userRepository;
         this.eligibilityService = eligibilityService;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
-    @Transactional
     public ScheduleRecommendationResponse recommend(ScheduleRecommendationRequest request) {
         validateRequest(request);
+        try {
+            return transactionTemplate.execute(status -> recommendInTransaction(request));
+        } catch (ConcurrencyFailureException e) {
+            throw dataChangedRetry();
+        } catch (TransactionSystemException e) {
+            if (hasConcurrencyCause(e)) throw dataChangedRetry();
+            throw e;
+        }
+    }
+
+    private ScheduleRecommendationResponse recommendInTransaction(ScheduleRecommendationRequest request) {
         List<Long> ids = request.getDemandIds().stream().distinct().sorted().toList();
         Map<Long, TestDemand> demandsById = new LinkedHashMap<>();
         for (Long id : ids) {
             demandsById.put(id, demandRepository.findByIdForUpdate(id)
                     .orElseThrow(() -> error("DEMAND_NOT_FOUND", "测试需求不存在")));
         }
-        try {
-            if (Boolean.TRUE.equals(request.getReplaceExistingDrafts())) {
-                ids.forEach(scheduleRepository::deleteByDemandIdAndPublishedFalse);
-            }
-            List<TestDemand> demands = new ArrayList<>(demandsById.values());
-            demands.sort(demandComparator());
-            List<DemandManpowerDetail> details = detailRepository.findByDemandIdIn(ids);
-            List<DemandSpecialModule> specials = specialRepository.findByDemandIdInOrderByDemandIdAscIdAsc(ids);
-            Map<Long, List<DemandManpowerDetail>> detailsByDemand = details.stream()
-                    .collect(Collectors.groupingBy(DemandManpowerDetail::getDemandId));
-            Map<Long, List<DemandSpecialModule>> specialsByDemand = specials.stream()
-                    .collect(Collectors.groupingBy(DemandSpecialModule::getDemandId));
-            Map<Long, TestModuleConfig> modules = moduleRepository.findAllById(specials.stream()
-                    .map(DemandSpecialModule::getModuleId).filter(Objects::nonNull).distinct().toList())
-                    .stream().collect(Collectors.toMap(TestModuleConfig::getId, Function.identity()));
-
-            List<Schedule> existing = scheduleRepository.findByDemandIdIn(ids).stream()
-                    .filter(s -> !Boolean.TRUE.equals(request.getReplaceExistingDrafts())
-                            || Boolean.TRUE.equals(s.getPublished()))
-                    .collect(Collectors.toCollection(ArrayList::new));
-            List<TestStaff> staff = staffRepository.findByStatus(TestStaff.StaffStatus.active);
-            Set<Long> excluded = ids(request.getExcludedStaffIds());
-            Set<Long> fixed = ids(request.getFixedStaffIds());
-            staff = staff.stream().filter(s -> !excluded.contains(s.getId())).toList();
-            Map<Long, TestStaff> staffById = staff.stream().collect(Collectors.toMap(TestStaff::getId, Function.identity()));
-            Set<TestStaffModuleId> familiar = staffModuleRepository
-                    .findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc(new ArrayList<>(staffById.keySet()))
-                    .stream().map(TestStaffModule::getId).collect(Collectors.toSet());
-            Map<String, User> users = userRepository.findByUsernameIn(staff.stream().map(TestStaff::getEmpNo)
-                    .filter(Objects::nonNull).toList()).stream()
-                    .collect(Collectors.toMap(User::getUsername, Function.identity()));
-            DateBounds bounds = bounds(request, demands);
-            Map<Long, List<Schedule>> allByStaff = new HashMap<>();
-            if (bounds.start != null) {
-                scheduleRepository.findByStaffIdInAndDateBetween(new ArrayList<>(staffById.keySet()), bounds.start, bounds.end)
-                        .forEach(s -> allByStaff.computeIfAbsent(s.getStaffId(), ignored -> new ArrayList<>()).add(s));
-            }
-            staff.stream().map(TestStaff::getId).sorted().forEach(staffId ->
-                    staffRepository.findByIdForUpdate(staffId)
-                            .orElseThrow(() -> error("STAFF_NOT_FOUND", "测试人员不存在")));
-            List<StaffDailyStatus> statuses = bounds.start == null ? List.of()
-                    : statusRepository.findByStaffIdInAndDateBetween(new ArrayList<>(staffById.keySet()), bounds.start, bounds.end);
-            Map<String, StaffDailyStatus> statusByDate = statuses.stream().collect(Collectors.toMap(
-                    s -> key(s.getStaffId(), s.getDate()), Function.identity(), (a, b) -> a));
-            List<Schedule> generated = new ArrayList<>();
-            List<ScheduleRecommendationResponse.Fulfillment> fulfillment = new ArrayList<>();
-            for (TestDemand demand : demands) {
-                List<DemandManpowerDetail> demandDetails = detailsByDemand.getOrDefault(demand.getId(), List.of());
-                List<DemandSpecialModule> demandSpecials = specialsByDemand.getOrDefault(demand.getId(), List.of());
-                List<GapDraft> specialGaps = new ArrayList<>();
-                List<GapDraft> generalGaps = new ArrayList<>();
-                for (DemandSpecialModule special : demandSpecials.stream()
-                        .sorted(Comparator.comparing((DemandSpecialModule special) -> remainingSpecial(special, existing, generated),
-                                Comparator.reverseOrder()).thenComparing(DemandSpecialModule::getId))
-                        .toList()) {
-                    DemandManpowerDetail detail = demandDetails.stream().filter(d ->
-                            Objects.equals(d.getTestType(), module(special, modules).getTestType())).findFirst().orElse(null);
-                    BigDecimal remaining = remainingSpecial(special, existing, generated);
-                    GapDraft gap = allocate(demand, detail, special, remaining, fixed, staff,
-                            familiar, users, allByStaff, statusByDate, generated, request);
-                    if (gap != null) specialGaps.add(gap);
-                }
-                for (DemandManpowerDetail detail : demandDetails) {
-                    BigDecimal specialTotal = demandSpecials.stream().filter(s ->
-                            Objects.equals(module(s, modules).getTestType(), detail.getTestType()))
-                            .map(DemandSpecialModule::getManpowerDemand).reduce(BigDecimal.ZERO, BigDecimal::add);
-                    BigDecimal remaining = value(detail.getManpowerDemand()).subtract(specialTotal)
-                            .subtract(allocated(detail.getId(), null, existing, generated));
-                    GapDraft gap = allocate(demand, detail, null, remaining, fixed, staff,
-                            familiar, users, allByStaff, statusByDate, generated, request);
-                    if (gap != null) generalGaps.add(gap);
-                }
-                fulfillment.add(new ScheduleRecommendationResponse.Fulfillment(demand.getId(),
-                        toGaps(specialGaps), toGaps(generalGaps)));
-            }
-            if (!generated.isEmpty()) validateGenerated(generated, existing);
-            List<Schedule> persisted = generated.isEmpty() ? List.of() : scheduleRepository.saveAll(generated);
-            return new ScheduleRecommendationResponse(persisted, fulfillment);
-        } catch (OptimisticLockingFailureException e) {
-            throw error("DATA_CHANGED_RETRY", "排班数据已变化，请刷新后重试");
+        if (Boolean.TRUE.equals(request.getReplaceExistingDrafts())) {
+            ids.forEach(scheduleRepository::deleteByDemandIdAndPublishedFalse);
         }
+        List<TestDemand> demands = new ArrayList<>(demandsById.values());
+        demands.sort(demandComparator());
+        List<DemandManpowerDetail> details = detailRepository.findByDemandIdIn(ids);
+        List<DemandSpecialModule> specials = specialRepository.findByDemandIdInOrderByDemandIdAscIdAsc(ids);
+        Map<Long, List<DemandManpowerDetail>> detailsByDemand = details.stream()
+                .collect(Collectors.groupingBy(DemandManpowerDetail::getDemandId));
+        detailsByDemand.values().forEach(list -> list.sort(Comparator
+                .comparing(DemandManpowerDetail::getTestType, Comparator.nullsFirst(Comparator.naturalOrder()))
+                .thenComparing(DemandManpowerDetail::getId, Comparator.nullsFirst(Comparator.naturalOrder()))));
+        Map<Long, List<DemandSpecialModule>> specialsByDemand = specials.stream()
+                .collect(Collectors.groupingBy(DemandSpecialModule::getDemandId));
+        List<Long> moduleIds = specials.stream().map(DemandSpecialModule::getModuleId)
+                .filter(Objects::nonNull).distinct().sorted().toList();
+        moduleIds.forEach(moduleId -> moduleRepository.findByIdForUpdate(moduleId)
+                .orElseThrow(() -> error("MODULE_NOT_FOUND", "特殊模块不存在")));
+        Map<Long, TestModuleConfig> modules = moduleRepository.findAllById(moduleIds).stream()
+                .collect(Collectors.toMap(TestModuleConfig::getId, Function.identity()));
+        validateSpecialStructure(demands, detailsByDemand, specialsByDemand, modules);
+
+        List<Schedule> existing = scheduleRepository.findByDemandIdIn(ids).stream()
+                .filter(s -> !Boolean.TRUE.equals(request.getReplaceExistingDrafts())
+                        || Boolean.TRUE.equals(s.getPublished()))
+                .collect(Collectors.toCollection(ArrayList::new));
+        List<TestStaff> staff = staffRepository.findByStatus(TestStaff.StaffStatus.active);
+        Set<Long> excluded = ids(request.getExcludedStaffIds());
+        Set<Long> fixed = ids(request.getFixedStaffIds());
+        staff = staff.stream().filter(s -> !excluded.contains(s.getId())).toList();
+        staff.stream().map(TestStaff::getId).sorted().forEach(staffId -> staffRepository.findByIdForUpdate(staffId)
+                .orElseThrow(() -> error("STAFF_NOT_FOUND", "测试人员不存在")));
+        Map<Long, TestStaff> staffById = staff.stream().collect(Collectors.toMap(TestStaff::getId, Function.identity()));
+        Set<TestStaffModuleId> familiar = staffModuleRepository
+                .findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc(new ArrayList<>(staffById.keySet()))
+                .stream().map(TestStaffModule::getId).collect(Collectors.toSet());
+        Map<String, User> users = userRepository.findByUsernameIn(staff.stream().map(TestStaff::getEmpNo)
+                .filter(Objects::nonNull).toList()).stream()
+                .collect(Collectors.toMap(User::getUsername, Function.identity()));
+        DateBounds bounds = bounds(request, demands);
+        Map<Long, List<Schedule>> allByStaff = new HashMap<>();
+        if (bounds.start != null) {
+            scheduleRepository.findByStaffIdInAndDateBetween(new ArrayList<>(staffById.keySet()), bounds.start, bounds.end)
+                    .forEach(s -> allByStaff.computeIfAbsent(s.getStaffId(), ignored -> new ArrayList<>()).add(s));
+        }
+        List<StaffDailyStatus> statuses = bounds.start == null ? List.of()
+                : statusRepository.findByStaffIdInAndDateBetween(new ArrayList<>(staffById.keySet()), bounds.start, bounds.end);
+        Map<String, StaffDailyStatus> statusByDate = statuses.stream().collect(Collectors.toMap(
+                s -> key(s.getStaffId(), s.getDate()), Function.identity(), (a, b) -> a));
+        List<Schedule> generated = new ArrayList<>();
+        Map<Long, List<GapDraft>> specialGapsByDemand = new HashMap<>();
+        Map<Long, List<GapDraft>> generalGapsByDemand = new HashMap<>();
+
+        // Phase 1 is global so general work from an earlier demand cannot consume a
+        // candidate needed by a later demand's special module bucket.
+        for (TestDemand demand : demands) {
+            List<DemandManpowerDetail> demandDetails = detailsByDemand.getOrDefault(demand.getId(), List.of());
+            List<DemandSpecialModule> demandSpecials = sortedSpecials(
+                    specialsByDemand.getOrDefault(demand.getId(), List.of()), existing, generated);
+            for (DemandSpecialModule special : demandSpecials) {
+                DemandManpowerDetail detail = demandDetails.stream().filter(d ->
+                        Objects.equals(d.getTestType(), module(special, modules).getTestType())).findFirst().orElseThrow();
+                GapDraft gap = allocate(demand, detail, special,
+                        remainingSpecial(special, existing, generated), fixed, staff, familiar, users,
+                        allByStaff, statusByDate, generated, request);
+                if (gap != null) specialGapsByDemand.computeIfAbsent(demand.getId(), ignored -> new ArrayList<>()).add(gap);
+            }
+        }
+        // Phase 2 handles all general buckets only after every special bucket ran.
+        for (TestDemand demand : demands) {
+            List<DemandManpowerDetail> demandDetails = detailsByDemand.getOrDefault(demand.getId(), List.of());
+            List<DemandSpecialModule> demandSpecials = specialsByDemand.getOrDefault(demand.getId(), List.of());
+            for (DemandManpowerDetail detail : demandDetails) {
+                BigDecimal specialTotal = demandSpecials.stream().filter(s ->
+                        Objects.equals(module(s, modules).getTestType(), detail.getTestType()))
+                        .map(DemandSpecialModule::getManpowerDemand).reduce(BigDecimal.ZERO, BigDecimal::add);
+                BigDecimal remaining = value(detail.getManpowerDemand()).subtract(specialTotal)
+                        .subtract(allocated(detail.getId(), null, existing, generated));
+                GapDraft gap = allocate(demand, detail, null, remaining, fixed, staff, familiar,
+                        users, allByStaff, statusByDate, generated, request);
+                if (gap != null) generalGapsByDemand.computeIfAbsent(demand.getId(), ignored -> new ArrayList<>()).add(gap);
+            }
+        }
+        if (!generated.isEmpty()) validateGenerated(generated);
+        List<Schedule> persisted = generated.isEmpty() ? List.of() : scheduleRepository.saveAllAndFlush(generated);
+        List<ScheduleRecommendationResponse.Fulfillment> fulfillment = demands.stream().map(demand -> {
+            List<GapDraft> specialGaps = specialGapsByDemand.getOrDefault(demand.getId(), List.of());
+            List<GapDraft> generalGaps = generalGapsByDemand.getOrDefault(demand.getId(), List.of());
+            return new ScheduleRecommendationResponse.Fulfillment(demand.getId(), specialGaps.isEmpty() && generalGaps.isEmpty(),
+                    toGaps(specialGaps), toGaps(generalGaps));
+        }).toList();
+        return new ScheduleRecommendationResponse(persisted, fulfillment);
     }
 
     private GapDraft allocate(TestDemand demand, DemandManpowerDetail detail, DemandSpecialModule special,
@@ -184,14 +210,15 @@ public class ScheduleRecommendationService {
         }
         boolean sawQualified = false;
         boolean sawDevice = false;
-        for (LocalDate date : dates(demand, request)) {
+        List<LocalDate> allocationDates = dates(demand, request);
+        for (LocalDate date : allocationDates) {
             while (remaining.compareTo(STEP) >= 0) {
                 List<TestStaff> candidates = staff.stream().filter(candidate ->
                         special == null ? Objects.equals(candidate.getTestType(), detail.getTestType())
                                 : familiar.contains(new TestStaffModuleId(candidate.getId(), special.getModuleId())))
                         .filter(candidate -> confidentiallyEligible(demand, candidate, users))
-                        .sorted(Comparator.comparing((TestStaff s) -> !fixed.contains(s.getId()))
-                                .thenComparing(TestStaff::getId)).toList();
+                        .sorted(candidateComparator(fixed, allocationDates, date, allByStaff, statuses))
+                        .toList();
                 sawQualified |= !candidates.isEmpty();
                 TestStaff chosen = null;
                 for (TestStaff candidate : candidates) {
@@ -216,13 +243,76 @@ public class ScheduleRecommendationService {
         return new GapDraft(detail == null ? null : detail.getId(), special == null ? null : special.getId(), remaining, code);
     }
 
-    private void validateGenerated(List<Schedule> generated, List<Schedule> existing) {
+    private Comparator<TestStaff> candidateComparator(Set<Long> fixed, List<LocalDate> dates,
+            LocalDate date, Map<Long, List<Schedule>> schedules, Map<String, StaffDailyStatus> statuses) {
+        return Comparator.comparing((TestStaff staff) -> !fixed.contains(staff.getId()))
+                .thenComparing((left, right) -> Integer.compare(
+                        periodRemaining(right, dates, schedules, statuses),
+                        periodRemaining(left, dates, schedules, statuses)))
+                .thenComparing((left, right) -> Integer.compare(
+                        available(right, date, schedules, statuses), available(left, date, schedules, statuses)))
+                .thenComparing((left, right) -> Integer.compare(load(left, dates, schedules), load(right, dates, schedules)))
+                .thenComparing(TestStaff::getId, Comparator.nullsLast(Comparator.naturalOrder()));
+    }
+
+    private int periodRemaining(TestStaff staff, List<LocalDate> dates,
+            Map<Long, List<Schedule>> schedules, Map<String, StaffDailyStatus> statuses) {
+        return dates.stream().mapToInt(date -> Math.max(0, available(staff, date, schedules, statuses))).sum();
+    }
+
+    private int load(TestStaff staff, List<LocalDate> dates, Map<Long, List<Schedule>> schedules) {
+        Set<LocalDate> dateSet = new HashSet<>(dates);
+        return schedules.getOrDefault(staff.getId(), List.of()).stream()
+                .filter(schedule -> dateSet.contains(schedule.getDate()))
+                .map(Schedule::getPercentage).filter(Objects::nonNull).mapToInt(Integer::intValue).sum();
+    }
+
+    private void validateGenerated(List<Schedule> generated) {
         ScheduleEligibilityService.ValidationContext context = eligibilityService.prepareContext(generated);
-        existing.forEach(context::addSchedule);
         for (Schedule schedule : generated) {
             eligibilityService.validate(schedule, null, context);
             context.addSchedule(schedule);
         }
+    }
+
+    private List<DemandSpecialModule> sortedSpecials(List<DemandSpecialModule> specials,
+            List<Schedule> existing, List<Schedule> generated) {
+        return specials.stream().sorted(Comparator
+                .comparing((DemandSpecialModule special) -> remainingSpecial(special, existing, generated),
+                        Comparator.reverseOrder())
+                .thenComparing(DemandSpecialModule::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+    }
+
+    private void validateSpecialStructure(List<TestDemand> demands,
+            Map<Long, List<DemandManpowerDetail>> detailsByDemand,
+            Map<Long, List<DemandSpecialModule>> specialsByDemand,
+            Map<Long, TestModuleConfig> modules) {
+        for (TestDemand demand : demands) {
+            List<DemandManpowerDetail> details = detailsByDemand.getOrDefault(demand.getId(), List.of());
+            for (DemandSpecialModule special : specialsByDemand.getOrDefault(demand.getId(), List.of())) {
+                TestModuleConfig module = module(special, modules);
+                boolean matchingDetail = details.stream().anyMatch(detail ->
+                        Objects.equals(detail.getTestType(), module.getTestType()));
+                if (!matchingDetail) {
+                    throw error("DEMAND_MANPOWER_STRUCTURE_INVALID",
+                            "特殊模块所属测试类型不在需求人力明细中");
+                }
+            }
+        }
+    }
+
+    private BusinessException dataChangedRetry() {
+        return error("DATA_CHANGED_RETRY", "排班数据已变化，请刷新后重试");
+    }
+
+    private boolean hasConcurrencyCause(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof ConcurrencyFailureException) return true;
+            current = current.getCause();
+        }
+        return false;
     }
 
     private Schedule draft(TestDemand demand, DemandManpowerDetail detail, DemandSpecialModule special,
