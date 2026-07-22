@@ -12,12 +12,15 @@ import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.DemandManpowerDetailRepository;
 import com.testscheduling.repository.DemandSpecialModuleRepository;
 import com.testscheduling.repository.ScheduleRepository;
+import com.testscheduling.repository.StaffDailyStatusRepository;
 import com.testscheduling.repository.TestDemandRepository;
 import com.testscheduling.repository.TestModuleConfigRepository;
 import com.testscheduling.repository.TestStaffModuleRepository;
 import com.testscheduling.repository.TestStaffRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import jakarta.persistence.EntityManagerFactory;
 import org.hibernate.stat.Statistics;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -33,6 +36,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -60,6 +65,9 @@ class ScheduleServiceIntegrationTest {
     @Autowired TestModuleConfigRepository moduleRepository;
     @Autowired TestStaffRepository staffRepository;
     @Autowired TestStaffModuleRepository staffModuleRepository;
+    @Autowired StaffDailyStatusService staffDailyStatusService;
+    @Autowired StaffDailyStatusRepository dailyStatusRepository;
+    @Autowired PlatformTransactionManager transactionManager;
     @Autowired EntityManagerFactory entityManagerFactory;
 
     @Test
@@ -194,7 +202,8 @@ class ScheduleServiceIntegrationTest {
                 start, schedule(secondDemand, staff, secondDetail, null, 60)));
             start.countDown();
 
-            List<Object> outcomes = List.of(first.get(), second.get());
+            List<Object> outcomes = List.of(
+                first.get(5, TimeUnit.SECONDS), second.get(5, TimeUnit.SECONDS));
 
             assertEquals(1, outcomes.stream().filter(Schedule.class::isInstance).count());
             Object failure = outcomes.stream()
@@ -247,8 +256,8 @@ class ScheduleServiceIntegrationTest {
             Future<Object> unpublish = executor.submit(() -> runLockedAction(start,
                 () -> scheduleService.unpublishByDemandId(demand.getId())));
             start.countDown();
-            assertTrue(publish.get() instanceof Boolean);
-            assertTrue(unpublish.get() instanceof Boolean);
+            assertTrue(publish.get(5, TimeUnit.SECONDS) instanceof Boolean);
+            assertTrue(unpublish.get(5, TimeUnit.SECONDS) instanceof Boolean);
             assertEquals(1, scheduleRepository.findByDemandId(demand.getId()).size());
         } finally {
             executor.shutdownNow();
@@ -270,17 +279,109 @@ class ScheduleServiceIntegrationTest {
                 () -> scheduleService.deleteByDemandId(demand.getId(),
                     ScheduleDeleteScope.DRAFT_ONLY)));
             start.countDown();
-            assertTrue(publish.get() instanceof Boolean);
-            assertTrue(clear.get() instanceof Boolean);
+            assertTrue(publish.get(5, TimeUnit.SECONDS) instanceof Boolean);
+            assertTrue(clear.get(5, TimeUnit.SECONDS) instanceof Boolean);
             assertTrue(scheduleRepository.findByDemandId(demand.getId()).size() <= 1);
         } finally {
             executor.shutdownNow();
         }
     }
 
+    @Test
+    void dailyStatusMutationWaitsForStaffLockAndChangesLaterScheduleCapacity() throws Exception {
+        TestStaff staff = saveStaff("STATUS-SERIAL-A", "功能测试", 1.0);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch lockHeld = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+        CountDownLatch operationStarted = new CountDownLatch(1);
+        Future<?> lockHolder = holdStaffLock(executor, staff.getId(), lockHeld, releaseLock);
+        Future<Object> statusMutation = executor.submit(() -> {
+            operationStarted.countDown();
+            staffDailyStatusService.setStatus(staff.getId(), DATE,
+                com.testscheduling.entity.StaffDailyStatus.DailyAvailabilityStatus.OTHER_TASKS,
+                100.0);
+            return Boolean.TRUE;
+        });
+        try {
+            assertTrue(lockHeld.await(5, TimeUnit.SECONDS));
+            assertTrue(operationStarted.await(5, TimeUnit.SECONDS));
+            assertThrows(TimeoutException.class,
+                () -> statusMutation.get(200, TimeUnit.MILLISECONDS));
+            assertTrue(dailyStatusRepository.findByStaffIdAndDate(staff.getId(), DATE).isEmpty());
+
+            releaseLock.countDown();
+            assertEquals(Boolean.TRUE, statusMutation.get(5, TimeUnit.SECONDS));
+            lockHolder.get(5, TimeUnit.SECONDS);
+            assertTrue(dailyStatusRepository.findByStaffIdAndDate(staff.getId(), DATE).isPresent());
+
+            TestDemand demand = saveDemand("status-capacity-after-lock", 1.0, 2);
+            DemandManpowerDetail detail = saveDetail(demand, "功能测试", 1.0);
+            BusinessException error = assertThrows(BusinessException.class,
+                () -> scheduleService.create(schedule(demand, staff, detail, null, 50)));
+            assertEquals("STAFF_CAPACITY_EXCEEDED", error.getErrorCode());
+        } finally {
+            releaseLock.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void scheduleCreationWaitsForStaffLockBeforeEligibilityAndCommit() throws Exception {
+        TestDemand demand = saveDemand("schedule-serial", 1.0, 2);
+        DemandManpowerDetail detail = saveDetail(demand, "功能测试", 1.0);
+        TestStaff staff = saveStaff("SCHEDULE-SERIAL-A", "功能测试", 1.0);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch lockHeld = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+        CountDownLatch operationStarted = new CountDownLatch(1);
+        Future<?> lockHolder = holdStaffLock(executor, staff.getId(), lockHeld, releaseLock);
+        Future<Object> scheduleCreation = executor.submit(() -> {
+            operationStarted.countDown();
+            return scheduleService.create(schedule(demand, staff, detail, null, 50));
+        });
+        try {
+            assertTrue(lockHeld.await(5, TimeUnit.SECONDS));
+            assertTrue(operationStarted.await(5, TimeUnit.SECONDS));
+            assertThrows(TimeoutException.class,
+                () -> scheduleCreation.get(200, TimeUnit.MILLISECONDS));
+            assertTrue(scheduleRepository.findByDemandId(demand.getId()).isEmpty());
+
+            releaseLock.countDown();
+            assertInstanceOf(Schedule.class, scheduleCreation.get(5, TimeUnit.SECONDS));
+            lockHolder.get(5, TimeUnit.SECONDS);
+            assertEquals(1, scheduleRepository.findByDemandId(demand.getId()).size());
+        } finally {
+            releaseLock.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    private Future<?> holdStaffLock(
+            ExecutorService executor,
+            Long staffId,
+            CountDownLatch lockHeld,
+            CountDownLatch releaseLock) {
+        return executor.submit(() -> new TransactionTemplate(transactionManager)
+            .executeWithoutResult(transaction -> {
+                staffRepository.findByIdForUpdate(staffId)
+                    .orElseThrow(() -> new IllegalStateException("staff fixture missing"));
+                lockHeld.countDown();
+                try {
+                    if (!releaseLock.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("staff lock release timed out");
+                    }
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(error);
+                }
+            }));
+    }
+
     private Object runLockedAction(CountDownLatch start, Runnable action) {
         try {
-            start.await();
+            if (!start.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("start signal timed out");
+            }
             action.run();
             return Boolean.TRUE;
         } catch (InterruptedException error) {
@@ -291,7 +392,9 @@ class ScheduleServiceIntegrationTest {
 
     private Object createAfterSignal(CountDownLatch start, Schedule schedule) {
         try {
-            start.await();
+            if (!start.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("start signal timed out");
+            }
             return scheduleService.create(schedule);
         } catch (BusinessException error) {
             return error;
