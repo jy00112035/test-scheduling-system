@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
 import type { FamiliarModule } from '../types';
-import { buildStaffExportRows, createStaffImportTemplateWorkbook, parseStaffRoles, parseStaffStatus, STAFF_IMPORT_TEMPLATE_FILENAME } from './staffSpreadsheet';
+import { buildStaffExportRows, classifyStaffImportLimits, createStaffImportTemplateWorkbook, parseStaffRoles, parseStaffStatus, STAFF_IMPORT_MAX_FILE_SIZE, STAFF_IMPORT_MAX_ROWS, STAFF_IMPORT_TEMPLATE_FILENAME } from './staffSpreadsheet';
 
 const historicalModule: FamiliarModule = {
   id: 11, moduleName: '支付模块', testType: '功能测试', enabled: false, sortOrder: 1,
@@ -46,5 +46,11 @@ describe('staff spreadsheet helpers', () => {
     expect(rows.map(row => parseStaffStatus(row.状态).status)).toEqual(['active', 'leave', 'resigned']);
     expect(parseStaffRoles('不存在角色').invalid).toEqual(['不存在角色']);
     expect(parseStaffStatus('未知状态').invalid).toBe(true);
+  });
+
+  it('accepts exact import size and row boundaries and rejects the next value', () => {
+    expect(classifyStaffImportLimits(STAFF_IMPORT_MAX_FILE_SIZE, STAFF_IMPORT_MAX_ROWS)).toBeNull();
+    expect(classifyStaffImportLimits(STAFF_IMPORT_MAX_FILE_SIZE + 1)).toBe('fileTooLarge');
+    expect(classifyStaffImportLimits(0, STAFF_IMPORT_MAX_ROWS + 1)).toBe('tooManyRows');
   });
 });

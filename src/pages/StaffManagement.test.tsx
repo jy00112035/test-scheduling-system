@@ -592,10 +592,31 @@ describe('StaffManagement familiar modules', () => {
       await user.click(screen.getByRole('button', { name: /确\s*定/ }));
       expect(await screen.findByText('人员1')).toBeInTheDocument();
       expect(screen.queryByText('人员21')).not.toBeInTheDocument();
-      await user.click(screen.getAllByTitle('Next Page').at(-1)!);
+      const nextPages = screen.getAllByTitle('Next Page');
+      await user.click(nextPages[nextPages.length - 1]);
       expect(await screen.findByText('人员21')).toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: '确认导入' }));
       await waitFor(() => expect(createStaff).toHaveBeenCalledTimes(21));
+    } finally { Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader }); }
+  });
+
+  it('aborts and invalidates a removed upload before the same file is reselected', async () => {
+    const OriginalFileReader = globalThis.FileReader;
+    class TestFileReader { static instances: TestFileReader[] = []; onload: ((event: any) => void) | null = null; abort = vi.fn(); constructor() { TestFileReader.instances.push(this); } readAsArrayBuffer() {} }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      render(<StaffManagement />); const user = userEvent.setup(); const file = new File(['x'], 'same.xlsx');
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      let input = document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement;
+      await user.upload(input, file); await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+      await waitFor(() => expect(TestFileReader.instances).toHaveLength(1));
+      await user.click(screen.getByTitle('Remove file'));
+      expect(TestFileReader.instances[0].abort).toHaveBeenCalled();
+      TestFileReader.instances[0].onload?.({ target: { result: workbookData([{ 工号: 'OLD', 姓名: '旧文件' }]) } });
+      expect(screen.queryByText('旧文件')).not.toBeInTheDocument();
+      input = document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement;
+      await user.upload(input, file); await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+      await waitFor(() => expect(TestFileReader.instances).toHaveLength(2));
     } finally { Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader }); }
   });
 });

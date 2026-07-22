@@ -20,6 +20,12 @@ export const STAFF_IMPORT_TEMPLATE_FILENAME = '人员导入模板.xlsx';
 export const STAFF_IMPORT_MAX_FILE_SIZE = 5 * 1024 * 1024;
 export const STAFF_IMPORT_MAX_ROWS = 1000;
 
+export function classifyStaffImportLimits(fileSize: number, rowCount?: number) {
+  if (fileSize > STAFF_IMPORT_MAX_FILE_SIZE) return 'fileTooLarge' as const;
+  if (rowCount !== undefined && rowCount > STAFF_IMPORT_MAX_ROWS) return 'tooManyRows' as const;
+  return null;
+}
+
 export const staffRoleLabels: Record<string, string> = {
   testManager: '测试经理', resourceManager: '资源主管', projectManager: '项目经理',
   testExecutor: '测试执行人员', fieldAdmin: '字段管理员', testLead: '测试组长',

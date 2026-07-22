@@ -36,6 +36,7 @@ import type { FamiliarModule, TestModule } from '../types';
 import { createFamiliarModuleNameIndex, parseFamiliarModuleNames } from '../utils/staffModuleImport';
 import {
   buildStaffExportRows,
+  classifyStaffImportLimits,
   createStaffImportTemplateWorkbook,
   parseStaffRoles,
   parseStaffStatus,
@@ -287,7 +288,7 @@ const StaffManagement: React.FC = () => {
       message.error('请选择要导入的文件');
       return;
     }
-    if (selectedFile.size > STAFF_IMPORT_MAX_FILE_SIZE) {
+    if (classifyStaffImportLimits(selectedFile.size) === 'fileTooLarge') {
       message.error(`Excel文件不能超过 ${STAFF_IMPORT_MAX_FILE_SIZE / 1024 / 1024}MB`);
       return;
     }
@@ -320,7 +321,7 @@ const StaffManagement: React.FC = () => {
           const worksheet = workbook.Sheets[firstSheetName];
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
 
-          if (jsonData.length > STAFF_IMPORT_MAX_ROWS) {
+          if (classifyStaffImportLimits(selectedFile.size, jsonData.length) === 'tooManyRows') {
             message.error(`Excel文件最多导入 ${STAFF_IMPORT_MAX_ROWS} 行数据`);
             setImportLoading(false);
             return;
