@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -36,32 +36,54 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingModule, setEditingModule] = useState<TestModule | null>(null);
-  const [statusLoadingId, setStatusLoadingId] = useState<number | null>(null);
+  const [statusPendingIds, setStatusPendingIds] = useState<Set<number>>(new Set());
+  const [deletePendingIds, setDeletePendingIds] = useState<Set<number>>(new Set());
+  const [savePending, setSavePending] = useState(false);
+  const mountedRef = useRef(true);
+  const loadGenerationRef = useRef(0);
+  const statusPendingRef = useRef(new Set<number>());
+  const deletePendingRef = useRef(new Set<number>());
+  const savePendingRef = useRef(false);
+  const modalSessionRef = useRef(0);
 
   const loadModules = useCallback(async () => {
+    const generation = ++loadGenerationRef.current;
     setLoading(true);
     setLoadError(null);
     try {
-      setModules(await api.getTestModules());
+      const data = await api.getTestModules();
+      if (mountedRef.current && generation === loadGenerationRef.current) {
+        setModules(data);
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '获取特殊模块配置失败';
-      setLoadError(errorMessage);
+      if (mountedRef.current && generation === loadGenerationRef.current) {
+        setLoadError(errorMessage);
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current && generation === loadGenerationRef.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     void loadModules();
+    return () => {
+      mountedRef.current = false;
+    };
   }, [loadModules]);
 
   const showMutationError = (error: unknown, fallback: string) => {
+    if (!mountedRef.current) return;
     const errorMessage = error instanceof Error ? error.message : fallback;
     setMutationError(errorMessage);
     message.error(errorMessage);
   };
 
   const openAdd = () => {
+    if (savePendingRef.current) return;
+    modalSessionRef.current += 1;
     setEditingModule(null);
     setMutationError(null);
     form.resetFields();
@@ -70,6 +92,8 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
   };
 
   const openEdit = (module: TestModule) => {
+    if (savePendingRef.current) return;
+    modalSessionRef.current += 1;
     setEditingModule(module);
     setMutationError(null);
     form.setFieldsValue({
@@ -81,44 +105,68 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
   };
 
   const submit = async (values: TestModuleWriteRequest) => {
+    if (savePendingRef.current || !mountedRef.current) return;
+    const session = modalSessionRef.current;
+    savePendingRef.current = true;
+    setSavePending(true);
     setMutationError(null);
     try {
       if (editingModule) {
         await api.updateTestModule(editingModule.id, values);
-        message.success('特殊模块已更新');
+        if (mountedRef.current && session === modalSessionRef.current) message.success('特殊模块已更新');
       } else {
         await api.createTestModule(values);
-        message.success('特殊模块已添加');
+        if (mountedRef.current && session === modalSessionRef.current) message.success('特殊模块已添加');
       }
-      setModalOpen(false);
-      await loadModules();
+      if (mountedRef.current && session === modalSessionRef.current) {
+        setModalOpen(false);
+        await loadModules();
+      }
     } catch (error) {
-      showMutationError(error, '特殊模块操作失败');
+      if (session === modalSessionRef.current) showMutationError(error, '特殊模块操作失败');
+    } finally {
+      if (mountedRef.current && session === modalSessionRef.current) {
+        savePendingRef.current = false;
+        setSavePending(false);
+      }
     }
   };
 
   const changeStatus = async (module: TestModule, enabled: boolean) => {
+    if (statusPendingRef.current.has(module.id) || !mountedRef.current) return;
+    statusPendingRef.current.add(module.id);
+    setStatusPendingIds(new Set(statusPendingRef.current));
     setMutationError(null);
-    setStatusLoadingId(module.id);
     try {
       await api.setTestModuleStatus(module.id, enabled);
-      message.success(enabled ? '模块已启用' : '模块已停用');
-      await loadModules();
+      if (mountedRef.current) {
+        message.success(enabled ? '模块已启用' : '模块已停用');
+        await loadModules();
+      }
     } catch (error) {
       showMutationError(error, '模块状态更新失败');
     } finally {
-      setStatusLoadingId(null);
+      statusPendingRef.current.delete(module.id);
+      if (mountedRef.current) setStatusPendingIds(new Set(statusPendingRef.current));
     }
   };
 
-  const deleteModule = async (module: TestModule) => {
+  const deleteModule = async (module: TestModule): Promise<void> => {
+    if (deletePendingRef.current.has(module.id) || !mountedRef.current) return;
+    deletePendingRef.current.add(module.id);
+    setDeletePendingIds(new Set(deletePendingRef.current));
     setMutationError(null);
     try {
       await api.deleteTestModule(module.id);
-      message.success('特殊模块已删除');
-      await loadModules();
+      if (mountedRef.current) {
+        message.success('特殊模块已删除');
+        await loadModules();
+      }
     } catch (error) {
       showMutationError(error, '删除特殊模块失败');
+    } finally {
+      deletePendingRef.current.delete(module.id);
+      if (mountedRef.current) setDeletePendingIds(new Set(deletePendingRef.current));
     }
   };
 
@@ -131,8 +179,8 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
         <Space>
           <Switch
             checked={module.enabled}
-            loading={statusLoadingId === module.id}
-            aria-label={`${module.enabled ? '启用' : '停用'}${module.moduleName}`}
+            loading={statusPendingIds.has(module.id)}
+            aria-label={`${module.moduleName}启用状态`}
             onChange={(enabled) => void changeStatus(module, enabled)}
           />
           <span>{module.enabled ? '启用' : '停用'}</span>
@@ -155,6 +203,7 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
               type="link"
               icon={<EditOutlined />}
               aria-label={`编辑${module.moduleName}`}
+              disabled={savePending}
               onClick={() => openEdit(module)}
             />
           </Tooltip>
@@ -163,16 +212,17 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
               title="确定删除此特殊模块吗？"
               okText="确定"
               cancelText="取消"
-              onConfirm={() => void deleteModule(module)}
+              onConfirm={() => deleteModule(module)}
             >
-              <Tooltip title="删除模块">
-                <Button
-                  type="link"
-                  danger
-                  icon={<DeleteOutlined />}
-                  aria-label={`删除${module.moduleName}`}
-                />
-              </Tooltip>
+              <Button
+                type="link"
+                danger
+                icon={<DeleteOutlined />}
+                title="删除模块"
+                aria-label={`删除${module.moduleName}`}
+                loading={deletePendingIds.has(module.id)}
+                disabled={deletePendingIds.has(module.id)}
+              />
             </Popconfirm>
           )}
         </Space>
@@ -183,7 +233,7 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>
+        <Button type="primary" icon={<PlusOutlined />} onClick={openAdd} disabled={savePending}>
           新增特殊模块
         </Button>
       </div>
@@ -194,14 +244,19 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
         dataSource={modules}
         rowKey="id"
         bordered
-        loading={loading}
+        loading={loading && modules.length === 0}
         scroll={{ x: 850 }}
         locale={{ emptyText: loadError ? '加载失败' : '暂无特殊模块配置' }}
       />
       <Modal
         title={editingModule ? '编辑特殊模块' : '新增特殊模块'}
         open={modalOpen}
-        onCancel={() => setModalOpen(false)}
+        onCancel={() => {
+          if (!savePendingRef.current) setModalOpen(false);
+        }}
+        maskClosable={!savePending}
+        keyboard={!savePending}
+        closable={!savePending}
         footer={null}
       >
         <Form form={form} layout="vertical" onFinish={submit}>
@@ -219,8 +274,8 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
           </Form.Item>
           <Form.Item style={{ marginBottom: 0 }}>
             <Space>
-              <Button type="primary" htmlType="submit" icon={<SaveOutlined />}>保存</Button>
-              <Button onClick={() => setModalOpen(false)}>取消</Button>
+              <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={savePending} disabled={savePending}>保存</Button>
+              <Button onClick={() => setModalOpen(false)} disabled={savePending}>取消</Button>
             </Space>
           </Form.Item>
         </Form>
