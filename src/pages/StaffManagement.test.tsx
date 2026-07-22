@@ -6,6 +6,7 @@ import { api } from '../services/api';
 import type { FamiliarModule, TestModule } from '../types';
 import * as XLSX from 'xlsx';
 import { message } from 'antd';
+import { STAFF_IMPORT_MAX_FILE_SIZE } from '../utils/staffSpreadsheet';
 
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: { testType: '功能测试' } }) }));
 vi.mock('../context/UserRoleContext', () => ({
@@ -559,6 +560,42 @@ describe('StaffManagement familiar modules', () => {
       expect(screen.queryByText('已提交')).not.toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: '确认导入' }));
       await waitFor(() => expect(createStaff).toHaveBeenCalledTimes(3));
+    } finally { Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader }); }
+  });
+
+  it('rejects an oversized import before constructing a FileReader', async () => {
+    const OriginalFileReader = globalThis.FileReader;
+    const readAsArrayBuffer = vi.fn();
+    class TestFileReader { onload: ((event: any) => void) | null = null; readAsArrayBuffer = readAsArrayBuffer; abort() {} }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      render(<StaffManagement />); const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      await user.upload(document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement, new File([new Uint8Array(STAFF_IMPORT_MAX_FILE_SIZE + 1)], 'large.xlsx'));
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+      expect(await screen.findByText(/Excel文件不能超过/)).toBeInTheDocument();
+      expect(readAsArrayBuffer).not.toHaveBeenCalled();
+      expect(screen.queryByRole('button', { name: '确认导入' })).not.toBeInTheDocument();
+    } finally { Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader }); }
+  });
+
+  it('paginates a large preview while saving every valid row', async () => {
+    const createStaff = vi.spyOn(api, 'createStaff').mockResolvedValue({ staff: {}, generatedPassword: '' });
+    const rows = Array.from({ length: 21 }, (_, index) => ({ 工号: `EMP${100 + index}`, 姓名: `人员${index + 1}`, 所属项目: '功能测试组' }));
+    const OriginalFileReader = globalThis.FileReader;
+    class TestFileReader { onload: ((event: any) => void) | null = null; abort() {} readAsArrayBuffer() { this.onload?.({ target: { result: workbookData(rows) } }); } }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      render(<StaffManagement />); const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      await user.upload(document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement, new File(['x'], 'rows.xlsx'));
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+      expect(await screen.findByText('人员1')).toBeInTheDocument();
+      expect(screen.queryByText('人员21')).not.toBeInTheDocument();
+      await user.click(screen.getAllByTitle('Next Page').at(-1)!);
+      expect(await screen.findByText('人员21')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: '确认导入' }));
+      await waitFor(() => expect(createStaff).toHaveBeenCalledTimes(21));
     } finally { Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader }); }
   });
 });
