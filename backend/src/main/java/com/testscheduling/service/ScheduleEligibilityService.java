@@ -70,14 +70,20 @@ public class ScheduleEligibilityService {
         if (schedule == null) {
             throw error("SCHEDULE_REQUIRED", "排班信息不能为空");
         }
+        if (schedule.getDemandId() == null) {
+            throw error("DEMAND_REQUIRED", "需求ID不能为空");
+        }
+        if (schedule.getStaffId() == null) {
+            throw error("STAFF_REQUIRED", "人员ID不能为空");
+        }
+        if (schedule.getDemandManpowerDetailId() == null) {
+            throw error("SCHEDULE_DETAIL_REQUIRED", "排班必须归属人力明细");
+        }
 
         TestDemand demand = demandRepository.findById(schedule.getDemandId())
             .orElseThrow(() -> error("DEMAND_NOT_FOUND", "测试需求不存在"));
         TestStaff staff = staffRepository.findById(schedule.getStaffId())
             .orElseThrow(() -> error("STAFF_NOT_FOUND", "测试人员不存在"));
-        if (schedule.getDemandManpowerDetailId() == null) {
-            throw error("SCHEDULE_DETAIL_REQUIRED", "排班必须归属人力明细");
-        }
         DemandManpowerDetail detail = detailRepository.findById(schedule.getDemandManpowerDetailId())
             .orElseThrow(() -> error("SCHEDULE_DETAIL_NOT_FOUND", "人力明细不存在"));
 
@@ -85,7 +91,10 @@ public class ScheduleEligibilityService {
         TestModuleConfig module = null;
         if (schedule.getDemandSpecialModuleId() != null) {
             special = specialRepository.findById(schedule.getDemandSpecialModuleId())
-                .orElseThrow(() -> error("SCHEDULE_DETAIL_NOT_FOUND", "特殊模块人力明细不存在"));
+                .orElseThrow(() -> error("SPECIAL_MODULE_NOT_FOUND", "特殊模块人力明细不存在"));
+            if (special.getModuleId() == null) {
+                throw error("MODULE_REQUIRED", "特殊模块ID不能为空");
+            }
             module = moduleRepository.findById(special.getModuleId())
                 .orElseThrow(() -> error("MODULE_NOT_FOUND", "特殊模块不存在"));
         }

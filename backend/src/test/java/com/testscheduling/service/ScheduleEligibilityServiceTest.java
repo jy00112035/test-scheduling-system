@@ -36,6 +36,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -211,6 +212,55 @@ class ScheduleEligibilityServiceTest {
             () -> service.validate(schedule, null));
 
         assertEquals("DEMAND_NOT_FOUND", error.getErrorCode());
+    }
+
+    @Test
+    void rejectsNullDemandIdBeforeRepositoryLookup() {
+        Schedule schedule = generalSchedule();
+        schedule.setDemandId(null);
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service.validate(schedule, null));
+
+        assertEquals("DEMAND_REQUIRED", error.getErrorCode());
+        verifyNoInteractions(demandRepository, staffRepository, detailRepository);
+    }
+
+    @Test
+    void rejectsNullStaffIdBeforeRepositoryLookup() {
+        Schedule schedule = generalSchedule();
+        schedule.setStaffId(null);
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service.validate(schedule, null));
+
+        assertEquals("STAFF_REQUIRED", error.getErrorCode());
+        verifyNoInteractions(demandRepository, staffRepository, detailRepository);
+    }
+
+    @Test
+    void rejectsNullDetailIdBeforeRepositoryLookup() {
+        Schedule schedule = generalSchedule();
+        schedule.setDemandManpowerDetailId(null);
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service.validate(schedule, null));
+
+        assertEquals("SCHEDULE_DETAIL_REQUIRED", error.getErrorCode());
+        verifyNoInteractions(demandRepository, staffRepository, detailRepository);
+    }
+
+    @Test
+    void rejectsUnknownSpecialIdWithStableErrorCode() {
+        Schedule schedule = generalSchedule();
+        schedule.setDemandSpecialModuleId(999L);
+        stubBaseEligibility("功能测试");
+        when(specialRepository.findById(999L)).thenReturn(Optional.empty());
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service.validate(schedule, null));
+
+        assertEquals("SPECIAL_MODULE_NOT_FOUND", error.getErrorCode());
     }
 
     private Schedule specialSchedule() {

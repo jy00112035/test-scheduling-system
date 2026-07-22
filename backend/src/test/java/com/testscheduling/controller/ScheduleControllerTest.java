@@ -20,6 +20,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -64,6 +65,37 @@ class ScheduleControllerTest {
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value(400))
             .andExpect(jsonPath("$.data.errorCode").value("FORBIDDEN"));
+    }
+
+    @Test
+    void validateReturnsStableErrorForMissingDemandId() throws Exception {
+        doThrow(new BusinessException("DEMAND_REQUIRED", "需求ID不能为空"))
+            .when(service).validateOnly(any(Schedule.class));
+
+        mockMvc.perform(authorized(post("/api/schedules/validate")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"staffId":108,"date":"2026-07-22","percentage":50,
+                     "demandManpowerDetailId":301}
+                    """), "projectManager"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.data.errorCode").value("DEMAND_REQUIRED"));
+    }
+
+    @Test
+    void validateReturnsStableErrorForMissingDetailId() throws Exception {
+        doThrow(new BusinessException("SCHEDULE_DETAIL_REQUIRED", "排班必须归属人力明细"))
+            .when(service).validateOnly(any(Schedule.class));
+
+        mockMvc.perform(authorized(post("/api/schedules/validate")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"demandId":1001,"staffId":108,"date":"2026-07-22","percentage":50}
+                    """), "projectManager"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.data.errorCode").value("SCHEDULE_DETAIL_REQUIRED"));
     }
 
     @Test

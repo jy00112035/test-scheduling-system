@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -112,8 +113,8 @@ class ScheduleServiceTest {
 
         assertEquals(10L, result.getDemandId());
         assertEquals(21L, result.getStaffId());
-        assertEquals(30L, result.getDemandManpowerDetailId());
-        assertEquals(50L, result.getDemandSpecialModuleId());
+        assertEquals(31L, result.getDemandManpowerDetailId());
+        assertEquals(null, result.getDemandSpecialModuleId());
         assertEquals(LocalDate.of(2026, 7, 23), result.getDate());
         assertEquals(70, result.getPercentage());
         assertEquals("保留产品", result.getProduct());
@@ -123,6 +124,62 @@ class ScheduleServiceTest {
         assertTrue(result.getPublished());
         assertEquals(7L, result.getLockVersion());
         verify(eligibilityService).validate(any(Schedule.class), org.mockito.ArgumentMatchers.eq(99L));
+    }
+
+    @Test
+    void updateCanChangeSpecialAttributionToGeneral() {
+        Schedule existing = schedule(10L, 20L, 30L, 50L);
+        existing.setId(99L);
+        Schedule changes = schedule(999L, 20L, 30L, null);
+        when(scheduleRepository.findById(99L)).thenReturn(Optional.of(existing));
+        stubLocks(10L, 20L);
+        when(scheduleRepository.findByIdForUpdate(99L)).thenReturn(Optional.of(existing));
+        when(scheduleRepository.save(existing)).thenReturn(existing);
+
+        Schedule result = scheduleService.update(99L, changes);
+
+        assertEquals(30L, result.getDemandManpowerDetailId());
+        assertEquals(null, result.getDemandSpecialModuleId());
+        verify(eligibilityService).validate(any(Schedule.class), org.mockito.ArgumentMatchers.eq(99L));
+        verify(scheduleRepository).save(existing);
+    }
+
+    @Test
+    void updateCanChangeGeneralAttributionToAnotherSpecialBucket() {
+        Schedule existing = schedule(10L, 20L, 30L, null);
+        existing.setId(99L);
+        Schedule changes = schedule(999L, 20L, 30L, 51L);
+        when(scheduleRepository.findById(99L)).thenReturn(Optional.of(existing));
+        stubLocks(10L, 20L);
+        when(scheduleRepository.findByIdForUpdate(99L)).thenReturn(Optional.of(existing));
+        when(scheduleRepository.save(existing)).thenReturn(existing);
+
+        Schedule result = scheduleService.update(99L, changes);
+
+        assertEquals(30L, result.getDemandManpowerDetailId());
+        assertEquals(51L, result.getDemandSpecialModuleId());
+        verify(eligibilityService).validate(any(Schedule.class), org.mockito.ArgumentMatchers.eq(99L));
+        verify(scheduleRepository).save(existing);
+    }
+
+    @Test
+    void invalidAttributionUpdateDoesNotMutateOrSaveExistingSchedule() {
+        Schedule existing = schedule(10L, 20L, 30L, 50L);
+        existing.setId(99L);
+        Schedule changes = schedule(999L, 20L, 31L, 51L);
+        when(scheduleRepository.findById(99L)).thenReturn(Optional.of(existing));
+        stubLocks(10L, 20L);
+        when(scheduleRepository.findByIdForUpdate(99L)).thenReturn(Optional.of(existing));
+        doThrow(new BusinessException("SCHEDULE_DETAIL_DEMAND_MISMATCH", "人力明细不属于当前需求"))
+            .when(eligibilityService).validate(any(Schedule.class), org.mockito.ArgumentMatchers.eq(99L));
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> scheduleService.update(99L, changes));
+
+        assertEquals("SCHEDULE_DETAIL_DEMAND_MISMATCH", error.getErrorCode());
+        assertEquals(30L, existing.getDemandManpowerDetailId());
+        assertEquals(50L, existing.getDemandSpecialModuleId());
+        verify(scheduleRepository, never()).save(any());
     }
 
     @Test

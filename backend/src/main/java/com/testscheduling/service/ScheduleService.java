@@ -103,6 +103,8 @@ public class ScheduleService {
         candidate.setStaffId(schedule.getStaffId());
         candidate.setDate(schedule.getDate());
         candidate.setPercentage(schedule.getPercentage());
+        candidate.setDemandManpowerDetailId(schedule.getDemandManpowerDetailId());
+        candidate.setDemandSpecialModuleId(schedule.getDemandSpecialModuleId());
         eligibilityService.validate(candidate, id);
         copyWritableFields(candidate, existing);
         return scheduleRepository.save(existing);
