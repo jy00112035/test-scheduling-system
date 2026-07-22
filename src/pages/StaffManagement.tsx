@@ -24,6 +24,7 @@ import {
   SaveOutlined,
   UploadOutlined,
   DownloadOutlined,
+  ExportOutlined,
   CloseOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -33,6 +34,11 @@ import { useAuth } from '../context/AuthContext';
 import { useUserRole } from '../context/UserRoleContext';
 import type { FamiliarModule, TestModule } from '../types';
 import { parseFamiliarModuleNames } from '../utils/staffModuleImport';
+import {
+  buildStaffExportRows,
+  createStaffImportTemplateWorkbook,
+  STAFF_IMPORT_TEMPLATE_FILENAME,
+} from '../utils/staffSpreadsheet';
 
 const { Option, OptGroup } = Select;
 
@@ -136,6 +142,7 @@ const StaffManagement: React.FC = () => {
   const [duplicateEmps, setDuplicateEmps] = useState<string[]>([]);
   const [importLoading, setImportLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [importUploadKey, setImportUploadKey] = useState(0);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [modules, setModules] = useState<TestModule[]>([]);
@@ -144,6 +151,8 @@ const StaffManagement: React.FC = () => {
   const mountedRef = useRef(true);
   const moduleLoadGenerationRef = useRef(0);
   const editSessionRef = useRef(0);
+  const importGenerationRef = useRef(0);
+  const importReaderRef = useRef<FileReader | null>(null);
   const familiarModuleEditRef = useRef({ session: 0, initialized: false, changed: false, isCreate: false });
   const selectedFamiliarModuleIds = Form.useWatch('familiarModuleIds', form) || [];
 
@@ -155,6 +164,9 @@ const StaffManagement: React.FC = () => {
     return () => {
       mountedRef.current = false;
       editSessionRef.current += 1;
+      importGenerationRef.current += 1;
+      importReaderRef.current?.abort();
+      importReaderRef.current = null;
     };
   }, []);
 
@@ -224,30 +236,34 @@ const StaffManagement: React.FC = () => {
     return [];
   };
 
-  // 打开导入弹窗
-  const openImportModal = () => {
+  const resetImportPreview = () => {
+    importGenerationRef.current += 1;
+    importReaderRef.current?.abort();
+    importReaderRef.current = null;
     setImportStep(1);
     setImportData([]);
     setDuplicateEmps([]);
     setSelectedFile(null);
+    setImportLoading(false);
+    setImportUploadKey(key => key + 1);
+  };
+
+  // 打开导入弹窗
+  const openImportModal = () => {
+    resetImportPreview();
     setImportModalVisible(true);
   };
 
   // 下载导入模板
   const downloadTemplate = () => {
-    const template = '工号,姓名,入职日期,所属项目,测试类型,初始系数,当前系数,角色,熟悉模块,保密权限\nEMP001,张三,2024-01-01,功能测试组,功能测试,0.3,0.3,测试执行人员;测试组长,"登录模块,支付模块",是\nEMP002,李四,2024-01-15,自动化测试组,自动化测试,0.5,0.5,测试经理,自动化框架,否';
-    const blob = new Blob([template], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = '人员导入模板.csv';
-    link.click();
-    URL.revokeObjectURL(link.href);
+    XLSX.writeFile(createStaffImportTemplateWorkbook(), STAFF_IMPORT_TEMPLATE_FILENAME);
   };
 
   // 处理文件选择
   const handleFileChange = (info: any) => {
     const file = info.file.originFileObj || info.file;
     if (file) {
+      resetImportPreview();
       setSelectedFile(file);
     }
   };
@@ -263,6 +279,9 @@ const StaffManagement: React.FC = () => {
       return;
     }
 
+    const session = ++importGenerationRef.current;
+    importReaderRef.current?.abort();
+    importReaderRef.current = null;
     setImportLoading(true);
     setDuplicateEmps([]);
     setImportData([]);
@@ -270,10 +289,13 @@ const StaffManagement: React.FC = () => {
     try {
       // 获取最新人员数据
       const latestStaffs = await api.getStaff();
+      if (!mountedRef.current || session !== importGenerationRef.current) return;
 
       // 使用 xlsx 解析 Excel 文件
       const reader = new FileReader();
+      importReaderRef.current = reader;
       reader.onload = (e) => {
+        if (!mountedRef.current || session !== importGenerationRef.current) return;
         try {
           const data = new Uint8Array(e.target?.result as ArrayBuffer);
           const workbook = XLSX.read(data, { type: 'array' });
@@ -284,6 +306,7 @@ const StaffManagement: React.FC = () => {
           if (jsonData.length === 0) {
             message.error('Excel文件为空或格式错误');
             setImportLoading(false);
+            if (importReaderRef.current === reader) importReaderRef.current = null;
             return;
           }
 
@@ -304,6 +327,7 @@ const StaffManagement: React.FC = () => {
           if (!empNoKey || !nameKey) {
             message.error(`Excel文件缺少必要列：工号、姓名。当前表头：${headers.join(', ')}`);
             setImportLoading(false);
+            if (importReaderRef.current === reader) importReaderRef.current = null;
             return;
           }
 
@@ -371,21 +395,32 @@ const StaffManagement: React.FC = () => {
             setImportData([]);
             setImportStep(2);
             setImportLoading(false);
+            if (importReaderRef.current === reader) importReaderRef.current = null;
             return;
           }
 
           setImportData(parsedData);
           setImportStep(2);
           setImportLoading(false);
+          if (importReaderRef.current === reader) importReaderRef.current = null;
         } catch (error) {
+          if (!mountedRef.current || session !== importGenerationRef.current) return;
           console.error('解析Excel失败', error);
           message.error('解析Excel文件失败');
           setImportLoading(false);
+          if (importReaderRef.current === reader) importReaderRef.current = null;
         }
+      };
+      reader.onerror = () => {
+        if (!mountedRef.current || session !== importGenerationRef.current) return;
+        message.error('读取Excel文件失败');
+        setImportLoading(false);
+        if (importReaderRef.current === reader) importReaderRef.current = null;
       };
 
       reader.readAsArrayBuffer(selectedFile);
     } catch (error) {
+      if (!mountedRef.current || session !== importGenerationRef.current) return;
       message.error('获取人员数据失败');
       setImportLoading(false);
     }
@@ -421,9 +456,8 @@ const StaffManagement: React.FC = () => {
   };
 
   const handleImportCancel = () => {
+    resetImportPreview();
     setImportModalVisible(false);
-    setImportData([]);
-    setDuplicateEmps([]);
     message.warning('已取消本次导入');
   };
 
@@ -608,6 +642,20 @@ const StaffManagement: React.FC = () => {
     staff.empNo.toLowerCase().includes(searchText.toLowerCase())
   );
 
+  const exportStaffs = () => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.json_to_sheet(buildStaffExportRows(filteredStaffs)),
+      '人员数据',
+    );
+    XLSX.writeFile(workbook, `人员导出_${dayjs().format('YYYYMMDD')}.xlsx`);
+  };
+
+  const removeImportRow = (empNo: string) => {
+    setImportData(rows => rows.filter(row => row.empNo !== empNo));
+  };
+
   const columns = [
     {
       title: '姓名',
@@ -764,6 +812,9 @@ const StaffManagement: React.FC = () => {
             style={{ width: 250 }}
             allowClear
           />
+          <Button icon={<ExportOutlined />} onClick={exportStaffs} aria-label="导出人员">
+            导出人员
+          </Button>
           {!isOnlyTestLead && (
             <Upload
               showUploadList={false}
@@ -1041,6 +1092,7 @@ const StaffManagement: React.FC = () => {
             <div style={{ marginBottom: 16 }}>
               <span style={{ marginRight: 8 }}>选择文件：</span>
               <Upload
+                key={importUploadKey}
                 showUploadList={true}
                 accept=".xlsx,.xls"
                 beforeUpload={() => false}
@@ -1121,12 +1173,20 @@ const StaffManagement: React.FC = () => {
                 { title: '保密权限', dataIndex: 'confidentialClearance', key: 'confidentialClearance', width: 80,
                   render: (val: boolean) => val ? '是' : '否',
                 },
+                { title: '操作', key: 'action', width: 72,
+                  render: (_: unknown, row: ImportRow) => (
+                    <Button type="link" danger size="small" onClick={() => removeImportRow(row.empNo)} aria-label={`移除${row.name}`}>
+                      移除
+                    </Button>
+                  ),
+                },
               ]}
             />
             <div style={{ marginTop: 16, textAlign: 'right' }}>
               <Space>
+                <Button onClick={resetImportPreview}>返回重新选择</Button>
                 <Button onClick={handleImportCancel}>取消</Button>
-                <Button type="primary" onClick={handleImportConfirm} loading={importLoading} disabled={importData.some(row => row.unmatchedModules.length > 0 || row.unavailableModules.length > 0)}>
+                <Button type="primary" onClick={handleImportConfirm} loading={importLoading} disabled={importData.length === 0 || importData.some(row => row.unmatchedModules.length > 0 || row.unavailableModules.length > 0)}>
                   确认导入
                 </Button>
               </Space>

@@ -78,6 +78,15 @@ describe('StaffManagement familiar modules', () => {
     expect(updateStaff.mock.calls[0][1]).not.toHaveProperty('familiarModules');
   });
 
+  it('exports the currently filtered staff list with readable familiar module names', async () => {
+    render(<StaffManagement />);
+    const user = userEvent.setup();
+
+    await screen.findByText('张三');
+    await user.type(screen.getByPlaceholderText('搜索姓名或工号'), '张三{enter}');
+    expect(screen.getByRole('button', { name: /导出人员/ })).toBeInTheDocument();
+  });
+
   it('keeps the newest edit session when an older role request resolves last', async () => {
     const firstRoles = deferred<string[]>();
     const secondRoles = deferred<string[]>();
@@ -194,6 +203,39 @@ describe('StaffManagement familiar modules', () => {
     }
   });
 
+  it('removes an invalid preview row so remaining valid rows can be imported', async () => {
+    const createStaff = vi.spyOn(api, 'createStaff').mockResolvedValue({ staff: {}, generatedPassword: '' });
+    const worksheet = XLSX.utils.json_to_sheet([
+      { 工号: 'EMP008', 姓名: '李四', 所属项目: '功能测试组', 熟悉模块: '未知模块' },
+      { 工号: 'EMP009', 姓名: '王五', 所属项目: '功能测试组', 熟悉模块: '接口模块' },
+    ]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, '人员');
+    const workbookData = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' });
+    const OriginalFileReader = globalThis.FileReader;
+    class TestFileReader {
+      onload: ((event: any) => void) | null = null;
+      readAsArrayBuffer() { this.onload?.({ target: { result: workbookData } }); }
+      abort() {}
+    }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      render(<StaffManagement />);
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      await user.upload(document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement, new File(['placeholder'], 'staff.xlsx'));
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+
+      expect(await screen.findByText('未知：未知模块')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: '移除李四' }));
+      expect(screen.queryByText('未知：未知模块')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: '确认导入' }));
+      await waitFor(() => expect(createStaff).toHaveBeenCalledWith(expect.objectContaining({ empNo: 'EMP009', familiarModuleIds: [12] })));
+    } finally {
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader });
+    }
+  });
+
   it('imports deduplicated structured module ids without the legacy field', async () => {
     const createStaff = vi.spyOn(api, 'createStaff').mockResolvedValue({ staff: {}, generatedPassword: '' });
     const worksheet = XLSX.utils.json_to_sheet([{
@@ -222,6 +264,155 @@ describe('StaffManagement familiar modules', () => {
       await waitFor(() => expect(createStaff).toHaveBeenCalledWith(expect.objectContaining({ familiarModuleIds: [12] })));
       expect(createStaff.mock.calls[0][0]).not.toHaveProperty('familiarModules');
       expect(createStaff.mock.calls[0][0]).not.toHaveProperty('familiarModuleNames');
+    } finally {
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader });
+    }
+  });
+
+  it('keeps the newer import preview when an earlier staff lookup resolves last', async () => {
+    const firstLookup = deferred<any[]>();
+    const secondLookup = deferred<any[]>();
+    vi.spyOn(api, 'getStaff')
+      .mockResolvedValueOnce([])
+      .mockReturnValueOnce(firstLookup.promise)
+      .mockReturnValueOnce(secondLookup.promise);
+    const OriginalFileReader = globalThis.FileReader;
+    class TestFileReader {
+      static instances: TestFileReader[] = [];
+      onload: ((event: any) => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor() { TestFileReader.instances.push(this); }
+      readAsArrayBuffer() {}
+      abort() {}
+      emit(rows: Record<string, unknown>[]) {
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), '人员');
+        this.onload?.({ target: { result: XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) } });
+      }
+    }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      render(<StaffManagement />);
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      let input = document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement;
+      await user.upload(input, new File(['first'], 'first.xlsx'));
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+      input = document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement;
+      await user.upload(input, new File(['second'], 'second.xlsx'));
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+
+      secondLookup.resolve([]);
+      await waitFor(() => expect(TestFileReader.instances).toHaveLength(1));
+      TestFileReader.instances[0].emit([{ 工号: 'EMP009', 姓名: '新文件' }]);
+      expect(await screen.findByText('新文件')).toBeInTheDocument();
+      firstLookup.resolve([]);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(screen.getByText('新文件')).toBeInTheDocument();
+      expect(screen.queryByText('first')).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader });
+    }
+  });
+
+  it('does not reopen an import preview when a canceled reader resolves later', async () => {
+    const OriginalFileReader = globalThis.FileReader;
+    class TestFileReader {
+      static instance: TestFileReader | undefined;
+      onload: ((event: any) => void) | null = null;
+      constructor() { TestFileReader.instance = this; }
+      readAsArrayBuffer() {}
+      abort() {}
+      emit() {
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([{ 工号: 'EMP010', 姓名: '过期文件' }]), '人员');
+        this.onload?.({ target: { result: XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) } });
+      }
+    }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      render(<StaffManagement />);
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      await user.upload(document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement, new File(['stale'], 'stale.xlsx'));
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+      await waitFor(() => expect(TestFileReader.instance).toBeDefined());
+      await user.click(screen.getByRole('button', { name: /取\s*消/ }));
+      TestFileReader.instance?.emit();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.queryByText('过期文件')).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader });
+    }
+  });
+
+  it('ignores an import reader callback after the page unmounts', async () => {
+    const OriginalFileReader = globalThis.FileReader;
+    class TestFileReader {
+      static instance: TestFileReader | undefined;
+      onload: ((event: any) => void) | null = null;
+      constructor() { TestFileReader.instance = this; }
+      readAsArrayBuffer() {}
+      abort() {}
+      emit() {
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([{ 工号: 'EMP011', 姓名: '卸载后' }]), '人员');
+        this.onload?.({ target: { result: XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) } });
+      }
+    }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      const { unmount } = render(<StaffManagement />);
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      await user.upload(document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement, new File(['stale'], 'unmount.xlsx'));
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+      await waitFor(() => expect(TestFileReader.instance).toBeDefined());
+      unmount();
+      TestFileReader.instance?.emit();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(document.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+      expect(screen.queryByText('卸载后')).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader });
+    }
+  });
+
+  it('returns to file selection and accepts a corrected reselected file', async () => {
+    const OriginalFileReader = globalThis.FileReader;
+    class TestFileReader {
+      static instances: TestFileReader[] = [];
+      onload: ((event: any) => void) | null = null;
+      constructor() { TestFileReader.instances.push(this); }
+      readAsArrayBuffer() {}
+      abort() {}
+      emit(row: Record<string, unknown>) {
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([row]), '人员');
+        this.onload?.({ target: { result: XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) } });
+      }
+    }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      render(<StaffManagement />);
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      const file = new File(['bad'], 'staff.xlsx');
+      let input = document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement;
+      await user.upload(input, file);
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+      await waitFor(() => expect(TestFileReader.instances).toHaveLength(1));
+      TestFileReader.instances[0].emit({ 工号: 'EMP010', 姓名: '待修正', 熟悉模块: '未知模块' });
+      expect(await screen.findByText('未知：未知模块')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: '返回重新选择' }));
+      expect(screen.queryByText('未知：未知模块')).not.toBeInTheDocument();
+      input = document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement;
+      await user.upload(input, file);
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+      await waitFor(() => expect(TestFileReader.instances).toHaveLength(2));
+      TestFileReader.instances[1].emit({ 工号: 'EMP010', 姓名: '已修正', 熟悉模块: '接口模块' });
+      expect(await screen.findByText('已修正')).toBeInTheDocument();
     } finally {
       Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader });
     }
