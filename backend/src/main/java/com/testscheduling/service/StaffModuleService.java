@@ -47,6 +47,7 @@ public class StaffModuleService {
     @Transactional
     public List<TestModuleConfig> replaceModules(TestStaff staff, List<Long> requestedModuleIds) {
         Long staffId = requireStaffId(staff);
+        lockStaffIds(List.of(staffId));
         List<Long> existingIds = staffModuleRepository.findModuleIdsByStaffId(staffId);
         List<Long> requestedIds = distinctIds(requestedModuleIds);
         Map<Long, TestModuleConfig> modulesById = loadRequestedModules(requestedIds);
@@ -119,6 +120,7 @@ public class StaffModuleService {
 
     @Transactional
     public void deleteForStaff(Long staffId) {
+        lockStaffIds(List.of(staffId));
         staffModuleRepository.deleteByStaffId(staffId);
         staffModuleRepository.flush();
     }
@@ -128,7 +130,9 @@ public class StaffModuleService {
         if (staffIds == null || staffIds.isEmpty()) {
             return;
         }
-        staffModuleRepository.deleteByStaffIdIn(distinctIds(staffIds));
+        List<Long> distinctStaffIds = distinctIds(staffIds);
+        lockStaffIds(distinctStaffIds);
+        staffModuleRepository.deleteByStaffIdIn(distinctStaffIds);
         staffModuleRepository.flush();
     }
 
@@ -157,6 +161,7 @@ public class StaffModuleService {
             .filter(Objects::nonNull)
             .map(TestStaff::getId)
             .toList();
+        lockStaffIds(staffIds);
         List<TestStaffModule> existingRelations = staffIds.isEmpty()
             ? List.of()
             : staffModuleRepository
@@ -219,6 +224,18 @@ public class StaffModuleService {
             throw new BusinessException("STAFF_REQUIRED", "人员必须先保存");
         }
         return staff.getId();
+    }
+
+    private void lockStaffIds(List<Long> staffIds) {
+        staffIds.stream()
+            .filter(Objects::nonNull)
+            .distinct()
+            .sorted()
+            .forEach(staffId -> staffRepository.findByIdForUpdate(staffId)
+                .orElseThrow(() -> new BusinessException("STAFF_NOT_FOUND", "测试人员不存在")));
+        if (staffIds.stream().anyMatch(Objects::isNull)) {
+            throw new BusinessException("STAFF_NOT_FOUND", "测试人员不存在");
+        }
     }
 
     private List<Long> distinctIds(List<Long> ids) {

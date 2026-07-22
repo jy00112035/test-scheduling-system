@@ -7,6 +7,7 @@ import com.testscheduling.entity.TestModuleConfig;
 import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.DemandSpecialModuleRepository;
 import com.testscheduling.repository.TestModuleConfigRepository;
+import com.testscheduling.repository.TestDemandRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,12 +27,15 @@ public class DemandSpecialModuleService {
 
     private final DemandSpecialModuleRepository specialRepository;
     private final TestModuleConfigRepository moduleRepository;
+    private final TestDemandRepository demandRepository;
 
     public DemandSpecialModuleService(
             DemandSpecialModuleRepository specialRepository,
-            TestModuleConfigRepository moduleRepository) {
+            TestModuleConfigRepository moduleRepository,
+            TestDemandRepository demandRepository) {
         this.specialRepository = specialRepository;
         this.moduleRepository = moduleRepository;
+        this.demandRepository = demandRepository;
     }
 
     public void validateNew(
@@ -44,6 +48,7 @@ public class DemandSpecialModuleService {
             Long demandId,
             List<DemandManpowerDetail> manpowerDetails,
             List<DemandSpecialModule> specialModuleDemands) {
+        lockDemand(demandId);
         List<DemandSpecialModule> existing = specialRepository.findByDemandIdOrderByIdAsc(demandId);
         validate(manpowerDetails, specialModuleDemands, historicalLimits(existing));
     }
@@ -53,6 +58,7 @@ public class DemandSpecialModuleService {
             Long demandId,
             List<DemandManpowerDetail> manpowerDetails,
             List<DemandSpecialModule> specialModuleDemands) {
+        lockDemand(demandId);
         List<DemandSpecialModule> existing = specialRepository.findByDemandIdOrderByIdAsc(demandId);
 
         List<DemandSpecialModule> requested = specialList(specialModuleDemands);
@@ -72,6 +78,7 @@ public class DemandSpecialModuleService {
 
     @Transactional
     public void deleteForDemand(Long demandId) {
+        lockDemand(demandId);
         specialRepository.deleteByDemandId(demandId);
         specialRepository.flush();
     }
@@ -266,6 +273,14 @@ public class DemandSpecialModuleService {
         target.setTestType(source.getTestType());
         target.setEnabled(source.getEnabled());
         return target;
+    }
+
+    private void lockDemand(Long demandId) {
+        if (demandId == null) {
+            throw new BusinessException("DEMAND_NOT_FOUND", "测试需求不存在");
+        }
+        demandRepository.findByIdForUpdate(demandId)
+            .orElseThrow(() -> new BusinessException("DEMAND_NOT_FOUND", "测试需求不存在"));
     }
 
     private List<DemandManpowerDetail> detailList(List<DemandManpowerDetail> details) {

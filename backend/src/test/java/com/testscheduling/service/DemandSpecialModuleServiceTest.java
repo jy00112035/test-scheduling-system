@@ -7,6 +7,7 @@ import com.testscheduling.entity.TestModuleConfig;
 import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.DemandSpecialModuleRepository;
 import com.testscheduling.repository.TestModuleConfigRepository;
+import com.testscheduling.repository.TestDemandRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -35,8 +36,17 @@ class DemandSpecialModuleServiceTest {
     @Mock
     private TestModuleConfigRepository moduleRepository;
 
+    @Mock
+    private TestDemandRepository demandRepository;
+
     @InjectMocks
     private DemandSpecialModuleService service;
+
+    @org.junit.jupiter.api.BeforeEach
+    void allowExistingDemandLocks() {
+        org.mockito.Mockito.lenient().when(demandRepository.findByIdForUpdate(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(java.util.Optional.of(new com.testscheduling.entity.TestDemand()));
+    }
 
     @Test
     void rejectsSpecialModuleTotalAboveItsGroupTotal() {

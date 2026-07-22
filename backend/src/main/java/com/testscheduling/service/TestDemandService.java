@@ -83,7 +83,7 @@ public class TestDemandService {
 
     @Transactional
     public TestDemand update(Long id, TestDemand demand) {
-        TestDemand existing = findById(id);
+        TestDemand existing = lockedDemand(id);
         List<DemandManpowerDetail> beforeDetails = existing.getManpowerDetails();
         List<DemandSpecialModule> beforeSpecials = existing.getSpecialModuleDemands();
         boolean detailsProvided = demand.getManpowerDetails() != null;
@@ -123,6 +123,7 @@ public class TestDemandService {
 
     @Transactional
     public void delete(Long id) {
+        lockedDemand(id);
         if (scheduleRepository.existsByDemandId(id)) {
             throw immutableScheduledDemand();
         }
@@ -134,7 +135,7 @@ public class TestDemandService {
 
     @Transactional
     public TestDemand close(Long id) {
-        TestDemand demand = findById(id);
+        TestDemand demand = lockedDemand(id);
         demand.setStatus(TestDemand.DemandStatus.completed);
         return testDemandRepository.save(demand);
     }
@@ -147,7 +148,7 @@ public class TestDemandService {
 
     @Transactional
     public TestDemand approveDemand(Long id) {
-        TestDemand demand = findById(id);
+        TestDemand demand = lockedDemand(id);
         if (demand.getStatus() != TestDemand.DemandStatus.submitted) {
             throw new RuntimeException("只能批准状态为'已提交待审批'的需求");
         }
@@ -157,7 +158,7 @@ public class TestDemandService {
 
     @Transactional
     public void rejectDemand(Long id) {
-        TestDemand demand = findById(id);
+        TestDemand demand = lockedDemand(id);
         if (demand.getStatus() != TestDemand.DemandStatus.submitted) {
             throw new RuntimeException("只能退回状态为'已提交待审批'的需求");
         }
@@ -167,14 +168,14 @@ public class TestDemandService {
 
     @Transactional
     public void batchApproveDemands(List<Long> ids) {
-        for (Long id : ids) {
+        for (Long id : ids.stream().sorted().toList()) {
             approveDemand(id);
         }
     }
 
     @Transactional
     public TestDemand approveWithChanges(Long id, TestDemand modifiedDemand) {
-        TestDemand demand = findById(id);
+        TestDemand demand = lockedDemand(id);
         if (demand.getStatus() != TestDemand.DemandStatus.submitted) {
             throw new RuntimeException("只能修改并批准状态为'已提交待审批'的需求");
         }
@@ -225,14 +226,14 @@ public class TestDemandService {
 
     @Transactional
     public TestDemand updatePriority(Long id, String priority) {
-        TestDemand demand = findById(id);
+        TestDemand demand = lockedDemand(id);
         demand.setPriority(priority);
         return testDemandRepository.save(demand);
     }
 
     @Transactional
     public void batchRejectDemands(List<Long> ids) {
-        for (Long id : ids) {
+        for (Long id : ids.stream().sorted().toList()) {
             rejectDemand(id);
         }
     }
@@ -249,6 +250,15 @@ public class TestDemandService {
         target.setPriority(source.getPriority());
         target.setTestDeviceCount(source.getTestDeviceCount());
         target.setStatus(source.getStatus());
+    }
+
+    private TestDemand lockedDemand(Long id) {
+        if (id == null) {
+            throw new BusinessException("DEMAND_NOT_FOUND", "测试需求不存在");
+        }
+        TestDemand demand = testDemandRepository.findByIdForUpdate(id)
+            .orElseThrow(() -> new BusinessException("DEMAND_NOT_FOUND", "测试需求不存在"));
+        return enrichWithDetails(demand);
     }
 
     private void replaceDetails(Long demandId, List<DemandManpowerDetail> details) {

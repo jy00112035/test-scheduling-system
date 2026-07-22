@@ -118,6 +118,7 @@ public class TestStaffService {
             staff.setStatus(TestStaff.StaffStatus.valueOf(request.getStatus()));
         }
         TestStaff savedStaff = testStaffRepository.save(staff);
+        testStaffRepository.flush();
 
         String plainPassword = "12345678";
         User user = new User();

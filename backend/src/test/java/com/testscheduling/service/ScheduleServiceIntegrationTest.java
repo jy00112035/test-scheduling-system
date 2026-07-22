@@ -220,11 +220,13 @@ class ScheduleServiceIntegrationTest {
             org.hibernate.SessionFactory.class).getStatistics();
         statistics.clear();
 
-        scheduleService.createBatch(List.of(
+        List<Schedule> returned = scheduleService.createBatch(List.of(
             schedule(demand, first, detail, null, 30),
             schedule(demand, second, detail, null, 30),
             schedule(demand, third, detail, null, 30)));
 
+        assertEquals(3, returned.size());
+        assertTrue(returned.stream().allMatch(item -> item.getId() != null));
         assertTrue(statistics.getPrepareStatementCount() < 20,
             "batch should use bounded preload queries, count="
                 + statistics.getPrepareStatementCount());

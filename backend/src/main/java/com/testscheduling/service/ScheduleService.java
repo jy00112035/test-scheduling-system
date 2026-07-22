@@ -129,6 +129,9 @@ public class ScheduleService {
     @Transactional
     public Schedule classifyHistorical(
             Long id, Long demandManpowerDetailId, Long demandSpecialModuleId) {
+        // The locked schedule-scope query acquires the demand first. It is followed by
+        // the ordered schedule-row lock, then staff; all schedule mutations lock demand
+        // before staff, so this order cannot form a cross-service wait cycle.
         TestDemand demand = demandRepository.findByScheduleIdForUpdate(id)
             .orElseThrow(() -> error("SCHEDULE_NOT_FOUND", "排班记录不存在"));
         Schedule existing = scheduleRepository.findByDemandIdForUpdate(demand.getId()).stream()

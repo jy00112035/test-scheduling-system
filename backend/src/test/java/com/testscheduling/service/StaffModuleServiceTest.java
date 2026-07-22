@@ -11,6 +11,7 @@ import com.testscheduling.repository.TestModuleConfigRepository;
 import com.testscheduling.repository.TestStaffModuleRepository;
 import com.testscheduling.repository.TestStaffRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -50,6 +52,16 @@ class StaffModuleServiceTest {
 
     @InjectMocks
     private StaffModuleService service;
+
+    @BeforeEach
+    void allowExistingStaffLocks() {
+        lenient().when(staffRepository.findByIdForUpdate(any()))
+            .thenAnswer(invocation -> {
+                TestStaff staff = new TestStaff();
+                staff.setId(invocation.getArgument(0));
+                return java.util.Optional.of(staff);
+            });
+    }
 
     @Test
     void replacesModulesWithoutCheckingStaffGroup() {
