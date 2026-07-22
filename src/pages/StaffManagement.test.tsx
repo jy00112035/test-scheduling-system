@@ -619,4 +619,208 @@ describe('StaffManagement familiar modules', () => {
       await waitFor(() => expect(TestFileReader.instances).toHaveLength(2));
     } finally { Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader }); }
   });
+
+  it('keeps staff CRUD usable after module load failure and restores module actions on retry', async () => {
+    const retryModules = deferred<TestModule[]>();
+    vi.spyOn(api, 'getTestModules')
+      .mockRejectedValueOnce(new Error('模块服务离线'))
+      .mockReturnValueOnce(retryModules.promise);
+    render(<StaffManagement />);
+    const user = userEvent.setup();
+
+    const warning = await screen.findByRole('alert');
+    expect(warning).toHaveTextContent('熟悉模块不可用：模块服务离线');
+    expect(screen.getByText('张三')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /添加人员/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /导入人员/ })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: /添加人员/ }));
+    expect(screen.getByRole('dialog', { name: '添加人员' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '熟悉模块' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: /取\s*消/ }));
+
+    await user.click(screen.getByRole('button', { name: '重试' }));
+    expect(screen.getByRole('button', { name: /导入人员/ })).toBeDisabled();
+    retryModules.resolve([
+      historicalModule,
+      moduleFixture({ id: 12, moduleName: '接口模块', testType: '自动化测试', enabled: true }),
+    ]);
+
+    await waitFor(() => expect(screen.queryByText('熟悉模块不可用：模块服务离线')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /导入人员/ })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: /添加人员/ }));
+    await user.click(screen.getByRole('combobox', { name: '熟悉模块' }));
+    expect(await screen.findByText('接口模块')).toBeInTheDocument();
+  });
+
+  it('keeps newer module retry success when an older retry fails afterward', async () => {
+    const olderRetry = deferred<TestModule[]>();
+    const newerRetry = deferred<TestModule[]>();
+    vi.spyOn(api, 'getTestModules')
+      .mockRejectedValueOnce(new Error('首次加载失败'))
+      .mockReturnValueOnce(olderRetry.promise)
+      .mockReturnValueOnce(newerRetry.promise);
+    render(<StaffManagement />);
+    const user = userEvent.setup();
+
+    await screen.findByText('熟悉模块不可用：首次加载失败');
+    await user.click(screen.getByRole('button', { name: '重试' }));
+    await user.click(screen.getByRole('button', { name: '重试' }));
+    newerRetry.resolve([
+      historicalModule,
+      moduleFixture({ id: 12, moduleName: '接口模块', testType: '自动化测试', enabled: true }),
+    ]);
+    await waitFor(() => expect(screen.getByRole('button', { name: /导入人员/ })).toBeEnabled());
+
+    olderRetry.reject(new Error('过期重试失败'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(screen.queryByText(/过期重试失败/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /添加人员/ }));
+    await user.click(screen.getByRole('combobox', { name: '熟悉模块' }));
+    expect(await screen.findByText('接口模块')).toBeInTheDocument();
+  });
+
+  it('suppresses module retry completion after unmount', async () => {
+    const retryModules = deferred<TestModule[]>();
+    vi.spyOn(api, 'getTestModules')
+      .mockRejectedValueOnce(new Error('首次加载失败'))
+      .mockReturnValueOnce(retryModules.promise);
+    const warningMessage = vi.spyOn(message, 'warning');
+    const errorMessage = vi.spyOn(message, 'error');
+    const { unmount } = render(<StaffManagement />);
+    const user = userEvent.setup();
+
+    await screen.findByText('熟悉模块不可用：首次加载失败');
+    await user.click(screen.getByRole('button', { name: '重试' }));
+    unmount();
+    retryModules.reject(new Error('卸载后的失败'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(screen.queryByText(/卸载后的失败/)).not.toBeInTheDocument();
+    expect(warningMessage).not.toHaveBeenCalledWith(expect.stringContaining('卸载后的失败'));
+    expect(errorMessage).not.toHaveBeenCalledWith(expect.stringContaining('卸载后的失败'));
+  });
+
+  it('commits a created staff member when field-config sync fails and closes with a sync-only warning', async () => {
+    const configs = [
+      { id: 1, fieldName: 'groupName', options: '功能测试组', fieldType: 'select', description: '', required: true, sortOrder: 1 },
+      { id: 2, fieldName: 'testType', options: '功能测试,自动化测试', fieldType: 'select', description: '', required: true, sortOrder: 2 },
+    ];
+    vi.spyOn(api, 'getFieldConfigs')
+      .mockResolvedValueOnce(configs as any)
+      .mockRejectedValueOnce(new Error('字段配置服务不可用'));
+    vi.spyOn(api, 'getStaff')
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        id: 40, name: '已提交人员', empNo: 'EMP040', joinDate: '2026-07-22', groupName: '功能测试组',
+        initialCoefficient: 0.3, currentCoefficient: 0.3, status: 'active', role: 'testExecutor', familiarModules: [],
+      }]);
+    const createStaff = vi.spyOn(api, 'createStaff').mockResolvedValue({ staff: {}, generatedPassword: '' });
+    const warning = vi.spyOn(message, 'warning');
+    const success = vi.spyOn(message, 'success');
+    const error = vi.spyOn(message, 'error');
+    render(<StaffManagement />);
+    const user = userEvent.setup();
+    await waitFor(() => expect(api.getFieldConfigs).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole('button', { name: /添加人员/ }));
+    await user.type(screen.getByLabelText('姓名'), '已提交人员');
+    await user.type(screen.getByLabelText('工号'), 'EMP040');
+    await user.type(screen.getByLabelText('入职日期'), '2026-07-22');
+    await user.click(screen.getByRole('combobox', { name: '所属项目' }));
+    const groupOptions = await screen.findAllByText('功能测试组');
+    await user.click(groupOptions.find(option => option.classList.contains('ant-select-item-option-content'))!);
+    await user.click(screen.getByRole('combobox', { name: '角色' }));
+    const roleOptions = await screen.findAllByText('测试执行人员');
+    await user.click(roleOptions.find(option => option.classList.contains('ant-select-item-option-content'))!);
+    await user.click(screen.getByRole('button', { name: /保存/ }));
+
+    await waitFor(() => expect(createStaff).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '添加人员' })).not.toBeInTheDocument());
+    expect(warning).toHaveBeenCalledWith('人员已添加，但项目/测试类型选项同步失败');
+    expect(success).toHaveBeenCalledWith('人员已添加，初始登录密码为 12345678');
+    expect(error).not.toHaveBeenCalledWith(expect.stringMatching(/操作失败|字段配置服务不可用/));
+    expect(await screen.findByText('已提交人员')).toBeInTheDocument();
+    expect(createStaff).toHaveBeenCalledTimes(1);
+  });
+
+  it('commits an updated staff member when field-config sync fails and closes with a sync-only warning', async () => {
+    const configs = [
+      { id: 1, fieldName: 'groupName', options: '功能测试组', fieldType: 'select', description: '', required: true, sortOrder: 1 },
+      { id: 2, fieldName: 'testType', options: '功能测试,自动化测试', fieldType: 'select', description: '', required: true, sortOrder: 2 },
+    ];
+    vi.spyOn(api, 'getFieldConfigs')
+      .mockResolvedValueOnce(configs as any)
+      .mockRejectedValueOnce(new Error('字段配置服务不可用'));
+    const updateStaff = vi.spyOn(api, 'updateStaff').mockResolvedValue({});
+    const warning = vi.spyOn(message, 'warning');
+    const success = vi.spyOn(message, 'success');
+    const error = vi.spyOn(message, 'error');
+    render(<StaffManagement />);
+    const user = userEvent.setup();
+    await waitFor(() => expect(api.getFieldConfigs).toHaveBeenCalledTimes(1));
+
+    await user.click(await screen.findByText('编辑'));
+    await user.click(screen.getByRole('button', { name: /保存/ }));
+
+    await waitFor(() => expect(updateStaff).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑人员' })).not.toBeInTheDocument());
+    expect(warning).toHaveBeenCalledWith('人员已更新，但项目/测试类型选项同步失败');
+    expect(success).toHaveBeenCalledWith('人员信息已更新');
+    expect(error).not.toHaveBeenCalledWith(expect.stringMatching(/操作失败|字段配置服务不可用/));
+    expect(updateStaff).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a sync-failed committed import row out of the retry set when another create fails', async () => {
+    const configs = [
+      { id: 1, fieldName: 'groupName', options: '功能测试组', fieldType: 'select', description: '', required: true, sortOrder: 1 },
+      { id: 2, fieldName: 'testType', options: '功能测试', fieldType: 'select', description: '', required: true, sortOrder: 2 },
+    ];
+    vi.spyOn(api, 'getFieldConfigs')
+      .mockResolvedValueOnce(configs as any)
+      .mockRejectedValueOnce(new Error('同步失败'))
+      .mockResolvedValue(configs as any);
+    const getStaff = vi.spyOn(api, 'getStaff')
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([]);
+    const createStaff = vi.spyOn(api, 'createStaff')
+      .mockResolvedValueOnce({ staff: {}, generatedPassword: '' })
+      .mockRejectedValueOnce(new Error('工号冲突'))
+      .mockResolvedValueOnce({ staff: {}, generatedPassword: '' });
+    const warning = vi.spyOn(message, 'warning');
+    const OriginalFileReader = globalThis.FileReader;
+    class TestFileReader {
+      onload: ((event: any) => void) | null = null;
+      abort() {}
+      readAsArrayBuffer() { this.onload?.({ target: { result: workbookData([
+        { 工号: 'EMP050', 姓名: '已提交且同步失败', 所属项目: '新项目' },
+        { 工号: 'EMP051', 姓名: '创建失败待重试', 所属项目: '功能测试组' },
+      ]) } }); }
+    }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      render(<StaffManagement />);
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      await user.upload(document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement, new File(['rows'], 'staff.xlsx'));
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+      await user.click(await screen.findByRole('button', { name: '确认导入' }));
+
+      expect(await screen.findByText('导入失败：工号冲突')).toBeInTheDocument();
+      expect(screen.queryByText('已提交且同步失败')).not.toBeInTheDocument();
+      expect(warning).toHaveBeenCalledWith('人员已导入，但项目/测试类型选项同步失败');
+      expect(warning).toHaveBeenCalledWith('已成功导入 1 条，1 条待重试');
+      await waitFor(() => expect(getStaff).toHaveBeenCalledTimes(3));
+
+      await user.click(screen.getByRole('button', { name: '确认导入' }));
+      await waitFor(() => expect(createStaff).toHaveBeenCalledTimes(3));
+      expect(createStaff.mock.calls.map(([row]) => row.empNo)).toEqual(['EMP050', 'EMP051', 'EMP051']);
+    } finally {
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader });
+    }
+  });
+
 });

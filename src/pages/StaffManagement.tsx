@@ -166,6 +166,7 @@ const StaffManagement: React.FC = () => {
     void fetchModules();
     return () => {
       mountedRef.current = false;
+      moduleLoadGenerationRef.current += 1;
       editSessionRef.current += 1;
       importGenerationRef.current += 1;
       importSaveGenerationRef.current += 1;
@@ -180,12 +181,12 @@ const StaffManagement: React.FC = () => {
     const generation = ++moduleLoadGenerationRef.current;
     if (mountedRef.current) {
       setModulesLoading(true);
-      setModulesError(null);
     }
     try {
       const moduleList = await api.getTestModules();
       if (mountedRef.current && generation === moduleLoadGenerationRef.current) {
         setModules(moduleList);
+        setModulesError(null);
       }
     } catch (error: any) {
       if (mountedRef.current && generation === moduleLoadGenerationRef.current) {
@@ -480,6 +481,7 @@ const StaffManagement: React.FC = () => {
     setImportLoading(true);
     try {
       const retryableRows: ImportRow[] = [];
+      const committedRows: ImportRow[] = [];
       let successCount = 0;
       for (let index = 0; index < importData.length; index += 1) {
         const row = importData[index];
@@ -487,6 +489,7 @@ const StaffManagement: React.FC = () => {
         try {
           await api.createStaff(staffData);
           successCount += 1;
+          committedRows.push(row);
         } catch (error: any) {
           retryableRows.push({ ...row, retryError: error.message || '导入失败' });
           retryableRows.push(...importData.slice(index + 1));
@@ -494,24 +497,27 @@ const StaffManagement: React.FC = () => {
         }
         if (!ownsImportSave()) return;
       }
+      if (committedRows.length > 0) {
+        try {
+          await syncFieldConfigs(committedRows, ownsImportSave);
+          if (!ownsImportSave()) return;
+          await fetchFieldConfigs();
+        } catch {
+          if (ownsImportSave()) message.warning('人员已导入，但项目/测试类型选项同步失败');
+        }
+        if (!ownsImportSave()) return;
+        fetchStaffs();
+      }
       if (retryableRows.length > 0) {
         if (!ownsImportSave()) return;
         setImportData(retryableRows);
         message.warning(`已成功导入 ${successCount} 条，${retryableRows.length} 条待重试`);
         return;
       }
-      try {
-        await syncFieldConfigs(importData, ownsImportSave);
-        if (!ownsImportSave()) return;
-        await fetchFieldConfigs();
-      } catch {
-        if (ownsImportSave()) message.warning('人员已导入，但项目/测试类型选项同步失败');
-      }
       if (!ownsImportSave()) return;
       message.success(`成功导入 ${importData.length} 条人员数据`);
       setImportModalVisible(false);
       setImportData([]);
-      fetchStaffs();
     } catch (error: any) {
       if (ownsImportSave()) {
         message.error(error.message || '导入失败');
@@ -687,6 +693,14 @@ const StaffManagement: React.FC = () => {
 
       if (editingStaff) {
         await api.updateStaff(editingStaff.id, staffData);
+        if (!ownsStaffSave()) return;
+        try {
+          await syncFieldConfigs([staffData], ownsStaffSave);
+          if (!ownsStaffSave()) return;
+          await fetchFieldConfigs();
+        } catch {
+          if (ownsStaffSave()) message.warning('人员已更新，但项目/测试类型选项同步失败');
+        }
         if (!ownsStaffSave()) return;
         message.success('人员信息已更新');
       } else {
@@ -905,6 +919,15 @@ const StaffManagement: React.FC = () => {
   return (
     <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 96px)' }}>
       <Card style={{ marginBottom: 16 }}>
+        {modulesError && (
+          <Alert
+            type="warning"
+            showIcon
+            message={`熟悉模块不可用：${modulesError}`}
+            action={<Button size="small" aria-label="重试" onClick={() => void fetchModules()}>重试</Button>}
+            style={{ marginBottom: 16 }}
+          />
+        )}
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16, gap: 8, position: 'sticky', top: 0, zIndex: 10, background: '#fff', paddingTop: 8, paddingBottom: 8 }}>
           {!isOnlyTestLead && selectedRowKeys.length > 0 && (
             <Popconfirm
@@ -933,8 +956,9 @@ const StaffManagement: React.FC = () => {
               accept=".xlsx,.xls"
               beforeUpload={() => false}
               onChange={handleFileChange}
+              disabled={modulesLoading || Boolean(modulesError)}
             >
-              <Button icon={<UploadOutlined />} onClick={openImportModal}>
+              <Button icon={<UploadOutlined />} onClick={openImportModal} disabled={modulesLoading || Boolean(modulesError)}>
                 导入人员
               </Button>
             </Upload>
@@ -1152,8 +1176,6 @@ const StaffManagement: React.FC = () => {
               ))}
             </Select>
           </Form.Item>
-
-          {modulesError && <Alert type="warning" showIcon message={`熟悉模块不可用：${modulesError}`} action={<Button size="small" onClick={() => void fetchModules()}>重试</Button>} style={{ marginBottom: 16 }} />}
 
           <Form.Item
             name="confidentialClearance"
