@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import api, {
   type BatchPublishResponse,
+  type BackendSchedule,
   type ScheduleRecommendationRequest,
   type ScheduleWriteRequest,
 } from './api';
@@ -50,6 +51,17 @@ describe('ApiService special-module contracts', () => {
     ]);
   });
 
+  it('updates a test-module enabled status', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(respond({ id: 1, enabled: false }));
+
+    await api.setTestModuleStatus(1, false);
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/test-modules/1/status', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ enabled: false }),
+    }));
+  });
+
   it('migrates legacy staff modules through the staff endpoint', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(respond({ createdRelations: 2 }));
 
@@ -80,15 +92,43 @@ describe('ApiService special-module contracts', () => {
       demandSpecialModuleId: 40,
     };
     const batch: BatchPublishResponse = { success: [], failed: [] };
+    const generatedSchedule: BackendSchedule = {
+      id: 99,
+      demandId: 10,
+      staffId: 20,
+      demandManpowerDetailId: 30,
+      demandSpecialModuleId: null,
+      date: '2026-07-01',
+      percentage: 100,
+      product: '项目',
+      testManager: null,
+      versionType: '功能测试',
+      version: null,
+      lockVersion: 0,
+      published: false,
+      createdAt: '2026-07-01T00:00:00',
+    };
     const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(respond({ generatedSchedules: [], fulfillment: [] }))
+      .mockResolvedValueOnce(respond({ generatedSchedules: [generatedSchedule], fulfillment: [] }))
       .mockResolvedValueOnce(respond({ valid: true }))
-      .mockResolvedValueOnce(respond({ id: 99 }))
+      .mockResolvedValueOnce(respond({
+        ...generatedSchedule,
+        staffId: 22,
+        date: '2026-07-02',
+        percentage: 50,
+      }))
       .mockResolvedValueOnce(respond(batch));
 
-    await api.recommendScheduleDraft(recommendation);
+    const recommendationResponse = await api.recommendScheduleDraft(recommendation);
+    expect(recommendationResponse.generatedSchedules[0]).toEqual(generatedSchedule);
     await api.validateSchedule(schedule);
-    await api.moveSchedule(99, { staffId: 22, date: '2026-07-02', percentage: 50 });
+    const movedSchedule = await api.moveSchedule(99, { staffId: 22, date: '2026-07-02', percentage: 50 });
+    expect(movedSchedule).toEqual({
+      ...generatedSchedule,
+      staffId: 22,
+      date: '2026-07-02',
+      percentage: 50,
+    });
     await api.batchPublishSchedules({ demandIds: [10, 11] });
 
     expect(fetchMock.mock.calls.map(([url, options]) => [url, options?.method, options?.body])).toEqual([

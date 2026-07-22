@@ -2,18 +2,22 @@ const API_BASE_URL = '/api';
 
 import type {
   BatchPublishResponse,
+  BackendSchedule,
   ScheduleRecommendationRequest,
   ScheduleRecommendationResponse,
   ScheduleWriteRequest,
   TestModule,
+  TestModuleWriteRequest,
 } from '../types';
 
 export type {
   BatchPublishResponse,
+  BackendSchedule,
   ScheduleRecommendationRequest,
   ScheduleRecommendationResponse,
   ScheduleWriteRequest,
   TestModule,
+  TestModuleWriteRequest,
 } from '../types';
 
 interface ApiResponse<T> {
@@ -374,7 +378,7 @@ class ApiService {
     return this.request<TestModule[]>(`/test-modules${query ? `?${query}` : ''}`);
   }
 
-  async createTestModule(module: Pick<TestModule, 'moduleName' | 'testType' | 'sortOrder'>) {
+  async createTestModule(module: TestModuleWriteRequest) {
     return this.request<TestModule>('/test-modules', {
       method: 'POST',
       body: JSON.stringify(module),
@@ -383,7 +387,7 @@ class ApiService {
 
   async updateTestModule(
     id: number,
-    module: Pick<TestModule, 'moduleName' | 'testType' | 'sortOrder'>
+    module: TestModuleWriteRequest
   ) {
     return this.request<TestModule>(`/test-modules/${id}`, {
       method: 'PUT',
@@ -430,7 +434,7 @@ class ApiService {
     id: number,
     request: Pick<ScheduleWriteRequest, 'staffId' | 'date' | 'percentage'>
   ) {
-    return this.request<any>(`/schedules/${id}/move`, {
+    return this.request<BackendSchedule>(`/schedules/${id}/move`, {
       method: 'POST',
       body: JSON.stringify(request),
     });
