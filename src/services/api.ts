@@ -13,6 +13,7 @@ import type {
 export type {
   BatchPublishResponse,
   BackendSchedule,
+  DemandSpecialModule,
   DemandFulfillment,
   ScheduleRecommendationRequest,
   ScheduleRecommendationResponse,

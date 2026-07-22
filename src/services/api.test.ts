@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import api, {
   type BatchPublishResponse,
   type BackendSchedule,
+  type DemandSpecialModule,
   type DemandFulfillment,
   type ScheduleRecommendationRequest,
+  type ScheduleRecommendationResponse,
   type ScheduleWriteRequest,
   type TestModule,
   type TestModuleWriteRequest,
@@ -79,6 +81,35 @@ void moduleWriteRequest;
 void completeModuleResponse;
 void incompleteModuleResponse;
 void completeFulfillmentResponse;
+
+const invalidSpecialGap: ScheduleRecommendationResponse['fulfillment'][number]['specialModuleGaps'][number] = {
+  demandManpowerDetailId: 30,
+  // @ts-expect-error special-module gaps always identify a concrete special-module row
+  demandSpecialModuleId: null,
+  shortage: 1,
+  reasonCode: 'INSUFFICIENT_CAPACITY',
+  reason: '可用人力容量不足',
+};
+
+const incompleteEnrichedModule: DemandSpecialModule = {
+  id: 40,
+  demandId: 10,
+  moduleId: 50,
+  manpowerDemand: 2,
+  createdAt: '2026-07-01T00:00:00',
+  updatedAt: '2026-07-01T00:00:00',
+  // @ts-expect-error enriched module metadata is populated before the response is serialized
+  moduleName: null,
+  // @ts-expect-error enriched module metadata is populated before the response is serialized
+  testType: null,
+  // @ts-expect-error enriched module metadata is populated before the response is serialized
+  enabled: null,
+  allocatedManpower: null,
+  remainingManpower: null,
+};
+
+void invalidSpecialGap;
+void incompleteEnrichedModule;
 
 function respond(data: unknown, message = 'success') {
   return new Response(JSON.stringify({ code: 200, message, data }), {
@@ -174,12 +205,12 @@ describe('ApiService special-module contracts', () => {
       demandSpecialModuleId: null,
       date: '2026-07-01',
       percentage: 100,
-      product: '项目',
+      product: null,
       testManager: null,
-      versionType: '功能测试',
+      versionType: null,
       version: null,
       lockVersion: 0,
-      published: false,
+      published: null,
       createdAt: '2026-07-01T00:00:00',
     };
     const fetchMock = vi.spyOn(globalThis, 'fetch')

@@ -64,9 +64,9 @@ export interface DemandSpecialModule {
   manpowerDemand: number;
   createdAt: string;
   updatedAt: string;
-  moduleName: string | null;
-  testType: string | null;
-  enabled: boolean | null;
+  moduleName: string;
+  testType: string;
+  enabled: boolean;
   allocatedManpower: number | null;
   remainingManpower: number | null;
 }
@@ -113,7 +113,7 @@ export interface ScheduleRecommendationResponse {
     requiresHistoricalClassification: boolean;
     specialModuleGaps: Array<{
       demandManpowerDetailId: number;
-      demandSpecialModuleId: number | null;
+      demandSpecialModuleId: number;
       shortage: number;
       reasonCode: string;
       reason: string;
@@ -136,12 +136,12 @@ export interface BackendSchedule {
   demandSpecialModuleId: number | null;
   date: string;
   percentage: number;
-  product: string;
+  product: string | null;
   testManager: string | null;
-  versionType: string;
+  versionType: string | null;
   version: string | null;
   lockVersion: number;
-  published: boolean;
+  published: boolean | null;
   createdAt: string;
 }
 
