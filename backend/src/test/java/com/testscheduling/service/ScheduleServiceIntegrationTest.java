@@ -295,15 +295,15 @@ class ScheduleServiceIntegrationTest {
         CountDownLatch releaseLock = new CountDownLatch(1);
         CountDownLatch operationStarted = new CountDownLatch(1);
         Future<?> lockHolder = holdStaffLock(executor, staff.getId(), lockHeld, releaseLock);
-        Future<Object> statusMutation = executor.submit(() -> {
-            operationStarted.countDown();
-            staffDailyStatusService.setStatus(staff.getId(), DATE,
-                com.testscheduling.entity.StaffDailyStatus.DailyAvailabilityStatus.OTHER_TASKS,
-                100.0);
-            return Boolean.TRUE;
-        });
         try {
             assertTrue(lockHeld.await(5, TimeUnit.SECONDS));
+            Future<Object> statusMutation = executor.submit(() -> {
+                operationStarted.countDown();
+                staffDailyStatusService.setStatus(staff.getId(), DATE,
+                    com.testscheduling.entity.StaffDailyStatus.DailyAvailabilityStatus.OTHER_TASKS,
+                    100.0);
+                return Boolean.TRUE;
+            });
             assertTrue(operationStarted.await(5, TimeUnit.SECONDS));
             assertThrows(TimeoutException.class,
                 () -> statusMutation.get(200, TimeUnit.MILLISECONDS));
@@ -321,7 +321,7 @@ class ScheduleServiceIntegrationTest {
             assertEquals("STAFF_CAPACITY_EXCEEDED", error.getErrorCode());
         } finally {
             releaseLock.countDown();
-            executor.shutdownNow();
+            shutdownExecutor(executor);
         }
     }
 
@@ -335,12 +335,12 @@ class ScheduleServiceIntegrationTest {
         CountDownLatch releaseLock = new CountDownLatch(1);
         CountDownLatch operationStarted = new CountDownLatch(1);
         Future<?> lockHolder = holdStaffLock(executor, staff.getId(), lockHeld, releaseLock);
-        Future<Object> scheduleCreation = executor.submit(() -> {
-            operationStarted.countDown();
-            return scheduleService.create(schedule(demand, staff, detail, null, 50));
-        });
         try {
             assertTrue(lockHeld.await(5, TimeUnit.SECONDS));
+            Future<Object> scheduleCreation = executor.submit(() -> {
+                operationStarted.countDown();
+                return scheduleService.create(schedule(demand, staff, detail, null, 50));
+            });
             assertTrue(operationStarted.await(5, TimeUnit.SECONDS));
             assertThrows(TimeoutException.class,
                 () -> scheduleCreation.get(200, TimeUnit.MILLISECONDS));
@@ -352,7 +352,7 @@ class ScheduleServiceIntegrationTest {
             assertEquals(1, scheduleRepository.findByDemandId(demand.getId()).size());
         } finally {
             releaseLock.countDown();
-            executor.shutdownNow();
+            shutdownExecutor(executor);
         }
     }
 
@@ -375,6 +375,18 @@ class ScheduleServiceIntegrationTest {
                     throw new IllegalStateException(error);
                 }
             }));
+    }
+
+    private void shutdownExecutor(ExecutorService executor) {
+        executor.shutdownNow();
+        try {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("executor cleanup timed out");
+            }
+        } catch (InterruptedException error) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     private Object runLockedAction(CountDownLatch start, Runnable action) {
