@@ -24,12 +24,8 @@ const IssuePublishPanel: React.FC<IssuePublishPanelProps> = ({
   demands,
   publishFailures,
 }) => {
-  const fulfillmentDemandIds = new Set(fulfillment.map(item => item.demandId));
-  const historicalDemands = demands.filter(demand =>
-    demand.requiresHistoricalClassification === true
-    && !fulfillmentDemandIds.has(demand.id));
   if (conflicts.length === 0 && fulfillment.length === 0
-      && publishFailures.length === 0 && historicalDemands.length === 0) {
+      && publishFailures.length === 0) {
     return null;
   }
 
@@ -71,28 +67,26 @@ const IssuePublishPanel: React.FC<IssuePublishPanelProps> = ({
                         历史排班尚未完成人力归属
                       </Tag>
                     )}
+                    <div style={{ marginTop: 4 }}>
+                      总计：需求 {item.totalRequired} / 已分配 {item.totalAllocated} / 缺口 {item.totalShortage}
+                    </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
-                      {(demand?.manpowerSummary || []).map(summary => {
-                        const details = demand?.manpowerDetails || [];
-                        const detail = details.find(candidate => candidate.testType === summary.testType);
-                        const specialAllocated = (demand?.specialModuleDemands || [])
-                          .filter(module => module.testType === summary.testType)
-                          .reduce((sum, module) => sum + Number(module.allocatedManpower || 0), 0);
-                        const generalShortage = item.generalGaps
-                          .filter(gap => gap.demandManpowerDetailId === detail?.id)
-                          .reduce((sum, gap) => sum + Number(gap.shortage || 0), 0);
-                        const generalAllocated = Math.max(0, summary.generalManpower - generalShortage);
-                        return (
-                          <Tag key={summary.testType} style={{ margin: 0 }}>
-                            {summary.testType}：总量 {summary.totalManpower} / 特殊 {specialAllocated} / 通用 {generalAllocated}
-                          </Tag>
-                        );
-                      })}
+                      {item.summary.map(summary => (
+                        <Tag key={summary.demandManpowerDetailId} style={{ margin: 0 }}>
+                          {summary.testType}：需求 {summary.required} / 特殊 {summary.specialAllocated}/{summary.specialRequired}
+                          {' / '}通用 {summary.generalAllocated}/{summary.generalRequired} / 缺口 {summary.shortage}
+                        </Tag>
+                      ))}
+                      {item.specialModules.map(module => (
+                        <Tag key={module.demandSpecialModuleId} color="blue" style={{ margin: 0 }}>
+                          {module.moduleName}：需求 {module.required} / 已分配 {module.allocated} / 缺口 {module.remaining}
+                        </Tag>
+                      ))}
                     </div>
                     <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
                       {item.specialModuleGaps.map(gap => {
-                        const module = demand?.specialModuleDemands?.find(
-                          candidate => candidate.id === gap.demandSpecialModuleId,
+                        const module = item.specialModules.find(
+                          candidate => candidate.demandSpecialModuleId === gap.demandSpecialModuleId,
                         );
                         return (
                           <li key={`special-${gap.demandSpecialModuleId}`}>
@@ -102,8 +96,8 @@ const IssuePublishPanel: React.FC<IssuePublishPanelProps> = ({
                         );
                       })}
                       {item.generalGaps.map(gap => {
-                        const detail = demand?.manpowerDetails?.find(
-                          candidate => candidate.id === gap.demandManpowerDetailId,
+                        const detail = item.summary.find(
+                          candidate => candidate.demandManpowerDetailId === gap.demandManpowerDetailId,
                         );
                         return (
                           <li key={`general-${gap.demandManpowerDetailId}`}>
@@ -117,23 +111,6 @@ const IssuePublishPanel: React.FC<IssuePublishPanelProps> = ({
                 );
               })}
             </div>
-          )}
-          type="warning"
-          showIcon
-          style={{ marginBottom: 8 }}
-        />
-      )}
-      {historicalDemands.length > 0 && (
-        <Alert
-          message="历史排班待归类"
-          description={(
-            <ul style={{ margin: 0, paddingLeft: 20 }}>
-              {historicalDemands.map(demand => (
-                <li key={demand.id}>
-                  {demand.product}：历史排班尚未完成人力归属
-                </li>
-              ))}
-            </ul>
           )}
           type="warning"
           showIcon

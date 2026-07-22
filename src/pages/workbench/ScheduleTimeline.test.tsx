@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import dayjs from 'dayjs';
 import { describe, expect, it, vi } from 'vitest';
 import ScheduleTimeline from './ScheduleTimeline';
@@ -7,6 +7,8 @@ const noop = vi.fn();
 
 describe('ScheduleTimeline module eligibility', () => {
   it('highlights only familiar staff and renders structured historical module tags', () => {
+    const onDrop = vi.fn();
+    const onCellDragOver = vi.fn();
     render(<ScheduleTimeline
       staffs={[
         {
@@ -68,7 +70,7 @@ describe('ScheduleTimeline module eligibility', () => {
         remainingManpower: 1,
       }}
       draggedSchedule={null}
-      dragOverCell={null}
+      dragOverCell="1-2026-07-20"
       dragOverTrash={false}
       filterProducts={[]}
       canManageDailyAvailability={false}
@@ -77,11 +79,11 @@ describe('ScheduleTimeline module eligibility', () => {
       statusPctDraft={100}
       onWeekChange={noop}
       onFilterProductsChange={noop}
-      onDrop={noop}
+      onDrop={onDrop}
       onScheduleTransfer={noop}
       onScheduleDragStart={noop}
       onScheduleDragEnd={noop}
-      onCellDragOver={noop}
+      onCellDragOver={onCellDragOver}
       onTrashDragOver={noop}
       onTrashDrop={noop}
       onEditSchedule={noop}
@@ -92,7 +94,13 @@ describe('ScheduleTimeline module eligibility', () => {
       onStatusPctDraftChange={noop}
     />);
 
-    expect(screen.getAllByLabelText('张三：不熟悉支付模块')[0]).toHaveStyle({ cursor: 'not-allowed' });
+    const ineligibleCell = screen.getAllByLabelText('张三：不熟悉支付模块')[0];
+    expect(ineligibleCell).toHaveStyle({ cursor: 'not-allowed' });
+    expect(ineligibleCell.querySelector('.drop-active')).toBeNull();
+    fireEvent.dragOver(ineligibleCell);
+    fireEvent.drop(ineligibleCell);
+    expect(onCellDragOver).not.toHaveBeenCalled();
+    expect(onDrop).not.toHaveBeenCalled();
     expect(screen.getAllByLabelText('李四：可分配支付模块')[0]).toHaveStyle({ cursor: 'copy' });
     expect(screen.getByText('功能测试: 支付模块')).toBeInTheDocument();
     expect(screen.getByText('性能测试: 登录模块（已停用）')).toBeInTheDocument();

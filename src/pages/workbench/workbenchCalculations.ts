@@ -6,6 +6,12 @@
 import dayjs from 'dayjs';
 import type { AllocationTarget, DemandItem, ScheduleItem, StaffItem, BatchMetrics, ConflictDetail, DailyStatusEntry, UnfulfilledDetail, HighRiskDemandDetail } from './workbenchTypes';
 
+export function normalizeSchedulePercentage(value: number | null | undefined): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 100;
+  return Math.min(100, Math.max(10, Math.round(numeric / 10) * 10));
+}
+
 // ---- 常量 ----
 
 export const DAY_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];

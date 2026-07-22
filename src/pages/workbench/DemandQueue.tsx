@@ -293,6 +293,8 @@ const DemandQueue: React.FC<DemandQueueProps> = ({
 
   // 渲染已分配需求卡片（简化版，不可拖拽）
   const renderAssignedCard = (demand: DemandItem) => {
+    const hasUnpublishedDraft = schedules.some(schedule =>
+      schedule.demandId === demand.id && !schedule.published);
     return (
       <div
         key={demand.id}
@@ -339,6 +341,24 @@ const DemandQueue: React.FC<DemandQueueProps> = ({
             <Tag color="green" style={{ margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 4px' }}>
               已分配
             </Tag>
+            {hasUnpublishedDraft && (
+              <Tooltip title={demand.requiresHistoricalClassification
+                ? '历史排班尚未完成人力归属'
+                : undefined}>
+                <Button
+                  size="small"
+                  type="link"
+                  disabled={demand.requiresHistoricalClassification === true}
+                  style={{ fontSize: 10, padding: 0, height: 16 }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onPublishDemand(demand.id);
+                  }}
+                >
+                  发布
+                </Button>
+              </Tooltip>
+            )}
             <Button
               size="small"
               type="link"

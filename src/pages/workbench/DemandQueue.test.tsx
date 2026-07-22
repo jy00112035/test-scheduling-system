@@ -234,4 +234,39 @@ describe('DemandQueue allocation targets', () => {
 
     expect(screen.getByRole('button', { name: '发布' })).toBeDisabled();
   });
+
+  it('offers single publish from an assigned demand with an unpublished draft', () => {
+    const onPublishDemand = vi.fn();
+    render(<DemandQueue
+      demands={[demand({ manpowerFullySatisfied: true })]}
+      schedules={[{
+        id: 1, demandId: 1001, staffId: 10, date: '2026-07-22', percentage: 100,
+        product: '示例产品', versionType: '维护', published: false,
+      }]}
+      staffs={[]}
+      selectedDemandId={null}
+      selectedDemandIds={new Set()}
+      pendingChangeDemandIds={new Set()}
+      unfulfilledDemands={new Set()}
+      filterDemandTestTypes={[]}
+      priorityOptions={[]}
+      editingPriorityId={null}
+      canManagePriority={false}
+      onFilterChange={vi.fn()}
+      onSelectDemand={vi.fn()}
+      onViewDetail={vi.fn()}
+      onClearDemand={vi.fn()}
+      onPublishDemand={onPublishDemand}
+      onPriorityEdit={vi.fn()}
+      onPriorityChange={vi.fn()}
+      onAllocationTargetDragStart={vi.fn()}
+      onAllocationTargetDragEnd={vi.fn()}
+    />);
+
+    fireEvent.click(screen.getByRole('tab', { name: '已分配 (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: '发布' }));
+
+    expect(onPublishDemand).toHaveBeenCalledOnce();
+    expect(onPublishDemand).toHaveBeenCalledWith(1001);
+  });
 });

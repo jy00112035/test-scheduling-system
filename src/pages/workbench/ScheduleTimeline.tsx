@@ -728,6 +728,8 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                   );
 
                   const cellKey = `${staff.id}-${dateStr}`;
+                  const cellAcceptsDrop = Boolean(draggedSchedule)
+                    || (draggedAllocationTarget ? canDropAllocation : Boolean(selectedDemand && canAssign));
 
                   const cell = (
                     <td
@@ -743,22 +745,23 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                         padding: 0,
                       }}
                       onDrop={() => {
-                        onCellDragOver(null);
                         if (draggedSchedule) {
+                          onCellDragOver(null);
                           onScheduleTransfer(draggedSchedule, staff, dateStr);
-                        } else {
+                        } else if (cellAcceptsDrop) {
+                          onCellDragOver(null);
                           onDrop(staff, dateStr);
                         }
                       }}
                       onDragOver={(e) => {
-                        if (draggedAllocationTarget || selectedDemand || draggedSchedule) {
+                        if (cellAcceptsDrop) {
                           e.preventDefault();
                           onCellDragOver(cellKey);
                         }
                       }}
                     >
                       <div
-                        className={dragOverCell === cellKey ? 'drop-active' : ''}
+                        className={dragOverCell === cellKey && cellAcceptsDrop ? 'drop-active' : ''}
                         style={{
                           width: '100%',
                           minHeight: 28,

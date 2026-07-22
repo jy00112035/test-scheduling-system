@@ -37,6 +37,7 @@ import {
   saveDraftToLocalStorage,
   loadDraftFromLocalStorage,
   clearDraftFromLocalStorage,
+  normalizeSchedulePercentage,
 } from './workbench/workbenchCalculations';
 
 import type {
@@ -105,10 +106,12 @@ const ScheduleWorkbench: React.FC = () => {
 
   // 推荐排班
   const [dateRecModalOpen, setDateRecModalOpen] = useState(false);
-  const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
+  const [fixedDateRange, setFixedDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
   const [fullAllocModalOpen, setFullAllocModalOpen] = useState(false);
-  const [includeSaturdays, setIncludeSaturdays] = useState(false);
-  const [includeSundays, setIncludeSundays] = useState(false);
+  const [fixedIncludeSaturdays, setFixedIncludeSaturdays] = useState(false);
+  const [fixedIncludeSundays, setFixedIncludeSundays] = useState(false);
+  const [fullIncludeSaturdays, setFullIncludeSaturdays] = useState(false);
+  const [fullIncludeSundays, setFullIncludeSundays] = useState(false);
   const [selectedDemandIds, setSelectedDemandIds] = useState<Set<number>>(new Set());
   const [fixedStaffIds, setFixedStaffIds] = useState<Set<number>>(new Set());
   const [excludedStaffIds, setExcludedStaffIds] = useState<Set<number>>(new Set());
@@ -141,6 +144,19 @@ const ScheduleWorkbench: React.FC = () => {
   const classificationIdsRef = useRef(new Set<number>());
   const manualCreateRef = useRef(false);
   const dropValidationRef = useRef<number | null>(null);
+  const allocationPhaseRef = useRef<'idle' | 'dragging' | 'validating' | 'modal' | 'submitting'>('idle');
+
+  const resetAllocationSession = useCallback(() => {
+    allocationPhaseRef.current = 'idle';
+    dropValidationRef.current = null;
+    setDraggedAllocationTarget(null);
+    setSelectedDemand(null);
+    setAssignTarget(null);
+    setDragOverCell(null);
+    setAssignModalVisible(false);
+    setAssignPercentage(100);
+    setAssignDays(1);
+  }, []);
 
   useEffect(() => () => {
     mountedRef.current = false;
@@ -152,11 +168,12 @@ const ScheduleWorkbench: React.FC = () => {
     classificationIdsRef.current.clear();
     manualCreateRef.current = false;
     dropValidationRef.current = null;
+    allocationPhaseRef.current = 'idle';
   }, []);
 
   // ---- 页面初始化 ----
   useEffect(() => {
-    fetchData();
+    refreshAuthoritativeData();
     fetchPriorityOptions();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Legacy dependency behavior; refactor under dedicated tests.
   }, []);
@@ -221,7 +238,19 @@ const ScheduleWorkbench: React.FC = () => {
     } catch { /* ignore */ }
   };
 
-  const fetchData = async () => {
+  const invalidateSchedulingDiagnostics = () => {
+    recommendationRunRef.current = null;
+    setRecommendationFulfillment([]);
+    setUnfulfilledDemands(new Set());
+    setUnfulfilledDetails([]);
+    setPublishFailures([]);
+    setConflictDetails([]);
+  };
+
+  const refreshAuthoritativeData = async (
+    options: { invalidateDiagnostics?: boolean } = {},
+  ) => {
+    if (options.invalidateDiagnostics) invalidateSchedulingDiagnostics();
     const fetchSession = ++fetchGenerationRef.current;
     try {
       const [demandsData, schedulesData, staffData] = await Promise.all([
@@ -358,13 +387,12 @@ const ScheduleWorkbench: React.FC = () => {
   const runRecommendation = async (mode: 'FIXED_RANGE' | 'FULL_DEMAND') => {
     if (recommendationRunRef.current !== null) return;
     const demandIds = Array.from(selectedDemandIds).sort((a, b) => a - b);
-    const sortedDates = Array.from(selectedDates).sort();
     if (demandIds.length === 0) {
       message.warning('没有待排期的需求');
       return;
     }
-    if (mode === 'FIXED_RANGE' && sortedDates.length === 0) {
-      message.warning('请选择排班日期');
+    if (mode === 'FIXED_RANGE' && !fixedDateRange) {
+      message.warning('请选择连续排班日期范围');
       return;
     }
 
@@ -387,14 +415,16 @@ const ScheduleWorkbench: React.FC = () => {
         demandIds,
         ...(mode === 'FIXED_RANGE' ? {
           dateRange: {
-            startDate: sortedDates[0],
-            endDate: sortedDates[sortedDates.length - 1],
+            startDate: fixedDateRange![0].format('YYYY-MM-DD'),
+            endDate: fixedDateRange![1].format('YYYY-MM-DD'),
           },
         } : {}),
         fixedStaffIds: Array.from(fixedStaffIds).sort((a, b) => a - b),
         excludedStaffIds: Array.from(excludedStaffIds).sort((a, b) => a - b),
-        includeSaturdays,
-        includeSundays,
+        includeSaturdays: mode === 'FIXED_RANGE'
+          ? fixedIncludeSaturdays : fullIncludeSaturdays,
+        includeSundays: mode === 'FIXED_RANGE'
+          ? fixedIncludeSundays : fullIncludeSundays,
         replaceExistingDrafts: true,
       });
       if (!mountedRef.current || recommendationRunRef.current !== session) return;
@@ -427,13 +457,13 @@ const ScheduleWorkbench: React.FC = () => {
           };
         }));
 
-      await fetchData();
+      await refreshAuthoritativeData();
       if (!mountedRef.current || recommendationRunRef.current !== session) return;
       message.success(`推荐排班完成：共生成 ${result.generatedSchedules.length} 条草稿排班`);
     } catch (error: any) {
       if (!mountedRef.current || recommendationRunRef.current !== session) return;
       message.error(error?.message || '推荐排班失败');
-      await fetchData();
+      await refreshAuthoritativeData({ invalidateDiagnostics: true });
     } finally {
       stopLoading();
       if (recommendationRunRef.current === session) {
@@ -476,8 +506,10 @@ const ScheduleWorkbench: React.FC = () => {
           setConflictDetails([]);
           clearDraftFromLocalStorage();
           message.success(`已清除 ${unpublishdSchedules.length} 条未发布排班`);
+          await refreshAuthoritativeData({ invalidateDiagnostics: true });
         } catch (err: any) {
           message.error(err.message || '清除失败');
+          await refreshAuthoritativeData({ invalidateDiagnostics: true });
         }
       },
     });
@@ -510,7 +542,6 @@ const ScheduleWorkbench: React.FC = () => {
         try {
           const result = await api.batchPublishSchedules({ demandIds });
           if (!mountedRef.current || publishRunRef.current !== session) return;
-          setPublishFailures(result.failed);
           const succeeded = new Set(result.success.map(item => item.demandId));
           setPendingChangeDemandIds(previous => {
             const next = new Set(previous);
@@ -539,11 +570,14 @@ const ScheduleWorkbench: React.FC = () => {
           } else {
             message.success(`已成功发布 ${result.success.length} 个需求的排班`);
           }
-          await fetchData();
+          await refreshAuthoritativeData({ invalidateDiagnostics: true });
+          if (mountedRef.current && publishRunRef.current === session) {
+            setPublishFailures(result.failed);
+          }
         } catch (error: any) {
           if (mountedRef.current && publishRunRef.current === session) {
             message.error(error?.message || '发布失败');
-            await fetchData();
+            await refreshAuthoritativeData({ invalidateDiagnostics: true });
           }
         } finally {
           if (publishRunRef.current === session) {
@@ -584,11 +618,11 @@ const ScheduleWorkbench: React.FC = () => {
         return next;
       });
       message.success('排期已发布');
-      await fetchData();
+      await refreshAuthoritativeData({ invalidateDiagnostics: true });
     } catch (error: any) {
       if (mountedRef.current && publishRunRef.current === session) {
         message.error(error?.message || '发布失败');
-        await fetchData();
+        await refreshAuthoritativeData({ invalidateDiagnostics: true });
       }
     } finally {
       if (publishRunRef.current === session) publishRunRef.current = null;
@@ -627,9 +661,10 @@ const ScheduleWorkbench: React.FC = () => {
           setSchedules(prev => prev.filter(s => s.demandId !== demandId));
           setPendingChangeDemandIds(prev => { const next = new Set(prev); next.delete(demandId); return next; });
           message.success(`已清除 ${demandSchedules.length} 条排班`);
-          fetchData();
+          await refreshAuthoritativeData({ invalidateDiagnostics: true });
         } catch (err: any) {
           message.error(err.message || '清除失败');
+          await refreshAuthoritativeData({ invalidateDiagnostics: true });
         }
       },
     });
@@ -642,6 +677,7 @@ const ScheduleWorkbench: React.FC = () => {
   ) => {
     event.dataTransfer.effectAllowed = 'copy';
     dropValidationRef.current = null;
+    allocationPhaseRef.current = 'dragging';
     setDraggedAllocationTarget(target);
     setSelectedDemand(demands.find(demand => demand.id === target.demandId) || null);
   }, [demands]);
@@ -650,11 +686,9 @@ const ScheduleWorkbench: React.FC = () => {
   const handleScheduleDragStart = useCallback((e: React.DragEvent, schedule: ScheduleItem) => {
     e.stopPropagation();
     e.dataTransfer.effectAllowed = 'move';
-    dropValidationRef.current = null;
+    resetAllocationSession();
     setDraggedSchedule(schedule);
-    setDraggedAllocationTarget(null);
-    setSelectedDemand(null);
-  }, []);
+  }, [resetAllocationSession]);
 
   const handleScheduleDragEnd = useCallback(() => {
     setDraggedSchedule(null);
@@ -743,7 +777,7 @@ const ScheduleWorkbench: React.FC = () => {
       const moved = await api.moveSchedule(schedule.id, {
         staffId: targetStaff.id,
         date: targetDate,
-        percentage: schedule.percentage,
+        percentage: normalizeSchedulePercentage(schedule.percentage),
       });
       if (!mountedRef.current) return;
       setSchedules(previous => previous.map(item => item.id === schedule.id
@@ -762,11 +796,11 @@ const ScheduleWorkbench: React.FC = () => {
         }
         : item));
       message.success(`已转移至 ${targetStaff.name}`);
-      await fetchData();
+      await refreshAuthoritativeData({ invalidateDiagnostics: true });
     } catch (error: any) {
       if (mountedRef.current) {
         message.error(error?.message || '转移失败');
-        await fetchData();
+        await refreshAuthoritativeData({ invalidateDiagnostics: true });
       }
     } finally {
       scheduleMutationIdsRef.current.delete(schedule.id);
@@ -796,12 +830,13 @@ const ScheduleWorkbench: React.FC = () => {
     const statusFactor = status && status !== 'AVAILABLE'
       ? (1 - statusPercentage / 100)
       : 1;
-    const percentage = Math.min(
+    const percentage = normalizeSchedulePercentage(Math.min(
       Math.round(coefficient * 100 * statusFactor),
       Math.round(draggedAllocationTarget.remainingManpower * 100),
-    );
+    ));
     const session = ++operationGenerationRef.current;
     dropValidationRef.current = session;
+    allocationPhaseRef.current = 'validating';
     try {
       const validation = await api.validateSchedule({
         demandId: draggedAllocationTarget.demandId,
@@ -819,10 +854,12 @@ const ScheduleWorkbench: React.FC = () => {
       setAssignDays(1);
       setAssignPercentage(percentage);
       setAssignModalVisible(true);
+      allocationPhaseRef.current = 'modal';
     } catch (error: any) {
       if (mountedRef.current && dropValidationRef.current === session) {
         message.error(error?.message || '排班校验失败');
-        await fetchData();
+        resetAllocationSession();
+        await refreshAuthoritativeData({ invalidateDiagnostics: true });
       }
     } finally {
       if (dropValidationRef.current === session) dropValidationRef.current = null;
@@ -836,7 +873,8 @@ const ScheduleWorkbench: React.FC = () => {
     }
 
     const target = draggedAllocationTarget;
-    const thisAllocation = (assignDays * assignPercentage) / 100;
+    const normalizedPercentage = normalizeSchedulePercentage(assignPercentage);
+    const thisAllocation = (assignDays * normalizedPercentage) / 100;
     if (thisAllocation > target.remainingManpower) {
       message.warning(`剩余可分配 ${target.remainingManpower.toFixed(1)} 人天，本次分配超出明细需求`);
       return;
@@ -862,7 +900,7 @@ const ScheduleWorkbench: React.FC = () => {
       demandId: target.demandId,
       staffId: assignTarget.staff.id,
       date,
-      percentage: assignPercentage,
+      percentage: normalizedPercentage,
       demandManpowerDetailId: target.demandManpowerDetailId,
       ...(target.kind === 'special'
         ? { demandSpecialModuleId: target.demandSpecialModuleId }
@@ -870,6 +908,7 @@ const ScheduleWorkbench: React.FC = () => {
     }));
 
     manualCreateRef.current = true;
+    allocationPhaseRef.current = 'submitting';
     setAssignLoading(true);
     try {
       for (const request of requests) {
@@ -899,16 +938,14 @@ const ScheduleWorkbench: React.FC = () => {
           published: schedule.published ?? false,
         })),
       ]);
-      setAssignModalVisible(false);
-      setAssignTarget(null);
-      setDraggedAllocationTarget(null);
-      setSelectedDemand(null);
       message.success('分配成功');
-      await fetchData();
+      resetAllocationSession();
+      await refreshAuthoritativeData({ invalidateDiagnostics: true });
     } catch (error: any) {
       if (mountedRef.current) {
         message.error(error?.message || '分配失败');
-        await fetchData();
+        resetAllocationSession();
+        await refreshAuthoritativeData({ invalidateDiagnostics: true });
       }
     } finally {
       manualCreateRef.current = false;
@@ -925,10 +962,11 @@ const ScheduleWorkbench: React.FC = () => {
       if (!mountedRef.current) return;
       setSchedules(prev => prev.filter(s => s.id !== schedule.id));
       message.success('已删除排班');
+      await refreshAuthoritativeData({ invalidateDiagnostics: true });
     } catch (error: any) {
       if (mountedRef.current) {
         message.error(error.message || '删除失败');
-        await fetchData();
+        await refreshAuthoritativeData({ invalidateDiagnostics: true });
       }
     } finally {
       scheduleMutationIdsRef.current.delete(schedule.id);
@@ -938,7 +976,7 @@ const ScheduleWorkbench: React.FC = () => {
   // ---- 编辑排班 ----
   const handleEditSchedule = (schedule: ScheduleItem) => {
     setEditingSchedule(schedule);
-    setEditPercentage(schedule.percentage);
+    setEditPercentage(normalizeSchedulePercentage(schedule.percentage));
     setEditModalVisible(true);
   };
 
@@ -950,7 +988,7 @@ const ScheduleWorkbench: React.FC = () => {
       const moved = await api.moveSchedule(editingSchedule.id, {
         staffId: editingSchedule.staffId,
         date: editingSchedule.date,
-        percentage: editPercentage,
+        percentage: normalizeSchedulePercentage(editPercentage),
       });
       if (!mountedRef.current) return;
       setSchedules(previous => previous.map(schedule => schedule.id === editingSchedule.id
@@ -971,11 +1009,11 @@ const ScheduleWorkbench: React.FC = () => {
       message.success('排班已更新');
       setEditModalVisible(false);
       setEditingSchedule(null);
-      await fetchData();
+      await refreshAuthoritativeData({ invalidateDiagnostics: true });
     } catch (error: any) {
       if (mountedRef.current) {
         message.error(error.message || '更新失败');
-        await fetchData();
+        await refreshAuthoritativeData({ invalidateDiagnostics: true });
       }
     } finally {
       scheduleMutationIdsRef.current.delete(editingSchedule.id);
@@ -1001,11 +1039,11 @@ const ScheduleWorkbench: React.FC = () => {
       });
       if (!mountedRef.current) return;
       message.success('历史排班已归类');
-      await fetchData();
+      await refreshAuthoritativeData({ invalidateDiagnostics: true });
     } catch (error: any) {
       if (mountedRef.current) {
         message.error(error?.message || '归类失败');
-        await fetchData();
+        await refreshAuthoritativeData({ invalidateDiagnostics: true });
       }
     } finally {
       classificationIdsRef.current.delete(schedule.id);
@@ -1093,15 +1131,21 @@ const ScheduleWorkbench: React.FC = () => {
   const handleDateRecommend = () => {
     const eligibleIds = getRecommendationEligibleDemandIds();
     setSelectedDemandIds(new Set(eligibleIds));
-    setSelectedDates(new Set());
+    setFixedDateRange(null);
+    setFixedIncludeSaturdays(false);
+    setFixedIncludeSundays(false);
+    setFixedStaffIds(new Set());
+    setExcludedStaffIds(new Set());
     setDateRecModalOpen(true);
   };
 
   const handleFullAllocateRecommend = () => {
     const eligibleIds = getRecommendationEligibleDemandIds();
     setSelectedDemandIds(new Set(eligibleIds));
-    setIncludeSaturdays(false);
-    setIncludeSundays(false);
+    setFullIncludeSaturdays(false);
+    setFullIncludeSundays(false);
+    setFixedStaffIds(new Set());
+    setExcludedStaffIds(new Set());
     setFullAllocModalOpen(true);
   };
 
@@ -1175,7 +1219,11 @@ const ScheduleWorkbench: React.FC = () => {
           onPriorityEdit={setEditingPriorityId}
           onPriorityChange={handlePriorityChange}
           onAllocationTargetDragStart={handleAllocationTargetDragStart}
-          onAllocationTargetDragEnd={() => setDragOverCell(null)}
+          onAllocationTargetDragEnd={() => {
+            if (allocationPhaseRef.current === 'dragging') {
+              resetAllocationSession();
+            }
+          }}
         />
 
         <ScheduleTimeline
@@ -1245,14 +1293,9 @@ const ScheduleWorkbench: React.FC = () => {
           <Modal
             title="分配测试任务"
             open={assignModalVisible}
-            onCancel={() => {
-              setAssignModalVisible(false);
-              setSelectedDemand(null);
-              setAssignTarget(null);
-              setDraggedAllocationTarget(null);
-            }}
+            onCancel={resetAllocationSession}
             footer={[
-              <Button key="cancel" onClick={() => setAssignModalVisible(false)}>取消</Button>,
+              <Button key="cancel" onClick={resetAllocationSession}>取消</Button>,
               <Button key="confirm" type="primary" loading={assignLoading} disabled={exceeds} onClick={handleAssignConfirm}>
                 确认分配
               </Button>,
@@ -1300,8 +1343,10 @@ const ScheduleWorkbench: React.FC = () => {
                     <strong style={{ fontSize: 16, color: '#1890ff' }}>{dayjs(assignTarget.date).format('YYYY-MM-DD')}</strong>
                     <span style={{ fontSize: 14, color: '#666' }}> 开始，分配 </span>
                     <InputNumber
-                      min={1} max={Math.floor(assignTarget.staff.currentCoefficient * 100)}
-                      value={assignPercentage} onChange={(v) => setAssignPercentage(v || 100)}
+                      aria-label="分配投入比例"
+                      min={10} max={100} step={10}
+                      value={assignPercentage}
+                      onChange={(value) => setAssignPercentage(normalizeSchedulePercentage(value))}
                       style={{ width: 100, margin: '0 8px' }}
                     />
                     <span style={{ fontSize: 14, color: '#666' }}>%（系数 {assignTarget.staff.currentCoefficient}）</span>
@@ -1363,18 +1408,13 @@ const ScheduleWorkbench: React.FC = () => {
               <div style={{ marginBottom: 16 }}>
                 <span style={{ fontSize: 14, color: '#666' }}>投入比例：</span>
                 <InputNumber
-                  min={1} max={200}
-                  value={editPercentage} onChange={(v) => setEditPercentage(v || 100)}
+                  aria-label="编辑投入比例"
+                  min={10} max={100} step={10}
+                  value={editPercentage}
+                  onChange={(value) => setEditPercentage(normalizeSchedulePercentage(value))}
                   style={{ width: 100, marginLeft: 8 }}
                 />
                 <span style={{ fontSize: 14, color: '#666', marginLeft: 8 }}>%</span>
-              </div>
-              <div style={{ marginTop: 16, padding: 12, background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 8 }}>
-                <ul style={{ margin: 0, paddingLeft: 20, color: '#666' }}>
-                  <li>输入 100 表示 1 人/天</li>
-                  <li>输入 50 表示 0.5 人/天</li>
-                  <li>输入 200 表示 2 人/天（可超过100%）</li>
-                </ul>
               </div>
             </div>
           </div>
@@ -1386,9 +1426,17 @@ const ScheduleWorkbench: React.FC = () => {
         title="按指定日期排班"
         open={dateRecModalOpen}
         onOk={runDateRecommendation}
-        onCancel={() => { setDateRecModalOpen(false); setSelectedDates(new Set()); setSelectedDemandIds(new Set()); }}
+        onCancel={() => {
+          setDateRecModalOpen(false);
+          setFixedDateRange(null);
+          setFixedIncludeSaturdays(false);
+          setFixedIncludeSundays(false);
+          setSelectedDemandIds(new Set());
+          setFixedStaffIds(new Set());
+          setExcludedStaffIds(new Set());
+        }}
         okText="开始排班" cancelText="取消"
-        okButtonProps={{ disabled: selectedDemandIds.size === 0 || selectedDates.size === 0 }}
+        okButtonProps={{ disabled: selectedDemandIds.size === 0 || !fixedDateRange }}
         width={520}
       >
         <Space direction="vertical" style={{ width: '100%', marginBottom: 12 }}>
@@ -1422,59 +1470,38 @@ const ScheduleWorkbench: React.FC = () => {
           />
         </Space>
         <div style={{ marginBottom: 12 }}>
-          <div style={{ fontWeight: 500, marginBottom: 8 }}>选择排班日期（{selectedDates.size} 天已选）</div>
+          <div style={{ fontWeight: 500, marginBottom: 8 }}>选择连续排班日期范围</div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <DatePicker
-              placeholder="选择任意日期（含过去）"
+            <DatePicker.RangePicker
+              aria-label="连续排班日期范围"
               format="YYYY-MM-DD"
               style={{ flex: 1 }}
-              onChange={(date: dayjs.Dayjs | null) => {
-                if (date) {
-                  setSelectedDates(prev => { const next = new Set(prev); next.add(date.format('YYYY-MM-DD')); return next; });
-                }
+              value={fixedDateRange}
+              onChange={(range) => {
+                setFixedDateRange(range?.[0] && range[1]
+                  ? [range[0], range[1]] : null);
               }}
             />
+            <Button
+              aria-label="选择未来 8 天连续范围"
+              onClick={() => setFixedDateRange([dayjs(), dayjs().add(7, 'day')])}
+            >未来 8 天</Button>
           </div>
-          <Checkbox
-            checked={selectedDates.size === 8}
-            indeterminate={selectedDates.size > 0 && selectedDates.size < 8}
-            onChange={(e) => {
-              if (e.target.checked) {
-                const all = new Set<string>();
-                for (let i = 0; i <= 7; i++) all.add(dayjs().add(i, 'day').format('YYYY-MM-DD'));
-                setSelectedDates(all);
-              } else { setSelectedDates(new Set()); }
-            }}
-            style={{ marginBottom: 6 }}
-          ><span style={{ fontSize: 13, color: '#888' }}>近 8 天全选 / 取消全选</span></Checkbox>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {Array.from({ length: 8 }, (_, i) => {
-              const d = dayjs().add(i, 'day');
-              const dateStr = d.format('YYYY-MM-DD');
-              const dayNames = ['日', '一', '二', '三', '四', '五', '六'];
-              return (
-                <Checkbox key={dateStr} checked={selectedDates.has(dateStr)}
-                  onChange={(e) => {
-                    const next = new Set(selectedDates);
-                    if (e.target.checked) next.add(dateStr); else next.delete(dateStr);
-                    setSelectedDates(next);
-                  }}
-                >{d.format('MM/DD')}({dayNames[d.day()]}){i === 0 ? ' 今天' : ''}</Checkbox>
-              );
-            })}
+          <div style={{ marginBottom: 8, color: '#666' }}>
+            {fixedDateRange
+              ? `${fixedDateRange[0].format('YYYY-MM-DD')} 至 ${fixedDateRange[1].format('YYYY-MM-DD')}`
+              : '尚未选择连续日期范围'}
           </div>
-          {(() => {
-            const savedDates = Array.from(selectedDates).sort();
-            return savedDates.length > 0 && (
-              <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {savedDates.map(ds => (
-                  <Tag key={ds} closable color="blue" onClose={() => {
-                    setSelectedDates(prev => { const next = new Set(prev); next.delete(ds); return next; });
-                  }}>{ds}</Tag>
-                ))}
-              </div>
-            );
-          })()}
+          <Space direction="vertical">
+            <Checkbox checked={fixedIncludeSaturdays}
+              onChange={(event) => setFixedIncludeSaturdays(event.target.checked)}>
+              固定范围包含周六
+            </Checkbox>
+            <Checkbox checked={fixedIncludeSundays}
+              onChange={(event) => setFixedIncludeSundays(event.target.checked)}>
+              固定范围包含周日
+            </Checkbox>
+          </Space>
         </div>
         <Divider style={{ margin: '12px 0' }} />
         <div style={{ fontWeight: 500, marginBottom: 8 }}>选择待排期需求（{selectedDemandIds.size} 个已选）</div>
@@ -1490,7 +1517,12 @@ const ScheduleWorkbench: React.FC = () => {
         open={fullAllocModalOpen}
         onOk={runFullAllocateRecommendation}
         onCancel={() => {
-          setFullAllocModalOpen(false); setIncludeSaturdays(false); setIncludeSundays(false); setSelectedDemandIds(new Set());
+          setFullAllocModalOpen(false);
+          setFullIncludeSaturdays(false);
+          setFullIncludeSundays(false);
+          setSelectedDemandIds(new Set());
+          setFixedStaffIds(new Set());
+          setExcludedStaffIds(new Set());
         }}
         okText="开始排班" cancelText="取消"
         okButtonProps={{ disabled: selectedDemandIds.size === 0 }}
@@ -1529,8 +1561,10 @@ const ScheduleWorkbench: React.FC = () => {
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontWeight: 500, marginBottom: 8 }}>周末排班设置</div>
           <Space direction="vertical">
-            <Checkbox checked={includeSaturdays} onChange={(e) => setIncludeSaturdays(e.target.checked)}>周六排班</Checkbox>
-            <Checkbox checked={includeSundays} onChange={(e) => setIncludeSundays(e.target.checked)}>周日排班</Checkbox>
+            <Checkbox checked={fullIncludeSaturdays}
+              onChange={(e) => setFullIncludeSaturdays(e.target.checked)}>全部需求包含周六</Checkbox>
+            <Checkbox checked={fullIncludeSundays}
+              onChange={(e) => setFullIncludeSundays(e.target.checked)}>全部需求包含周日</Checkbox>
           </Space>
         </div>
         <Divider style={{ margin: '12px 0' }} />
