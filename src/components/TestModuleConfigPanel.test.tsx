@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { StrictMode } from 'react';
 import TestModuleConfigPanel from './TestModuleConfigPanel';
 import api from '../services/api';
 import type { TestModule } from '../types';
@@ -150,6 +151,39 @@ describe('TestModuleConfigPanel', () => {
 
     createRequest.resolve(moduleFixture({ moduleName: '库存模块' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('loads and keeps controls usable under React StrictMode remounting', async () => {
+    const getModules = vi.spyOn(api, 'getTestModules').mockResolvedValue([moduleFixture()]);
+    render(
+      <StrictMode>
+        <TestModuleConfigPanel testTypes={['功能测试']} />
+      </StrictMode>,
+    );
+
+    expect(await screen.findByText('支付模块')).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: '支付模块启用状态' })).toBeEnabled();
+    expect(getModules).toHaveBeenCalled();
+  });
+
+  it('disables conflicting row mutations while a row mutation is pending', async () => {
+    const statusRequest = deferred<TestModule>();
+    vi.spyOn(api, 'getTestModules').mockResolvedValue([moduleFixture()]);
+    const deleteModule = vi.spyOn(api, 'deleteTestModule').mockResolvedValue(undefined);
+    const setStatus = vi.spyOn(api, 'setTestModuleStatus').mockReturnValue(statusRequest.promise);
+
+    render(<TestModuleConfigPanel testTypes={['功能测试']} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('switch', { name: '支付模块启用状态' }));
+
+    expect(setStatus).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('switch', { name: '支付模块启用状态' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '编辑支付模块' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '删除支付模块' })).toBeDisabled();
+    expect(deleteModule).not.toHaveBeenCalled();
+
+    statusRequest.resolve(moduleFixture({ enabled: false }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '删除支付模块' })).toBeEnabled());
   });
 
 });

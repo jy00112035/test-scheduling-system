@@ -36,13 +36,11 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingModule, setEditingModule] = useState<TestModule | null>(null);
-  const [statusPendingIds, setStatusPendingIds] = useState<Set<number>>(new Set());
-  const [deletePendingIds, setDeletePendingIds] = useState<Set<number>>(new Set());
+  const [pendingMutationIds, setPendingMutationIds] = useState<Set<number>>(new Set());
   const [savePending, setSavePending] = useState(false);
   const mountedRef = useRef(true);
   const loadGenerationRef = useRef(0);
-  const statusPendingRef = useRef(new Set<number>());
-  const deletePendingRef = useRef(new Set<number>());
+  const pendingMutationRef = useRef(new Set<number>());
   const savePendingRef = useRef(false);
   const modalSessionRef = useRef(0);
 
@@ -68,6 +66,7 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     void loadModules();
     return () => {
       mountedRef.current = false;
@@ -133,9 +132,9 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
   };
 
   const changeStatus = async (module: TestModule, enabled: boolean) => {
-    if (statusPendingRef.current.has(module.id) || !mountedRef.current) return;
-    statusPendingRef.current.add(module.id);
-    setStatusPendingIds(new Set(statusPendingRef.current));
+    if (pendingMutationRef.current.has(module.id) || !mountedRef.current) return;
+    pendingMutationRef.current.add(module.id);
+    setPendingMutationIds(new Set(pendingMutationRef.current));
     setMutationError(null);
     try {
       await api.setTestModuleStatus(module.id, enabled);
@@ -146,15 +145,15 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
     } catch (error) {
       showMutationError(error, '模块状态更新失败');
     } finally {
-      statusPendingRef.current.delete(module.id);
-      if (mountedRef.current) setStatusPendingIds(new Set(statusPendingRef.current));
+      pendingMutationRef.current.delete(module.id);
+      if (mountedRef.current) setPendingMutationIds(new Set(pendingMutationRef.current));
     }
   };
 
   const deleteModule = async (module: TestModule): Promise<void> => {
-    if (deletePendingRef.current.has(module.id) || !mountedRef.current) return;
-    deletePendingRef.current.add(module.id);
-    setDeletePendingIds(new Set(deletePendingRef.current));
+    if (pendingMutationRef.current.has(module.id) || !mountedRef.current) return;
+    pendingMutationRef.current.add(module.id);
+    setPendingMutationIds(new Set(pendingMutationRef.current));
     setMutationError(null);
     try {
       await api.deleteTestModule(module.id);
@@ -165,8 +164,8 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
     } catch (error) {
       showMutationError(error, '删除特殊模块失败');
     } finally {
-      deletePendingRef.current.delete(module.id);
-      if (mountedRef.current) setDeletePendingIds(new Set(deletePendingRef.current));
+      pendingMutationRef.current.delete(module.id);
+      if (mountedRef.current) setPendingMutationIds(new Set(pendingMutationRef.current));
     }
   };
 
@@ -179,7 +178,8 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
         <Space>
           <Switch
             checked={module.enabled}
-            loading={statusPendingIds.has(module.id)}
+            loading={pendingMutationIds.has(module.id)}
+            disabled={pendingMutationIds.has(module.id)}
             aria-label={`${module.moduleName}启用状态`}
             onChange={(enabled) => void changeStatus(module, enabled)}
           />
@@ -203,7 +203,7 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
               type="link"
               icon={<EditOutlined />}
               aria-label={`编辑${module.moduleName}`}
-              disabled={savePending}
+              disabled={savePending || pendingMutationIds.has(module.id)}
               onClick={() => openEdit(module)}
             />
           </Tooltip>
@@ -220,8 +220,8 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
                 icon={<DeleteOutlined />}
                 title="删除模块"
                 aria-label={`删除${module.moduleName}`}
-                loading={deletePendingIds.has(module.id)}
-                disabled={deletePendingIds.has(module.id)}
+                loading={pendingMutationIds.has(module.id)}
+                disabled={pendingMutationIds.has(module.id)}
               />
             </Popconfirm>
           )}
