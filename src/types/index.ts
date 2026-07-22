@@ -45,10 +45,10 @@ export interface TestModule {
   testType: string;
   enabled: boolean;
   sortOrder: number;
-  lockVersion?: number;
-  createdAt?: string;
-  updatedAt?: string;
-  referenced?: boolean;
+  lockVersion: number;
+  createdAt: string;
+  updatedAt: string;
+  referenced: boolean | null;
 }
 
 export interface TestModuleWriteRequest {
@@ -108,80 +108,80 @@ export interface ScheduleRecommendationRequest {
 export interface ScheduleRecommendationResponse {
   generatedSchedules: BackendSchedule[];
   fulfillment: Array<{
-    demandId: number | null;
+    demandId: number;
     fullySatisfied: boolean;
     requiresHistoricalClassification: boolean;
     specialModuleGaps: Array<{
-      demandManpowerDetailId: number | null;
+      demandManpowerDetailId: number;
       demandSpecialModuleId: number | null;
-      shortage: number | null;
-      reasonCode: string | null;
-      reason: string | null;
+      shortage: number;
+      reasonCode: string;
+      reason: string;
     }>;
     generalGaps: Array<{
-      demandManpowerDetailId: number | null;
+      demandManpowerDetailId: number;
       demandSpecialModuleId: number | null;
-      shortage: number | null;
-      reasonCode: string | null;
-      reason: string | null;
+      shortage: number;
+      reasonCode: string;
+      reason: string;
     }>;
   }>;
 }
 
 export interface BackendSchedule {
   id: number;
-  demandId: number | null;
-  staffId: number | null;
-  demandManpowerDetailId: number | null;
+  demandId: number;
+  staffId: number;
+  demandManpowerDetailId: number;
   demandSpecialModuleId: number | null;
-  date: string | null;
-  percentage: number | null;
-  product: string | null;
+  date: string;
+  percentage: number;
+  product: string;
   testManager: string | null;
-  versionType: string | null;
+  versionType: string;
   version: string | null;
-  lockVersion: number | null;
-  published: boolean | null;
-  createdAt: string | null;
+  lockVersion: number;
+  published: boolean;
+  createdAt: string;
 }
 
 export interface DemandFulfillment {
-  demandId: number | null;
+  demandId: number;
   fullySatisfied: boolean;
   requiresHistoricalClassification: boolean;
   specialModuleGaps: Array<{
-    demandManpowerDetailId: number | null;
-    demandSpecialModuleId: number | null;
-    moduleId: number | null;
-    moduleName: string | null;
-    testType: string | null;
-    required: number | null;
-    allocated: number | null;
-    shortage: number | null;
+    demandManpowerDetailId: number;
+    demandSpecialModuleId: number;
+    moduleId: number;
+    moduleName: string;
+    testType: string;
+    required: number;
+    allocated: number;
+    shortage: number;
   }>;
   generalGaps: Array<{
-    demandManpowerDetailId: number | null;
+    demandManpowerDetailId: number;
     demandSpecialModuleId: number | null;
     moduleId: number | null;
     moduleName: string | null;
-    testType: string | null;
-    required: number | null;
-    allocated: number | null;
-    shortage: number | null;
+    testType: string;
+    required: number;
+    allocated: number;
+    shortage: number;
   }>;
   summary: Array<{
-    demandManpowerDetailId: number | null;
-    testType: string | null;
-    required: number | null;
-    specialRequired: number | null;
-    generalRequired: number | null;
-    specialAllocated: number | null;
-    generalAllocated: number | null;
-    shortage: number | null;
+    demandManpowerDetailId: number;
+    testType: string;
+    required: number;
+    specialRequired: number;
+    generalRequired: number;
+    specialAllocated: number;
+    generalAllocated: number;
+    shortage: number;
   }>;
-  totalRequired: number | null;
-  totalAllocated: number | null;
-  totalShortage: number | null;
+  totalRequired: number;
+  totalAllocated: number;
+  totalShortage: number;
 }
 
 export interface BatchPublishResponse {

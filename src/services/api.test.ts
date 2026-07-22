@@ -2,9 +2,83 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import api, {
   type BatchPublishResponse,
   type BackendSchedule,
+  type DemandFulfillment,
   type ScheduleRecommendationRequest,
   type ScheduleWriteRequest,
+  type TestModule,
+  type TestModuleWriteRequest,
 } from './api';
+
+const moduleWriteRequest: TestModuleWriteRequest = {
+  moduleName: '支付模块',
+  testType: '功能测试',
+  sortOrder: 1,
+};
+
+const completeModuleResponse: TestModule = {
+  id: 1,
+  moduleName: '支付模块',
+  testType: '功能测试',
+  enabled: true,
+  sortOrder: 1,
+  lockVersion: 0,
+  createdAt: '2026-07-01T00:00:00',
+  updatedAt: '2026-07-01T00:00:00',
+  referenced: null,
+};
+
+// @ts-expect-error response metadata is required; write inputs use the separate type above
+const incompleteModuleResponse: TestModule = {
+  id: 1,
+  moduleName: '支付模块',
+  testType: '功能测试',
+  enabled: true,
+  sortOrder: 1,
+};
+
+const completeFulfillmentResponse: DemandFulfillment = {
+  demandId: 10,
+  fullySatisfied: false,
+  requiresHistoricalClassification: false,
+  specialModuleGaps: [{
+    demandManpowerDetailId: 30,
+    demandSpecialModuleId: 40,
+    moduleId: 50,
+    moduleName: '支付模块',
+    testType: '功能测试',
+    required: 2,
+    allocated: 1,
+    shortage: 1,
+  }],
+  generalGaps: [{
+    demandManpowerDetailId: 30,
+    demandSpecialModuleId: null,
+    moduleId: null,
+    moduleName: null,
+    testType: '功能测试',
+    required: 1,
+    allocated: 0,
+    shortage: 1,
+  }],
+  summary: [{
+    demandManpowerDetailId: 30,
+    testType: '功能测试',
+    required: 3,
+    specialRequired: 2,
+    generalRequired: 1,
+    specialAllocated: 1,
+    generalAllocated: 0,
+    shortage: 2,
+  }],
+  totalRequired: 3,
+  totalAllocated: 1,
+  totalShortage: 2,
+};
+
+void moduleWriteRequest;
+void completeModuleResponse;
+void incompleteModuleResponse;
+void completeFulfillmentResponse;
 
 function respond(data: unknown, message = 'success') {
   return new Response(JSON.stringify({ code: 200, message, data }), {
