@@ -71,7 +71,7 @@ public class DemandFulfillmentService {
         BigDecimal required = value(demand.getManpowerDemand());
         BigDecimal allocated = percentToDays(schedules.stream()
             .filter(this::isHistoricalSchedule)
-            .map(Schedule::getPercentage)
+            .map(this::percentageOrZero)
             .reduce(0, Integer::sum));
         BigDecimal shortage = shortage(required, allocated);
         return new DemandFulfillmentResponse(
@@ -90,7 +90,10 @@ public class DemandFulfillmentService {
         List<DemandFulfillmentResponse.Gap> generalGaps = new ArrayList<>();
         List<DemandFulfillmentResponse.Summary> summaries = new ArrayList<>();
         BigDecimal totalRequired = BigDecimal.ZERO;
-        BigDecimal totalAllocated = BigDecimal.ZERO;
+        BigDecimal totalAllocated = percentToDays(schedules.stream()
+            .filter(this::isHistoricalSchedule)
+            .map(this::percentageOrZero)
+            .reduce(0, Integer::sum));
 
         for (DemandManpowerDetail detail : details) {
             List<DemandSpecialModule> groupSpecials = specials.stream()
@@ -104,7 +107,7 @@ public class DemandFulfillmentService {
             for (DemandSpecialModule special : groupSpecials) {
                 BigDecimal allocated = percentToDays(schedules.stream()
                     .filter(schedule -> same(special.getId(), schedule.getDemandSpecialModuleId()))
-                    .map(Schedule::getPercentage)
+                    .map(this::percentageOrZero)
                     .reduce(0, Integer::sum));
                 specialAllocated = specialAllocated.add(allocated);
                 BigDecimal gap = shortage(special.getManpowerDemand(), allocated);
@@ -118,7 +121,7 @@ public class DemandFulfillmentService {
             BigDecimal generalAllocated = percentToDays(schedules.stream()
                 .filter(schedule -> same(detail.getId(), schedule.getDemandManpowerDetailId()))
                 .filter(schedule -> schedule.getDemandSpecialModuleId() == null)
-                .map(Schedule::getPercentage)
+                .map(this::percentageOrZero)
                 .reduce(0, Integer::sum));
             BigDecimal generalGap = shortage(generalRequired, generalAllocated);
             if (generalGap.signum() > 0) {
@@ -174,6 +177,10 @@ public class DemandFulfillmentService {
     private BigDecimal percentToDays(Integer percentage) {
         return BigDecimal.valueOf(percentage == null ? 0 : percentage)
             .divide(ONE_HUNDRED, 1, RoundingMode.UNNECESSARY);
+    }
+
+    private int percentageOrZero(Schedule schedule) {
+        return schedule.getPercentage() == null ? 0 : schedule.getPercentage();
     }
 
     private BigDecimal shortage(BigDecimal required, BigDecimal allocated) {

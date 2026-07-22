@@ -103,6 +103,9 @@ class DemandFulfillmentServiceTest {
 
         assertTrue(result.requiresHistoricalClassification());
         assertFalse(result.fullySatisfied());
+        assertEquals(new BigDecimal("1.0"), result.specialModuleGaps().getFirst().shortage());
+        assertEquals(new BigDecimal("1.0"), result.generalGaps().getFirst().shortage());
+        assertEquals(new BigDecimal("2.0"), result.totalAllocated());
     }
 
     @Test
@@ -142,6 +145,7 @@ class DemandFulfillmentServiceTest {
         assertFalse(result.requiresHistoricalClassification());
         assertTrue(result.fullySatisfied());
         assertTrue(result.generalGaps().isEmpty());
+        assertEquals(new BigDecimal("4.0"), result.totalAllocated());
     }
 
     @Test
