@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import dayjs from 'dayjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -40,7 +40,10 @@ vi.mock('./workbench/WorkbenchSummaryBar', () => ({
     <button onClick={props.onDateRecommend}>按指定日期排班</button>
     <button onClick={props.onFullAllocateRecommend}>按全部需求排班</button>
     <button onClick={props.onClearAllDrafts}>清除全部草稿</button>
-    <button onClick={props.onPublishAll}>发布全部待发布排班</button>
+    <button
+      data-publish-loading={String(Boolean(props.publishLoading))}
+      onClick={props.onPublishAll}
+    >发布全部待发布排班</button>
   </div>,
 }));
 vi.mock('./workbench/DemandQueue', () => ({
@@ -630,6 +633,78 @@ describe('ScheduleWorkbench backend scheduling flows', () => {
     expect(mocks.warning).toHaveBeenCalled();
     render(mocks.warning.mock.calls[0][0].content);
     expect(screen.getByText(/SPECIAL_MODULE_UNFULFILLED/)).toHaveTextContent('支付模块仍缺少 0.5 人天');
+  });
+
+  it('discards stale batch failures when a newer delete reconciles first', async () => {
+    const batchRefresh = deferred<any[]>();
+    mocks.api.batchPublishSchedules.mockResolvedValue({
+      success: [],
+      failed: [{ demandId: 1001, reasonCode: 'STALE_BATCH_FAILURE', reason: '旧批次失败原因' }],
+    });
+    await renderLoaded();
+    mocks.api.getPendingDemands
+      .mockReturnValueOnce(batchRefresh.promise)
+      .mockResolvedValue([{ ...demand }]);
+    mocks.api.getSchedules
+      .mockResolvedValueOnce([schedule])
+      .mockResolvedValue([]);
+
+    fireEvent.click(screen.getByText('发布全部待发布排班'));
+    await waitFor(() => expect(mocks.api.batchPublishSchedules).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.api.getPendingDemands.mock.calls.length).toBeGreaterThan(1));
+
+    fireEvent.click(screen.getByText('删除排班'));
+    await waitFor(() => expect(mocks.api.deleteSchedule).toHaveBeenCalledWith(9001));
+    await waitFor(() => expect(screen.getByTestId('schedule-count')).toHaveTextContent('0'));
+
+    batchRefresh.resolve([{ ...demand }]);
+    await waitFor(() => expect(screen.getByText('发布全部待发布排班'))
+      .toHaveAttribute('data-publish-loading', 'false'));
+
+    expect(mocks.api.batchPublishSchedules).toHaveBeenCalledTimes(1);
+    expect(mocks.warning).not.toHaveBeenCalled();
+    expect(screen.getByTestId('publish-failure-count')).toHaveTextContent('0');
+    expect(screen.queryByText(/STALE_BATCH_FAILURE|旧批次失败原因/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('schedule-count')).toHaveTextContent('0');
+  });
+
+  it('does not let an invalidated first batch clear a newer batch loading state', async () => {
+    const firstRefresh = deferred<any[]>();
+    const secondBatch = deferred<any>();
+    mocks.api.batchPublishSchedules
+      .mockResolvedValueOnce({ success: [{ demandId: 1001, scheduleCount: 1 }], failed: [] })
+      .mockReturnValueOnce(secondBatch.promise);
+    mocks.api.moveSchedule.mockResolvedValue({ ...schedule, date: '2026-07-23' });
+    await renderLoaded();
+    mocks.api.getPendingDemands
+      .mockReturnValueOnce(firstRefresh.promise)
+      .mockResolvedValue([{ ...demand }]);
+    mocks.api.getSchedules
+      .mockResolvedValueOnce([schedule])
+      .mockResolvedValue([{ ...schedule, date: '2026-07-23' }]);
+
+    const publishButton = screen.getByText('发布全部待发布排班');
+    fireEvent.click(publishButton);
+    await waitFor(() => expect(mocks.api.batchPublishSchedules).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.api.getPendingDemands.mock.calls.length).toBeGreaterThan(1));
+
+    fireEvent.click(screen.getByText('移动排班'));
+    await waitFor(() => expect(mocks.api.moveSchedule).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(publishButton).toHaveAttribute('data-publish-loading', 'false'));
+
+    fireEvent.click(publishButton);
+    expect(mocks.api.batchPublishSchedules).toHaveBeenCalledTimes(2);
+    expect(publishButton).toHaveAttribute('data-publish-loading', 'true');
+
+    await act(async () => {
+      firstRefresh.resolve([{ ...demand }]);
+      await firstRefresh.promise;
+    });
+    expect(publishButton).toHaveAttribute('data-publish-loading', 'true');
+    expect(mocks.messageSuccess).not.toHaveBeenCalledWith(expect.stringContaining('已成功发布'));
+
+    secondBatch.resolve({ success: [{ demandId: 1001, scheduleCount: 1 }], failed: [] });
+    await waitFor(() => expect(publishButton).toHaveAttribute('data-publish-loading', 'false'));
   });
 
   it('classifies a double-null historical schedule without changing placement', async () => {

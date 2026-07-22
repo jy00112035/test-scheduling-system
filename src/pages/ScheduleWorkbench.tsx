@@ -55,6 +55,12 @@ import type {
 
 const { confirm } = Modal;
 
+interface PublishRun {
+  session: number;
+  mutationSession: number;
+  kind: 'single' | 'batch';
+}
+
 // ============================================================
 
 const ScheduleWorkbench: React.FC = () => {
@@ -142,8 +148,9 @@ const ScheduleWorkbench: React.FC = () => {
   const mountedRef = useRef(true);
   const operationGenerationRef = useRef(0);
   const fetchGenerationRef = useRef(0);
+  const scheduleMutationGenerationRef = useRef(0);
   const recommendationRunRef = useRef<number | null>(null);
-  const publishRunRef = useRef<number | null>(null);
+  const publishRunRef = useRef<PublishRun | null>(null);
   const scheduleMutationIdsRef = useRef(new Set<number>());
   const classificationIdsRef = useRef(new Set<number>());
   const manualCreateRef = useRef(false);
@@ -165,7 +172,8 @@ const ScheduleWorkbench: React.FC = () => {
 
   useEffect(() => () => {
     mountedRef.current = false;
-    operationGenerationRef.current += 1;
+    const unmountSession = ++operationGenerationRef.current;
+    scheduleMutationGenerationRef.current = unmountSession;
     fetchGenerationRef.current += 1;
     recommendationRunRef.current = null;
     publishRunRef.current = null;
@@ -252,6 +260,28 @@ const ScheduleWorkbench: React.FC = () => {
     setPublishFailures([]);
     setConflictDetails([]);
   };
+
+  const beginScheduleMutation = () => ++operationGenerationRef.current;
+
+  const completeScheduleMutation = (
+    mutationSession: number,
+    ownerPublishSession?: number,
+  ) => {
+    if (mutationSession <= scheduleMutationGenerationRef.current) return false;
+    scheduleMutationGenerationRef.current = mutationSession;
+    const activePublish = publishRunRef.current;
+    if (activePublish
+        && activePublish.session !== ownerPublishSession
+        && activePublish.mutationSession < mutationSession) {
+      publishRunRef.current = null;
+      if (activePublish.kind === 'batch') setPublishAllLoading(false);
+    }
+    setPublishFailures([]);
+    return true;
+  };
+
+  const ownsScheduleMutation = (mutationSession: number) =>
+    scheduleMutationGenerationRef.current === mutationSession;
 
   const refreshAuthoritativeData = async (
     options: { invalidateDiagnostics?: boolean } = {},
@@ -407,7 +437,7 @@ const ScheduleWorkbench: React.FC = () => {
       return;
     }
 
-    const session = ++operationGenerationRef.current;
+    const session = beginScheduleMutation();
     recommendationRunRef.current = session;
     if (mode === 'FIXED_RANGE') {
       setDateRecModalOpen(false);
@@ -438,41 +468,47 @@ const ScheduleWorkbench: React.FC = () => {
           ? fixedIncludeSundays : fullIncludeSundays,
         replaceExistingDrafts: true,
       });
-      if (!mountedRef.current || recommendationRunRef.current !== session) return;
-
-      setRecommendationFulfillment(result.fulfillment);
-      const unfulfilled = new Set(
-        result.fulfillment
+      if (!mountedRef.current) return;
+      const mutationCurrent = completeScheduleMutation(session);
+      const ownsRecommendation = mutationCurrent && recommendationRunRef.current === session;
+      if (ownsRecommendation) {
+        setRecommendationFulfillment(result.fulfillment);
+        const unfulfilled = new Set(
+          result.fulfillment
+            .filter(item => !item.fullySatisfied || item.requiresHistoricalClassification)
+            .map(item => item.demandId),
+        );
+        setUnfulfilledDemands(unfulfilled);
+        setUnfulfilledDetails(result.fulfillment
           .filter(item => !item.fullySatisfied || item.requiresHistoricalClassification)
-          .map(item => item.demandId),
-      );
-      setUnfulfilledDemands(unfulfilled);
-      setUnfulfilledDetails(result.fulfillment
-        .filter(item => !item.fullySatisfied || item.requiresHistoricalClassification)
-        .map(item => {
-          const demand = demands.find(candidate => candidate.id === item.demandId);
-          const gaps = [...item.specialModuleGaps, ...item.generalGaps];
-          return {
-            product: demand?.product || `需求 ${item.demandId}`,
-            shortage: gaps.reduce((sum, gap) => sum + Number(gap.shortage || 0), 0),
-            details: gaps.map(gap => ({
-              testType: demand?.manpowerDetails?.find(
-                detail => detail.id === gap.demandManpowerDetailId,
-              )?.testType || '未分类',
-              shortage: Number(gap.shortage || 0),
-            })),
-            reasons: [
-              ...gaps.map(gap => `[${gap.reasonCode}] ${gap.reason}`),
-              ...(item.requiresHistoricalClassification ? ['历史排班尚未完成人力归属'] : []),
-            ],
-          };
-        }));
-
-      await reconcileAfterMutation(
-        `推荐排班完成：共生成 ${result.generatedSchedules.length} 条草稿排班`,
-        '推荐排班已生成，但数据刷新失败，请重试刷新',
-        {},
-      );
+          .map(item => {
+            const demand = demands.find(candidate => candidate.id === item.demandId);
+            const gaps = [...item.specialModuleGaps, ...item.generalGaps];
+            return {
+              product: demand?.product || `需求 ${item.demandId}`,
+              shortage: gaps.reduce((sum, gap) => sum + Number(gap.shortage || 0), 0),
+              details: gaps.map(gap => ({
+                testType: demand?.manpowerDetails?.find(
+                  detail => detail.id === gap.demandManpowerDetailId,
+                )?.testType || '未分类',
+                shortage: Number(gap.shortage || 0),
+              })),
+              reasons: [
+                ...gaps.map(gap => `[${gap.reasonCode}] ${gap.reason}`),
+                ...(item.requiresHistoricalClassification ? ['历史排班尚未完成人力归属'] : []),
+              ],
+            };
+          }));
+        await reconcileAfterMutation(
+          `推荐排班完成：共生成 ${result.generatedSchedules.length} 条草稿排班`,
+          '推荐排班已生成，但数据刷新失败，请重试刷新',
+          {},
+        );
+      } else {
+        try {
+          await refreshAuthoritativeData();
+        } catch { /* latest refresh failure owns the retry path */ }
+      }
     } catch (error: any) {
       if (!mountedRef.current || recommendationRunRef.current !== session) return;
       message.error(error?.message || '推荐排班失败');
@@ -512,9 +548,11 @@ const ScheduleWorkbench: React.FC = () => {
       cancelText: '取消',
       okType: 'danger',
       onOk: async () => {
+        const mutationSession = beginScheduleMutation();
         try {
           for (const s of unpublishdSchedules) {
             await api.deleteSchedule(s.id);
+            if (mountedRef.current) completeScheduleMutation(mutationSession);
           }
           setSchedules(prev => prev.filter(s => s.published));
           setPendingChangeDemandIds(new Set());
@@ -553,12 +591,27 @@ const ScheduleWorkbench: React.FC = () => {
       cancelText: '取消',
       onOk: async () => {
         if (publishRunRef.current !== null) return;
-        const session = ++operationGenerationRef.current;
-        publishRunRef.current = session;
+        const mutationSession = beginScheduleMutation();
+        const run: PublishRun = {
+          session: mutationSession,
+          mutationSession,
+          kind: 'batch',
+        };
+        publishRunRef.current = run;
         setPublishAllLoading(true);
         try {
           const result = await api.batchPublishSchedules({ demandIds });
-          if (!mountedRef.current || publishRunRef.current !== session) return;
+          if (!mountedRef.current) return;
+          const mutationCurrent = completeScheduleMutation(mutationSession, run.session);
+          const reconciled = mutationCurrent
+            ? await reconcileAfterMutation(
+              null,
+              '批量发布已处理，但数据刷新失败，请重试刷新',
+            )
+            : await refreshAuthoritativeData().catch(() => false);
+          if (!reconciled
+              || publishRunRef.current !== run
+              || !ownsScheduleMutation(mutationSession)) return;
           const succeeded = new Set(result.success.map(item => item.demandId));
           setPendingChangeDemandIds(previous => {
             const next = new Set(previous);
@@ -584,25 +637,20 @@ const ScheduleWorkbench: React.FC = () => {
                 </div>
               ),
             });
+          } else {
+            message.success(`已成功发布 ${result.success.length} 个需求的排班`);
           }
-          await reconcileAfterMutation(
-            result.failed.length === 0
-              ? `已成功发布 ${result.success.length} 个需求的排班` : null,
-            '批量发布已处理，但数据刷新失败，请重试刷新',
-          );
-          if (mountedRef.current && publishRunRef.current === session) {
-            setPublishFailures(result.failed);
-          }
+          setPublishFailures(result.failed);
         } catch (error: any) {
-          if (mountedRef.current && publishRunRef.current === session) {
+          if (mountedRef.current && publishRunRef.current === run) {
             message.error(error?.message || '发布失败');
             await refreshAfterMutationFailure();
           }
         } finally {
-          if (publishRunRef.current === session) {
+          if (publishRunRef.current === run) {
             publishRunRef.current = null;
+            if (mountedRef.current) setPublishAllLoading(false);
           }
-          if (mountedRef.current) setPublishAllLoading(false);
         }
       },
     });
@@ -621,11 +669,26 @@ const ScheduleWorkbench: React.FC = () => {
       return;
     }
 
-    const session = ++operationGenerationRef.current;
-    publishRunRef.current = session;
+    const mutationSession = beginScheduleMutation();
+    const run: PublishRun = {
+      session: mutationSession,
+      mutationSession,
+      kind: 'single',
+    };
+    publishRunRef.current = run;
     try {
       await api.publishSchedules(demandId);
-      if (!mountedRef.current || publishRunRef.current !== session) return;
+      if (!mountedRef.current) return;
+      const mutationCurrent = completeScheduleMutation(mutationSession, run.session);
+      const reconciled = mutationCurrent
+        ? await reconcileAfterMutation(
+          null,
+          '排期已发布，但数据刷新失败，请重试刷新',
+        )
+        : await refreshAuthoritativeData().catch(() => false);
+      if (!reconciled
+          || publishRunRef.current !== run
+          || !ownsScheduleMutation(mutationSession)) return;
       setPendingChangeDemandIds(previous => {
         const next = new Set(previous);
         next.delete(demandId);
@@ -636,17 +699,14 @@ const ScheduleWorkbench: React.FC = () => {
         next.delete(demandId);
         return next;
       });
-      await reconcileAfterMutation(
-        '排期已发布',
-        '排期已发布，但数据刷新失败，请重试刷新',
-      );
+      message.success('排期已发布');
     } catch (error: any) {
-      if (mountedRef.current && publishRunRef.current === session) {
+      if (mountedRef.current && publishRunRef.current === run) {
         message.error(error?.message || '发布失败');
         await refreshAfterMutationFailure();
       }
     } finally {
-      if (publishRunRef.current === session) publishRunRef.current = null;
+      if (publishRunRef.current === run) publishRunRef.current = null;
     }
   };
 
@@ -680,8 +740,11 @@ const ScheduleWorkbench: React.FC = () => {
       okType: 'danger',
       cancelText: '取消',
       onOk: async () => {
+        const mutationSession = beginScheduleMutation();
         try {
           await api.deleteSchedulesByDemand(demandId, pubCount > 0 ? 'all' : 'draft_only');
+          if (!mountedRef.current) return;
+          completeScheduleMutation(mutationSession);
           setPendingChangeDemandIds(prev => { const next = new Set(prev); next.delete(demandId); return next; });
           await reconcileAfterMutation(
             `已清除 ${demandSchedules.length} 条排班`,
@@ -822,6 +885,7 @@ const ScheduleWorkbench: React.FC = () => {
     }
 
     scheduleMutationIdsRef.current.add(schedule.id);
+    const mutationSession = beginScheduleMutation();
     try {
       const moved = await api.moveSchedule(schedule.id, {
         staffId: targetStaff.id,
@@ -829,6 +893,7 @@ const ScheduleWorkbench: React.FC = () => {
         percentage: normalizeSchedulePercentage(schedule.percentage),
       });
       if (!mountedRef.current) return;
+      completeScheduleMutation(mutationSession);
       setSchedules(previous => previous.map(item => item.id === schedule.id
         ? {
           ...item,
@@ -968,10 +1033,12 @@ const ScheduleWorkbench: React.FC = () => {
           throw new Error('排班校验未通过');
         }
       }
+      const mutationSession = beginScheduleMutation();
       const saved = requests.length === 1
         ? [await api.createSchedule(requests[0])]
         : await api.createSchedulesBatch(requests);
       if (!mountedRef.current) return;
+      completeScheduleMutation(mutationSession);
       setSchedules(previous => [
         ...previous,
         ...saved.map(schedule => ({
@@ -1014,9 +1081,11 @@ const ScheduleWorkbench: React.FC = () => {
     }
     if (scheduleMutationIdsRef.current.has(schedule.id)) return;
     scheduleMutationIdsRef.current.add(schedule.id);
+    const mutationSession = beginScheduleMutation();
     try {
       await api.deleteSchedule(schedule.id);
       if (!mountedRef.current) return;
+      completeScheduleMutation(mutationSession);
       setSchedules(prev => prev.filter(s => s.id !== schedule.id));
       await reconcileAfterMutation(
         '已删除排班',
@@ -1042,6 +1111,7 @@ const ScheduleWorkbench: React.FC = () => {
   const handleEditConfirm = async () => {
     if (!editingSchedule || scheduleMutationIdsRef.current.has(editingSchedule.id)) return;
     scheduleMutationIdsRef.current.add(editingSchedule.id);
+    const mutationSession = beginScheduleMutation();
     setEditLoading(true);
     try {
       const moved = await api.moveSchedule(editingSchedule.id, {
@@ -1050,6 +1120,7 @@ const ScheduleWorkbench: React.FC = () => {
         percentage: normalizeSchedulePercentage(editPercentage),
       });
       if (!mountedRef.current) return;
+      completeScheduleMutation(mutationSession);
       setSchedules(previous => previous.map(schedule => schedule.id === editingSchedule.id
         ? {
           ...schedule,
@@ -1093,12 +1164,14 @@ const ScheduleWorkbench: React.FC = () => {
     }
 
     classificationIdsRef.current.add(schedule.id);
+    const mutationSession = beginScheduleMutation();
     try {
       await api.classifySchedule(schedule.id, {
         demandManpowerDetailId,
         demandSpecialModuleId: draft?.demandSpecialModuleId ?? null,
       });
       if (!mountedRef.current) return;
+      completeScheduleMutation(mutationSession);
       await reconcileAfterMutation(
         '历史排班已归类',
         '历史排班归类已保存，但数据刷新失败，请重试刷新',
