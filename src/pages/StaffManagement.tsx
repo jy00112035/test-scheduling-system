@@ -148,11 +148,16 @@ const StaffManagement: React.FC = () => {
   const [modules, setModules] = useState<TestModule[]>([]);
   const [modulesLoading, setModulesLoading] = useState(true);
   const [modulesError, setModulesError] = useState<string | null>(null);
+  const [staffSaving, setStaffSaving] = useState(false);
+  const [importSaving, setImportSaving] = useState(false);
   const mountedRef = useRef(true);
   const moduleLoadGenerationRef = useRef(0);
   const editSessionRef = useRef(0);
   const importGenerationRef = useRef(0);
   const importReaderRef = useRef<FileReader | null>(null);
+  const staffSaveSessionRef = useRef<number | null>(null);
+  const importSaveGenerationRef = useRef(0);
+  const importSaveSessionRef = useRef<number | null>(null);
   const familiarModuleEditRef = useRef({ session: 0, initialized: false, changed: false, isCreate: false });
   const selectedFamiliarModuleIds = Form.useWatch('familiarModuleIds', form) || [];
 
@@ -165,8 +170,11 @@ const StaffManagement: React.FC = () => {
       mountedRef.current = false;
       editSessionRef.current += 1;
       importGenerationRef.current += 1;
+      importSaveGenerationRef.current += 1;
       importReaderRef.current?.abort();
       importReaderRef.current = null;
+      staffSaveSessionRef.current = null;
+      importSaveSessionRef.current = null;
     };
   }, []);
 
@@ -204,21 +212,21 @@ const StaffManagement: React.FC = () => {
   }, [modules]);
 
   const fetchStaffs = async () => {
-    setLoading(true);
+    if (mountedRef.current) setLoading(true);
     try {
       const data = await api.getStaff();
-      setStaffs(data);
+      if (mountedRef.current) setStaffs(data);
     } catch (error: any) {
-      message.error(error.message || '获取人员列表失败');
+      if (mountedRef.current) message.error(error.message || '获取人员列表失败');
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
   const fetchFieldConfigs = async () => {
     try {
       const configs = await api.getFieldConfigs();
-      setFieldConfigs(configs);
+      if (mountedRef.current) setFieldConfigs(configs);
     } catch (error) {
       console.error('获取字段配置失败', error);
     }
@@ -237,6 +245,7 @@ const StaffManagement: React.FC = () => {
   };
 
   const resetImportPreview = () => {
+    if (importSaveSessionRef.current !== null) return;
     importGenerationRef.current += 1;
     importReaderRef.current?.abort();
     importReaderRef.current = null;
@@ -250,6 +259,7 @@ const StaffManagement: React.FC = () => {
 
   // 打开导入弹窗
   const openImportModal = () => {
+    if (importSaveSessionRef.current !== null) return;
     resetImportPreview();
     setImportModalVisible(true);
   };
@@ -261,6 +271,7 @@ const StaffManagement: React.FC = () => {
 
   // 处理文件选择
   const handleFileChange = (info: any) => {
+    if (importSaveSessionRef.current !== null) return;
     const file = info.file.originFileObj || info.file;
     if (file) {
       resetImportPreview();
@@ -270,6 +281,7 @@ const StaffManagement: React.FC = () => {
 
   // 处理导入确认
   const processImport = async () => {
+    if (importSaveSessionRef.current !== null) return;
     if (!selectedFile) {
       message.error('请选择要导入的文件');
       return;
@@ -427,6 +439,7 @@ const StaffManagement: React.FC = () => {
   };
 
   const handleImportConfirm = async () => {
+    if (importSaveSessionRef.current !== null) return;
     if (importData.length === 0) {
       message.error('没有可导入的数据');
       return;
@@ -436,32 +449,53 @@ const StaffManagement: React.FC = () => {
       return;
     }
 
+    const session = ++importSaveGenerationRef.current;
+    const ownsImportSave = () => (
+      mountedRef.current
+      && importSaveSessionRef.current === session
+      && importSaveGenerationRef.current === session
+    );
+    importSaveSessionRef.current = session;
+    setImportSaving(true);
     setImportLoading(true);
     try {
       for (const row of importData) {
         const { familiarModuleNames: _names, unmatchedModules: _unmatched, unavailableModules: _unavailable, ...staffData } = row;
         await api.createStaff(staffData);
+        if (!ownsImportSave()) return;
       }
-      await syncFieldConfigs(importData);
+      await syncFieldConfigs(importData, ownsImportSave);
+      if (!ownsImportSave()) return;
       await fetchFieldConfigs();
+      if (!ownsImportSave()) return;
       message.success(`成功导入 ${importData.length} 条人员数据`);
       setImportModalVisible(false);
       setImportData([]);
       fetchStaffs();
     } catch (error: any) {
-      message.error(error.message || '导入失败');
+      if (ownsImportSave()) {
+        message.error(error.message || '导入失败');
+      }
     } finally {
-      setImportLoading(false);
+      if (importSaveSessionRef.current === session) {
+        importSaveSessionRef.current = null;
+        if (mountedRef.current) {
+          setImportSaving(false);
+          setImportLoading(false);
+        }
+      }
     }
   };
 
   const handleImportCancel = () => {
+    if (importSaveSessionRef.current !== null) return;
     resetImportPreview();
     setImportModalVisible(false);
     message.warning('已取消本次导入');
   };
 
   const handleAdd = () => {
+    if (staffSaveSessionRef.current !== null) return;
     const session = ++editSessionRef.current;
     familiarModuleEditRef.current = { session, initialized: true, changed: false, isCreate: true };
     setEditingStaff(null);
@@ -470,6 +504,7 @@ const StaffManagement: React.FC = () => {
   };
 
   const handleEdit = async (record: Staff) => {
+    if (staffSaveSessionRef.current !== null) return;
     const session = ++editSessionRef.current;
     const familiarModuleIds = Array.isArray(record.familiarModules)
       ? record.familiarModules.map(module => module.id)
@@ -506,7 +541,8 @@ const StaffManagement: React.FC = () => {
     }
   };
 
-  const closeStaffModal = () => {
+  const closeStaffModal = (force = false) => {
+    if (staffSaveSessionRef.current !== null && !force) return;
     editSessionRef.current += 1;
     familiarModuleEditRef.current = { session: editSessionRef.current, initialized: false, changed: false, isCreate: false };
     setEditingStaff(null);
@@ -548,8 +584,12 @@ const StaffManagement: React.FC = () => {
     });
   };
 
-  const syncFieldConfigs = async (rows: { groupName?: string; testType?: string }[]) => {
+  const syncFieldConfigs = async (
+    rows: { groupName?: string; testType?: string }[],
+    shouldContinue: () => boolean = () => true,
+  ) => {
     const configs = await api.getFieldConfigs();
+    if (!shouldContinue()) return false;
     const newGroupNames = [...new Set(rows.map(r => r.groupName).filter(Boolean))];
     const newTestTypes = [...new Set(rows.map(r => r.testType).filter(Boolean))];
 
@@ -576,11 +616,22 @@ const StaffManagement: React.FC = () => {
           ...config,
           options: newOptions.join(','),
         });
+        if (!shouldContinue()) return false;
       }
     }
+    return true;
   };
 
   const handleSubmit = async (values: any) => {
+    if (staffSaveSessionRef.current !== null) return;
+    const session = editSessionRef.current;
+    const ownsStaffSave = () => (
+      mountedRef.current
+      && staffSaveSessionRef.current === session
+      && editSessionRef.current === session
+    );
+    staffSaveSessionRef.current = session;
+    setStaffSaving(true);
     try {
       const { familiarModuleIds, ...staffValues } = values;
       const staffData = {
@@ -596,18 +647,34 @@ const StaffManagement: React.FC = () => {
 
       if (editingStaff) {
         await api.updateStaff(editingStaff.id, staffData);
+        if (!ownsStaffSave()) return;
         message.success('人员信息已更新');
       } else {
         await api.createStaff(staffData);
-        await syncFieldConfigs([staffData]);
+        if (!ownsStaffSave()) return;
+        await syncFieldConfigs([staffData], ownsStaffSave);
+        if (!ownsStaffSave()) return;
         await fetchFieldConfigs();
+        if (!ownsStaffSave()) return;
         message.success('人员已添加，初始登录密码为 12345678');
       }
 
-      closeStaffModal();
+      if (!ownsStaffSave()) return;
+      staffSaveSessionRef.current = null;
+      setStaffSaving(false);
+      closeStaffModal(true);
       fetchStaffs();
     } catch (error: any) {
-      message.error(error.message || '操作失败');
+      if (ownsStaffSave()) {
+        message.error(error.message || '操作失败');
+      }
+    } finally {
+      if (staffSaveSessionRef.current === session) {
+        staffSaveSessionRef.current = null;
+        if (mountedRef.current) {
+          setStaffSaving(false);
+        }
+      }
     }
   };
 
@@ -653,6 +720,7 @@ const StaffManagement: React.FC = () => {
   };
 
   const removeImportRow = (empNo: string) => {
+    if (importSaveSessionRef.current !== null) return;
     setImportData(rows => rows.filter(row => row.empNo !== empNo));
   };
 
@@ -868,9 +936,13 @@ const StaffManagement: React.FC = () => {
       <Modal
         title={editingStaff ? '编辑人员' : '添加人员'}
         open={isModalVisible}
-        onCancel={closeStaffModal}
+        onCancel={staffSaving ? undefined : () => closeStaffModal()}
         footer={null}
         width={600}
+        confirmLoading={staffSaving}
+        closable={!staffSaving}
+        maskClosable={!staffSaving}
+        keyboard={!staffSaving}
       >
         <Form
           form={form}
@@ -1053,10 +1125,12 @@ const StaffManagement: React.FC = () => {
                 type="primary"
                 htmlType="submit"
                 icon={<SaveOutlined />}
+                loading={staffSaving}
+                disabled={staffSaving}
               >
                 保存
               </Button>
-              <Button onClick={() => setIsModalVisible(false)}>
+              <Button onClick={() => closeStaffModal()} disabled={staffSaving}>
                 取消
               </Button>
             </Space>
@@ -1068,10 +1142,14 @@ const StaffManagement: React.FC = () => {
       <Modal
         title="导入人员"
         open={importModalVisible}
-        onCancel={handleImportCancel}
+        onCancel={importSaving ? undefined : handleImportCancel}
         footer={null}
         width={600}
         destroyOnClose
+        confirmLoading={importSaving}
+        closable={!importSaving}
+        maskClosable={!importSaving}
+        keyboard={!importSaving}
       >
         {importStep === 1 ? (
           <div>
@@ -1104,8 +1182,8 @@ const StaffManagement: React.FC = () => {
             </div>
             <div style={{ textAlign: 'right' }}>
               <Space>
-                <Button onClick={handleImportCancel}>取消</Button>
-                <Button type="primary" onClick={processImport} loading={importLoading} disabled={!selectedFile}>
+                <Button onClick={handleImportCancel} disabled={importSaving}>取消</Button>
+                <Button type="primary" onClick={processImport} loading={importLoading} disabled={!selectedFile || importSaving}>
                   确定
                 </Button>
               </Space>
@@ -1175,7 +1253,7 @@ const StaffManagement: React.FC = () => {
                 },
                 { title: '操作', key: 'action', width: 72,
                   render: (_: unknown, row: ImportRow) => (
-                    <Button type="link" danger size="small" onClick={() => removeImportRow(row.empNo)} aria-label={`移除${row.name}`}>
+                    <Button type="link" danger size="small" onClick={() => removeImportRow(row.empNo)} aria-label={`移除${row.name}`} disabled={importSaving}>
                       移除
                     </Button>
                   ),
@@ -1184,9 +1262,9 @@ const StaffManagement: React.FC = () => {
             />
             <div style={{ marginTop: 16, textAlign: 'right' }}>
               <Space>
-                <Button onClick={resetImportPreview}>返回重新选择</Button>
-                <Button onClick={handleImportCancel}>取消</Button>
-                <Button type="primary" onClick={handleImportConfirm} loading={importLoading} disabled={importData.length === 0 || importData.some(row => row.unmatchedModules.length > 0 || row.unavailableModules.length > 0)}>
+                <Button onClick={resetImportPreview} disabled={importSaving}>返回重新选择</Button>
+                <Button onClick={handleImportCancel} disabled={importSaving}>取消</Button>
+                <Button type="primary" onClick={handleImportConfirm} loading={importLoading} disabled={importSaving || importData.length === 0 || importData.some(row => row.unmatchedModules.length > 0 || row.unavailableModules.length > 0)}>
                   确认导入
                 </Button>
               </Space>

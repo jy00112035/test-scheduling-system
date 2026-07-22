@@ -5,6 +5,7 @@ import StaffManagement from './StaffManagement';
 import { api } from '../services/api';
 import type { FamiliarModule, TestModule } from '../types';
 import * as XLSX from 'xlsx';
+import { message } from 'antd';
 
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: { testType: '功能测试' } }) }));
 vi.mock('../context/UserRoleContext', () => ({
@@ -34,6 +35,12 @@ function deferred<T>() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+function workbookData(rows: Record<string, unknown>[]) {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), '人员');
+  return XLSX.write(workbook, { type: 'array', bookType: 'xlsx' });
 }
 
 describe('StaffManagement familiar modules', () => {
@@ -413,6 +420,120 @@ describe('StaffManagement familiar modules', () => {
       await waitFor(() => expect(TestFileReader.instances).toHaveLength(2));
       TestFileReader.instances[1].emit({ 工号: 'EMP010', 姓名: '已修正', 熟悉模块: '接口模块' });
       expect(await screen.findByText('已修正')).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader });
+    }
+  });
+
+  it('owns a staff save session so a double save only sends one update and cannot be canceled', async () => {
+    const pendingUpdate = deferred<unknown>();
+    const updateStaff = vi.spyOn(api, 'updateStaff').mockReturnValue(pendingUpdate.promise as any);
+    render(<StaffManagement />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText('编辑'));
+    const save = screen.getByRole('button', { name: /保存/ });
+    await user.click(save);
+    await user.click(save);
+
+    expect(updateStaff).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: /取\s*消/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
+    pendingUpdate.resolve({});
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑人员' })).not.toBeInTheDocument());
+  });
+
+  it('releases an owned staff save after rejection so the same modal can be saved again', async () => {
+    const updateStaff = vi.spyOn(api, 'updateStaff')
+      .mockRejectedValueOnce(new Error('保存失败'))
+      .mockResolvedValueOnce({});
+    render(<StaffManagement />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText('编辑'));
+    await user.click(screen.getByRole('button', { name: /保存/ }));
+    await waitFor(() => expect(updateStaff).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('dialog', { name: '编辑人员' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /保存/ })).not.toBeDisabled();
+    await user.click(screen.getByRole('button', { name: /保存/ }));
+    await waitFor(() => expect(updateStaff).toHaveBeenCalledTimes(2));
+  });
+
+  it('suppresses staff save completion after unmount', async () => {
+    const pendingUpdate = deferred<unknown>();
+    vi.spyOn(api, 'updateStaff').mockReturnValue(pendingUpdate.promise as any);
+    const success = vi.spyOn(message, 'success');
+    const { unmount } = render(<StaffManagement />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText('编辑'));
+    await user.click(screen.getByRole('button', { name: /保存/ }));
+    unmount();
+    pendingUpdate.resolve({});
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(success).not.toHaveBeenCalledWith('人员信息已更新');
+  });
+
+  it('owns an import save sequence, disabling close controls and ignoring a duplicate confirm', async () => {
+    const firstCreate = deferred<unknown>();
+    const createStaff = vi.spyOn(api, 'createStaff').mockReturnValueOnce(firstCreate.promise as any).mockResolvedValueOnce({ staff: {}, generatedPassword: '' });
+    const OriginalFileReader = globalThis.FileReader;
+    class TestFileReader {
+      onload: ((event: any) => void) | null = null;
+      readAsArrayBuffer() { this.onload?.({ target: { result: workbookData([
+        { 工号: 'EMP020', 姓名: '甲', 所属项目: '功能测试组' },
+        { 工号: 'EMP021', 姓名: '乙', 所属项目: '功能测试组' },
+      ]) } }); }
+      abort() {}
+    }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      render(<StaffManagement />);
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      await user.upload(document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement, new File(['rows'], 'staff.xlsx'));
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+      const confirm = await screen.findByRole('button', { name: '确认导入' });
+      await user.click(confirm);
+      await user.click(confirm);
+
+      expect(createStaff).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('button', { name: /取\s*消/ })).toBeDisabled();
+      expect(screen.getByRole('button', { name: '返回重新选择' })).toBeDisabled();
+      expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
+      firstCreate.resolve({});
+      await waitFor(() => expect(createStaff).toHaveBeenCalledTimes(2));
+    } finally {
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader });
+    }
+  });
+
+  it('stops an import sequence after unmount instead of issuing the next staff create', async () => {
+    const firstCreate = deferred<unknown>();
+    const createStaff = vi.spyOn(api, 'createStaff').mockReturnValue(firstCreate.promise as any);
+    const OriginalFileReader = globalThis.FileReader;
+    class TestFileReader {
+      onload: ((event: any) => void) | null = null;
+      readAsArrayBuffer() { this.onload?.({ target: { result: workbookData([
+        { 工号: 'EMP022', 姓名: '甲', 所属项目: '功能测试组' },
+        { 工号: 'EMP023', 姓名: '乙', 所属项目: '功能测试组' },
+      ]) } }); }
+      abort() {}
+    }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      const { unmount } = render(<StaffManagement />);
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      await user.upload(document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement, new File(['rows'], 'staff.xlsx'));
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+      await user.click(await screen.findByRole('button', { name: '确认导入' }));
+      expect(createStaff).toHaveBeenCalledTimes(1);
+      unmount();
+      firstCreate.resolve({});
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(createStaff).toHaveBeenCalledTimes(1);
     } finally {
       Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader });
     }
