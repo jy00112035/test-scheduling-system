@@ -8,6 +8,7 @@ interface SpecialModuleDemandEditorProps {
   modules: TestModule[];
   manpowerByTestType: Record<string, number>;
   onChange: (rows: SpecialModuleDemandInput[]) => void;
+  disabled?: boolean;
 }
 
 const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
@@ -15,8 +16,9 @@ const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
   modules,
   manpowerByTestType,
   onChange,
+  disabled = false,
 }) => {
-  const validation = validateSpecialModuleRows(manpowerByTestType, rows);
+  const validation = validateSpecialModuleRows(manpowerByTestType, rows, modules);
   const updateRow = (index: number, row: SpecialModuleDemandInput) => {
     onChange(rows.map((item, itemIndex) => itemIndex === index ? row : item));
   };
@@ -24,8 +26,12 @@ const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
   return (
     <div>
       {rows.map((row, index) => {
+        const selectedModule = modules.find((module) => module.id === row.moduleId);
+        const authoritativeTestType = selectedModule?.testType ?? row.testType;
+        const rowInvalid = validation.rowIndexes?.includes(index) ?? false;
+        const rowErrorId = `special-module-row-error-${index}`;
         const availableModules = modules.filter((module) =>
-          module.testType === row.testType && (module.enabled || module.id === row.moduleId),
+          module.testType === authoritativeTestType && (module.enabled || module.id === row.moduleId),
         );
         const selectedByOtherRows = new Set(rows
           .filter((_, itemIndex) => itemIndex !== index)
@@ -36,9 +42,13 @@ const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
             <Select
               aria-label={`小组 ${index + 1}`}
               placeholder="选择小组"
-              value={row.testType || undefined}
+              value={authoritativeTestType || undefined}
               style={{ width: 150 }}
+              status={rowInvalid ? 'error' : undefined}
+              aria-invalid={rowInvalid}
+              aria-describedby={rowInvalid ? rowErrorId : undefined}
               onChange={(testType) => updateRow(index, { testType })}
+              disabled={disabled}
               options={Object.entries(manpowerByTestType)
                 .filter(([, manpower]) => manpower > 0)
                 .map(([testType]) => ({ value: testType, label: testType }))}
@@ -46,9 +56,12 @@ const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
             <Select
               aria-label={`特殊模块 ${index + 1}`}
               placeholder="选择特殊模块"
-              disabled={!row.testType}
+              disabled={disabled || !authoritativeTestType}
               value={row.moduleId}
               style={{ width: 180 }}
+              status={rowInvalid ? 'error' : undefined}
+              aria-invalid={rowInvalid}
+              aria-describedby={rowInvalid ? rowErrorId : undefined}
               onChange={(moduleId) => updateRow(index, { ...row, moduleId })}
               options={availableModules.map((module) => ({
                 value: module.id,
@@ -61,17 +74,24 @@ const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
             <InputNumber
               aria-label={`人力需求 ${index + 1}`}
               min={0.1}
+              max={999999999.9}
               step={0.1}
               precision={1}
               value={row.manpowerDemand}
+              disabled={disabled || (selectedModule?.enabled === false && row.historicalManpowerDemand !== undefined)}
+              status={rowInvalid ? 'error' : undefined}
+              aria-invalid={rowInvalid}
+              aria-describedby={rowInvalid ? rowErrorId : undefined}
               placeholder="人力需求"
               addonAfter="人/天"
               onChange={(manpowerDemand) => updateRow(index, { ...row, manpowerDemand: manpowerDemand ?? undefined })}
             />
+            {rowInvalid && <span id={rowErrorId} style={{ color: '#cf1322' }}>{validation.errorCode}</span>}
             <Button
               aria-label={`删除特殊模块需求 ${index + 1}`}
               icon={<DeleteOutlined />}
               onClick={() => onChange(rows.filter((_, itemIndex) => itemIndex !== index))}
+              disabled={disabled}
             />
           </Space>
         );
@@ -87,7 +107,7 @@ const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
       {!validation.valid && validation.errorCode !== 'SPECIAL_MODULE_EXCEEDS_GROUP' && validation.errorCode !== 'SPECIAL_MODULE_DUPLICATE' && (
         <div role="alert" style={{ color: '#cf1322', marginBottom: 8 }}>请完善特殊模块、人力需求和所属小组</div>
       )}
-      <Button icon={<PlusOutlined />} onClick={() => onChange([...rows, { testType: '' }])}>
+      <Button icon={<PlusOutlined />} disabled={disabled} onClick={() => onChange([...rows, { testType: '' }])}>
         新增特殊模块需求
       </Button>
     </div>

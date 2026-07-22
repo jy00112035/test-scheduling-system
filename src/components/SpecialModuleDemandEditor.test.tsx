@@ -83,6 +83,18 @@ describe('SpecialModuleDemandEditor', () => {
     expect(screen.getByText('已停用')).toBeInTheDocument();
   });
 
+  it('locks the amount for a restored disabled module', () => {
+    render(
+      <SpecialModuleDemandEditor
+        rows={[{ testType: '功能测试', moduleId: 11, manpowerDemand: 2, historicalManpowerDemand: 2 }]}
+        modules={[moduleFixture({ enabled: false })]}
+        manpowerByTestType={{ 功能测试: 8 }}
+        onChange={() => undefined}
+      />,
+    );
+    expect(screen.getByRole('spinbutton', { name: '人力需求 1' })).toBeDisabled();
+  });
+
   it('shows group-level overflow feedback', () => {
     render(
       <SpecialModuleDemandEditor

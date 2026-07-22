@@ -60,21 +60,26 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
   const [manpowerRemarks, setManpowerRemarks] = useState<Record<string, string>>({});
   const [specialModuleRows, setSpecialModuleRows] = useState<SpecialModuleDemandInput[]>([]);
   const [modules, setModules] = useState<TestModule[]>([]);
+  const [modulesAvailable, setModulesAvailable] = useState(true);
   const specialModuleSectionRef = useRef<HTMLDivElement>(null);
   const draftId = useRef(isEdit ? `edit_${initialValues?.id}` : 'new').current;
   const hasShownDraftPrompt = useRef(false);
 
   useEffect(() => {
     let active = true;
-    Promise.all([api.getFieldConfigs(), api.getTestModules()])
-      .then(([configs, moduleList]) => {
-        if (!active) return;
-        setFieldConfigs(configs);
-        setModules(moduleList);
-      })
-      .catch((error) => {
-        if (active) message.error(error.message || '获取特殊模块配置失败');
-      });
+    api.getFieldConfigs().then((configs) => {
+      if (active) setFieldConfigs(configs);
+    }).catch((error) => {
+      if (active) message.error(error.message || '获取字段配置失败');
+    });
+    api.getTestModules().then((moduleList) => {
+      if (active) setModules(moduleList);
+    }).catch((error) => {
+      if (active) {
+        setModulesAvailable(false);
+        message.error(error.message || '获取特殊模块配置失败');
+      }
+    });
     return () => { active = false; };
   }, []);
 
@@ -169,10 +174,16 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         setManpowerInputs(map);
         setManpowerRemarks(remarkMap);
       }
+      const enrichedModules = (initialValues.specialModuleDemands ?? []).map((row) => ({
+        id: row.moduleId, moduleName: row.moduleName, testType: row.testType, enabled: row.enabled,
+        sortOrder: 0, lockVersion: 0, createdAt: row.createdAt, updatedAt: row.updatedAt, referenced: true,
+      }));
+      if (enrichedModules.length > 0) setModules((current) => [...current, ...enrichedModules.filter((item) => !current.some((module) => module.id === item.id))]);
       setSpecialModuleRows((initialValues.specialModuleDemands ?? []).map((row) => ({
         moduleId: row.moduleId,
         testType: row.testType,
         manpowerDemand: row.manpowerDemand,
+        historicalManpowerDemand: row.enabled ? undefined : row.manpowerDemand,
       })));
     }
   }, [initialValues, form]);
@@ -183,24 +194,27 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
 
   const handleSubmit = async (values: any) => {
     // 构建按测试类型分组的人力需求明细
-    const testTypes = getSelectOptions('testType');
+    const testTypes = Array.from(new Set([...getSelectOptions('testType'), ...Object.keys(manpowerInputs)]));
     const manpowerDetails: DemandManpowerDetail[] = testTypes
       .filter(tt => (manpowerInputs[tt] || 0) > 0)
       .map(tt => ({
         testType: tt,
         manpowerDemand: manpowerInputs[tt],
-        remark: manpowerRemarks[tt] || undefined,
+        remark: manpowerRemarks[tt],
       }));
 
     if (manpowerDetails.length === 0) {
       message.warning('请至少为一个测试类型填写人力需求');
       return;
     }
-    const specialValidation = validateSpecialModuleRows(manpowerInputs, specialModuleRows);
+    const specialValidation = validateSpecialModuleRows(manpowerInputs, specialModuleRows, modules);
     if (!specialValidation.valid) {
       message.warning(specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP'
         ? `${specialValidation.testType}小组的特殊模块人力超过总人力`
         : '请完善特殊模块人力需求');
+      if (specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && specialValidation.testType) {
+        document.getElementById(`demand-manpower-${specialValidation.testType}`)?.focus();
+      }
       specialModuleSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
@@ -333,6 +347,8 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
                     {testType}
                   </Tag>
                   <InputNumber
+                    id={`demand-manpower-${testType}`}
+                    aria-label={`${testType}小组总人力`}
                     min={0}
                     step={0.1}
                     precision={1}
@@ -366,12 +382,13 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
                 rows={specialModuleRows}
                 modules={modules}
                 manpowerByTestType={manpowerInputs}
+                disabled={!modulesAvailable && specialModuleRows.length === 0}
                 onChange={(rows) => {
                   setSpecialModuleRows(rows);
                   onDirtyChange?.(true);
                 }}
               />
-              {calculateManpowerSummary(manpowerInputs, specialModuleRows).map((summary) => (
+              {calculateManpowerSummary(manpowerInputs, specialModuleRows, modules).map((summary) => (
                 <div key={summary.testType} style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
                   {summary.testType}：总人力 {summary.totalManpower.toFixed(1)}，特殊模块 {summary.specialManpower.toFixed(1)}，通用人力 {summary.generalManpower.toFixed(1)} 人/天
                 </div>

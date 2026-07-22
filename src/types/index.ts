@@ -80,6 +80,8 @@ export interface SpecialModuleDemandInput {
   moduleId?: number;
   testType: string;
   manpowerDemand?: number;
+  // UI-only replacement allowance for a persisted disabled module. Never send to the API.
+  historicalManpowerDemand?: number;
 }
 
 export interface ManpowerSummary {

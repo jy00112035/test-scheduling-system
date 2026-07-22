@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Table, Button, Space, Popconfirm, message, Tag, Modal, DatePicker, InputNumber, Divider, Select } from 'antd';
 import { CheckOutlined, CloseOutlined, EditOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -27,8 +27,12 @@ const DemandApproval: React.FC = () => {
   const [priorityOptions, setPriorityOptions] = useState<string[]>([]);
   const [modules, setModules] = useState<TestModule[]>([]);
   const [editSpecialModuleRows, setEditSpecialModuleRows] = useState<SpecialModuleDemandInput[]>([]);
+  const [editManpowerRemarks, setEditManpowerRemarks] = useState<Record<string, string | undefined>>({});
+  const editRequestSequence = useRef(0);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
+    mountedRef.current = true;
     fetchPending();
     fetchTestTypes();
     let active = true;
@@ -37,7 +41,7 @@ const DemandApproval: React.FC = () => {
     }).catch((error: any) => {
       if (active) message.error(error.message || '获取特殊模块配置失败');
     });
-    return () => { active = false; };
+    return () => { active = false; mountedRef.current = false; };
   }, []);
 
   const fetchTestTypes = async () => {
@@ -96,15 +100,12 @@ const DemandApproval: React.FC = () => {
   };
 
   const openEditModal = async (record: any) => {
-    setEditingDemand(record);
-    setEditDateRange([
-      dayjs(record.startDate),
-      dayjs(record.endDate),
-    ]);
-
+    const requestSequence = ++editRequestSequence.current;
     let details: DemandManpowerDetail[] = [];
-    let specialRows: SpecialModuleDemandInput[] = (record.specialModuleDemands ?? []).map((row: any) => ({
+    let specialMetadata = record.specialModuleDemands ?? [];
+    let specialRows: SpecialModuleDemandInput[] = specialMetadata.map((row: any) => ({
       moduleId: row.moduleId, testType: row.testType, manpowerDemand: row.manpowerDemand,
+      historicalManpowerDemand: row.enabled === false ? row.manpowerDemand : undefined,
     }));
     let priority = record.priority || '';
     try {
@@ -115,8 +116,10 @@ const DemandApproval: React.FC = () => {
       if (fullDemand.priority) {
         priority = fullDemand.priority;
       }
-      specialRows = (fullDemand.specialModuleDemands ?? specialRows).map((row: any) => ({
+      specialMetadata = fullDemand.specialModuleDemands ?? specialMetadata;
+      specialRows = specialMetadata.map((row: any) => ({
         moduleId: row.moduleId, testType: row.testType, manpowerDemand: row.manpowerDemand,
+        historicalManpowerDemand: row.enabled === false ? row.manpowerDemand : undefined,
       }));
     } catch (e) {
       if (record.manpowerDetails) {
@@ -124,12 +127,24 @@ const DemandApproval: React.FC = () => {
       }
     }
 
+    if (!mountedRef.current || requestSequence !== editRequestSequence.current) return;
+
     const orig: Record<string, number> = {};
+    const remarks: Record<string, string | undefined> = {};
     details.forEach((d: DemandManpowerDetail) => {
       orig[d.testType] = d.manpowerDemand;
+      remarks[d.testType] = d.remark;
     });
+    const enrichedModules = specialMetadata.map((row: any) => ({
+      id: row.moduleId, moduleName: row.moduleName, testType: row.testType, enabled: row.enabled,
+      sortOrder: 0, lockVersion: 0, createdAt: row.createdAt ?? '', updatedAt: row.updatedAt ?? '', referenced: true,
+    }));
+    setModules((current) => [...current, ...enrichedModules.filter((item: TestModule) => !current.some((module) => module.id === item.id))]);
+    setEditingDemand(record);
+    setEditDateRange([dayjs(record.startDate), dayjs(record.endDate)]);
     setOriginalManpower(orig);
     setEditManpower({ ...orig });
+    setEditManpowerRemarks(remarks);
     setEditSpecialModuleRows(specialRows);
     setOriginalPriority(priority);
     setEditPriority(priority);
@@ -140,22 +155,26 @@ const DemandApproval: React.FC = () => {
     if (!editDateRange || !editingDemand) return;
 
     // 构建按测试类型分组的人力需求明细
-    const manpowerDetails = testTypes
+    const manpowerDetails = Array.from(new Set([...testTypes, ...Object.keys(editManpower)]))
       .filter(tt => (editManpower[tt] || 0) > 0)
       .map(tt => ({
         testType: tt,
         manpowerDemand: editManpower[tt],
+        remark: editManpowerRemarks[tt],
       }));
 
     if (manpowerDetails.length === 0) {
       message.warning('请至少为一个测试类型填写人力需求');
       return;
     }
-    const specialValidation = validateSpecialModuleRows(editManpower, editSpecialModuleRows);
+    const specialValidation = validateSpecialModuleRows(editManpower, editSpecialModuleRows, modules);
     if (!specialValidation.valid) {
       message.warning(specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP'
         ? `${specialValidation.testType}小组的特殊模块人力超过总人力`
         : '请完善特殊模块人力需求');
+      if (specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && specialValidation.testType) {
+        document.getElementById(`approval-manpower-${specialValidation.testType}`)?.focus();
+      }
       return;
     }
 
@@ -248,7 +267,7 @@ const DemandApproval: React.FC = () => {
         }), {}),
         (record.specialModuleDemands ?? []).map((row: any) => ({
           moduleId: row.moduleId, testType: row.testType, manpowerDemand: row.manpowerDemand,
-        })),
+        })), modules,
       ).map((summary) => (
         <div key={summary.testType}>{summary.testType}：总 {summary.totalManpower.toFixed(1)} / 特殊 {summary.specialManpower.toFixed(1)} / 通用 {summary.generalManpower.toFixed(1)}</div>
       )),
@@ -325,7 +344,7 @@ const DemandApproval: React.FC = () => {
       <Modal
         title="修改并批准测试需求"
         open={editModalOpen}
-        onCancel={() => { setEditModalOpen(false); setEditingDemand(null); }}
+        onCancel={() => { editRequestSequence.current += 1; setEditModalOpen(false); setEditingDemand(null); }}
         footer={null}
         width={600}
         destroyOnClose
@@ -409,6 +428,8 @@ const DemandApproval: React.FC = () => {
                       {originalManpower[testType] || 0} 人/天
                     </span>
                     <InputNumber
+                      id={`approval-manpower-${testType}`}
+                      aria-label={`${testType}小组总人力`}
                       min={0}
                       step={0.1}
                       precision={1}
@@ -447,7 +468,7 @@ const DemandApproval: React.FC = () => {
                 manpowerByTestType={editManpower}
                 onChange={setEditSpecialModuleRows}
               />
-              {calculateManpowerSummary(editManpower, editSpecialModuleRows).map((summary) => (
+              {calculateManpowerSummary(editManpower, editSpecialModuleRows, modules).map((summary) => (
                 <div key={summary.testType} style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
                   {summary.testType}：总人力 {summary.totalManpower.toFixed(1)}，特殊模块 {summary.specialManpower.toFixed(1)}，通用人力 {summary.generalManpower.toFixed(1)} 人/天
                 </div>
@@ -455,7 +476,7 @@ const DemandApproval: React.FC = () => {
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
-              <Button onClick={() => { setEditModalOpen(false); setEditingDemand(null); }}>
+              <Button onClick={() => { editRequestSequence.current += 1; setEditModalOpen(false); setEditingDemand(null); }}>
                 取消
               </Button>
               <Button type="primary" loading={editLoading} onClick={handleEditApprove}>
