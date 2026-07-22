@@ -262,7 +262,7 @@ class ScheduleControllerTest {
     @Test
     void movePublishedScheduleReturnsStableBusinessErrorShape() throws Exception {
         doThrow(new BusinessException(
-            "SCHEDULE_PUBLISHED_MOVE_FORBIDDEN", "已发布排班不可移动"))
+            "SCHEDULE_PUBLISHED_MODIFICATION_FORBIDDEN", "已发布排班必须先取消发布后再修改"))
             .when(service).move(9L, 108L, LocalDate.of(2026, 7, 23), 40);
 
         mockMvc.perform(authorized(post("/api/schedules/{id}/move", 9L)
@@ -272,8 +272,9 @@ class ScheduleControllerTest {
                     """), "resourceManager"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.message").value("已发布排班必须先取消发布后再修改"))
             .andExpect(jsonPath("$.data.errorCode")
-                .value("SCHEDULE_PUBLISHED_MOVE_FORBIDDEN"));
+                .value("SCHEDULE_PUBLISHED_MODIFICATION_FORBIDDEN"));
     }
 
     @Test
@@ -339,6 +340,22 @@ class ScheduleControllerTest {
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value(400))
             .andExpect(jsonPath("$.data.errorCode").value("STAFF_CAPACITY_EXCEEDED"));
+    }
+
+    @Test
+    void updatePublishedScheduleReturnsStableBusinessErrorShape() throws Exception {
+        when(service.update(eq(9L), any(Schedule.class))).thenThrow(
+            new BusinessException("SCHEDULE_PUBLISHED_MODIFICATION_FORBIDDEN",
+                "已发布排班必须先取消发布后再修改"));
+
+        mockMvc.perform(authorized(put("/api/schedules/{id}", 9L), "projectManager")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(scheduleJson()))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.message").value("已发布排班必须先取消发布后再修改"))
+            .andExpect(jsonPath("$.data.errorCode")
+                .value("SCHEDULE_PUBLISHED_MODIFICATION_FORBIDDEN"));
     }
 
     @Test

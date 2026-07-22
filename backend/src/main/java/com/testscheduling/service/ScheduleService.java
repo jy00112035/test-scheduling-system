@@ -30,6 +30,11 @@ import java.util.stream.Collectors;
 @Service
 public class ScheduleService {
 
+    private static final String PUBLISHED_MODIFICATION_ERROR_CODE =
+        "SCHEDULE_PUBLISHED_MODIFICATION_FORBIDDEN";
+    private static final String PUBLISHED_MODIFICATION_ERROR_MESSAGE =
+        "已发布排班必须先取消发布后再修改";
+
     @Autowired
     private ScheduleRepository scheduleRepository;
 
@@ -98,6 +103,7 @@ public class ScheduleService {
     @Transactional
     public Schedule update(Long id, Schedule schedule) {
         Schedule existing = lockExisting(id, schedule.getStaffId());
+        requireDraftMutable(existing);
         if (existing.getDemandManpowerDetailId() == null
                 && existing.getDemandSpecialModuleId() == null) {
             throw error("SCHEDULE_HISTORICAL_READ_ONLY", "历史排班只能通过归类接口补充人力归属");
@@ -120,9 +126,7 @@ public class ScheduleService {
     @Transactional
     public Schedule move(Long id, Long staffId, LocalDate date, Integer percentage) {
         Schedule existing = lockExisting(id, staffId);
-        if (Boolean.TRUE.equals(existing.getPublished())) {
-            throw error("SCHEDULE_PUBLISHED_MOVE_FORBIDDEN", "已发布排班不可移动");
-        }
+        requireDraftMutable(existing);
         Schedule candidate = copy(existing);
         candidate.setStaffId(staffId);
         candidate.setDate(date);
@@ -153,7 +157,8 @@ public class ScheduleService {
         candidate.setDemandManpowerDetailId(demandManpowerDetailId);
         candidate.setDemandSpecialModuleId(demandSpecialModuleId);
         eligibilityService.validate(candidate, id);
-        copyWritableFields(candidate, existing);
+        existing.setDemandManpowerDetailId(demandManpowerDetailId);
+        existing.setDemandSpecialModuleId(demandSpecialModuleId);
         return scheduleRepository.save(existing);
     }
 
@@ -262,6 +267,13 @@ public class ScheduleService {
         target.setPercentage(source.getPercentage());
         target.setDemandManpowerDetailId(source.getDemandManpowerDetailId());
         target.setDemandSpecialModuleId(source.getDemandSpecialModuleId());
+    }
+
+    private void requireDraftMutable(Schedule schedule) {
+        if (Boolean.TRUE.equals(schedule.getPublished())) {
+            throw error(PUBLISHED_MODIFICATION_ERROR_CODE,
+                PUBLISHED_MODIFICATION_ERROR_MESSAGE);
+        }
     }
 
     private BusinessException error(String code, String message) {

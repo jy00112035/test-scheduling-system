@@ -97,14 +97,14 @@ class ScheduleServiceTest {
     }
 
     @Test
-    void updateCopiesWritableFieldsAndPreservesDemandProductVersionMetadata() {
+    void draftUpdateCopiesWritableFieldsAndPreservesDemandProductVersionMetadata() {
         Schedule existing = schedule(10L, 20L, 30L, 50L);
         existing.setId(99L);
         existing.setProduct("保留产品");
         existing.setTestManager("保留经理");
         existing.setVersionType("维护");
         existing.setVersion("v1.2.3");
-        existing.setPublished(true);
+        existing.setPublished(false);
         existing.setLockVersion(7L);
         Schedule changes = schedule(999L, 21L, 31L, null);
         changes.setDate(LocalDate.of(2026, 7, 23));
@@ -127,9 +127,39 @@ class ScheduleServiceTest {
         assertEquals("保留经理", result.getTestManager());
         assertEquals("维护", result.getVersionType());
         assertEquals("v1.2.3", result.getVersion());
-        assertTrue(result.getPublished());
+        assertFalse(result.getPublished());
         assertEquals(7L, result.getLockVersion());
         verify(eligibilityService).validate(any(Schedule.class), org.mockito.ArgumentMatchers.eq(99L));
+    }
+
+    @Test
+    void updateRejectsLockedPublishedScheduleWithoutMutationOrValidation() {
+        Schedule published = schedule(10L, 20L, 30L, 50L);
+        published.setId(99L);
+        published.setPublished(true);
+        published.setLockVersion(7L);
+        Schedule changes = schedule(999L, 21L, 31L, null);
+        changes.setDate(LocalDate.of(2026, 7, 24));
+        changes.setPercentage(40);
+        when(scheduleRepository.findById(99L)).thenReturn(Optional.of(published));
+        when(demandRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(demand(10L)));
+        when(testStaffRepository.findByIdForUpdate(21L)).thenReturn(Optional.of(staff(21L)));
+        when(scheduleRepository.findByIdForUpdate(99L)).thenReturn(Optional.of(published));
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> scheduleService.update(99L, changes));
+
+        assertEquals("SCHEDULE_PUBLISHED_MODIFICATION_FORBIDDEN", error.getErrorCode());
+        assertEquals("已发布排班必须先取消发布后再修改", error.getMessage());
+        assertEquals(20L, published.getStaffId());
+        assertEquals(30L, published.getDemandManpowerDetailId());
+        assertEquals(50L, published.getDemandSpecialModuleId());
+        assertEquals(LocalDate.of(2026, 7, 22), published.getDate());
+        assertEquals(50, published.getPercentage());
+        assertEquals(7L, published.getLockVersion());
+        verify(scheduleRepository).findByIdForUpdate(99L);
+        verify(eligibilityService, never()).validate(any(), any());
+        verify(scheduleRepository, never()).save(any());
     }
 
     @Test
@@ -244,8 +274,8 @@ class ScheduleServiceTest {
         BusinessException error = assertThrows(BusinessException.class,
             () -> scheduleService.move(99L, 21L, LocalDate.of(2026, 7, 24), 40));
 
-        assertEquals("SCHEDULE_PUBLISHED_MOVE_FORBIDDEN", error.getErrorCode());
-        assertEquals("已发布排班不可移动", error.getMessage());
+        assertEquals("SCHEDULE_PUBLISHED_MODIFICATION_FORBIDDEN", error.getErrorCode());
+        assertEquals("已发布排班必须先取消发布后再修改", error.getMessage());
         assertEquals(20L, published.getStaffId());
         assertEquals(LocalDate.of(2026, 7, 22), published.getDate());
         assertEquals(100, published.getPercentage());
@@ -279,6 +309,39 @@ class ScheduleServiceTest {
         assertEquals(30L, result.getDemandManpowerDetailId());
         assertEquals(50L, result.getDemandSpecialModuleId());
         verify(eligibilityService).validate(any(Schedule.class), org.mockito.ArgumentMatchers.eq(99L));
+        verify(scheduleRepository).save(historical);
+    }
+
+    @Test
+    void publishedHistoricalClassificationRepairsOnlyOwnershipFields() {
+        Schedule historical = schedule(10L, 20L, null, null);
+        historical.setId(99L);
+        historical.setPublished(true);
+        historical.setDate(LocalDate.of(2026, 7, 22));
+        historical.setPercentage(70);
+        historical.setLockVersion(7L);
+        when(demandRepository.findByScheduleIdForUpdate(99L)).thenReturn(Optional.of(demand(10L)));
+        when(scheduleRepository.findByDemandIdForUpdate(10L)).thenReturn(List.of(historical));
+        when(testStaffRepository.findByIdForUpdate(20L)).thenReturn(Optional.of(staff(20L)));
+        when(scheduleRepository.save(historical)).thenReturn(historical);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            Schedule candidate = invocation.getArgument(0);
+            candidate.setStaffId(999L);
+            candidate.setDate(LocalDate.of(2030, 1, 1));
+            candidate.setPercentage(10);
+            return null;
+        }).when(eligibilityService).validate(any(Schedule.class),
+            org.mockito.ArgumentMatchers.eq(99L));
+
+        Schedule result = scheduleService.classifyHistorical(99L, 30L, 50L);
+
+        assertEquals(30L, result.getDemandManpowerDetailId());
+        assertEquals(50L, result.getDemandSpecialModuleId());
+        assertEquals(20L, result.getStaffId());
+        assertEquals(LocalDate.of(2026, 7, 22), result.getDate());
+        assertEquals(70, result.getPercentage());
+        assertTrue(result.getPublished());
+        assertEquals(7L, result.getLockVersion());
         verify(scheduleRepository).save(historical);
     }
 
