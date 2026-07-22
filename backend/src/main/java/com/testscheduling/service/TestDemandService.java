@@ -1,5 +1,6 @@
 package com.testscheduling.service;
 
+import com.testscheduling.dto.DemandFulfillmentResponse;
 import com.testscheduling.entity.DemandManpowerDetail;
 import com.testscheduling.entity.DemandSpecialModule;
 import com.testscheduling.entity.TestDemand;
@@ -314,10 +315,13 @@ public class TestDemandService {
                 java.util.stream.Collectors.toList()));
         Map<Long, List<DemandSpecialModule>> specialsByDemand =
             specialModuleService.findByDemandIds(demandIds);
+        Map<Long, DemandFulfillmentResponse> fulfillmentByDemand = fulfillmentService.calculateBatch(
+            demands, detailsByDemand, specialsByDemand);
         demands.forEach(demand -> applyEnrichment(
             demand,
             detailsByDemand.getOrDefault(demand.getId(), List.of()),
-            specialsByDemand.getOrDefault(demand.getId(), List.of())));
+            specialsByDemand.getOrDefault(demand.getId(), List.of()),
+            fulfillmentByDemand.get(demand.getId())));
         return demands;
     }
 
@@ -329,6 +333,17 @@ public class TestDemandService {
         demand.setSpecialModuleDemands(specials);
         demand.setManpowerSummary(specialModuleService.summarize(details, specials));
         demand.setManpowerFullySatisfied(fulfillmentService.calculate(demand).fullySatisfied());
+    }
+
+    private void applyEnrichment(
+            TestDemand demand,
+            List<DemandManpowerDetail> details,
+            List<DemandSpecialModule> specials,
+            DemandFulfillmentResponse fulfillment) {
+        demand.setManpowerDetails(details);
+        demand.setSpecialModuleDemands(specials);
+        demand.setManpowerSummary(specialModuleService.summarize(details, specials));
+        demand.setManpowerFullySatisfied(fulfillment != null && fulfillment.fullySatisfied());
     }
 
     private boolean quotasChanged(

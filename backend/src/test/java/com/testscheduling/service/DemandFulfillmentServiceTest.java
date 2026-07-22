@@ -1,10 +1,12 @@
 package com.testscheduling.service;
 
+import com.testscheduling.dto.DemandFulfillmentResponse;
 import com.testscheduling.entity.DemandManpowerDetail;
 import com.testscheduling.entity.DemandSpecialModule;
 import com.testscheduling.entity.Schedule;
 import com.testscheduling.entity.TestDemand;
 import com.testscheduling.entity.TestModuleConfig;
+import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.DemandManpowerDetailRepository;
 import com.testscheduling.repository.DemandSpecialModuleRepository;
 import com.testscheduling.repository.ScheduleRepository;
@@ -19,11 +21,20 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.anyList;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class DemandFulfillmentServiceTest {
@@ -105,7 +116,7 @@ class DemandFulfillmentServiceTest {
         assertFalse(result.fullySatisfied());
         assertEquals(new BigDecimal("1.0"), result.specialModuleGaps().getFirst().shortage());
         assertEquals(new BigDecimal("1.0"), result.generalGaps().getFirst().shortage());
-        assertEquals(new BigDecimal("2.0"), result.totalAllocated());
+        assertEquals(0, new BigDecimal("2.0").compareTo(result.totalAllocated()));
     }
 
     @Test
@@ -145,7 +156,7 @@ class DemandFulfillmentServiceTest {
         assertFalse(result.requiresHistoricalClassification());
         assertTrue(result.fullySatisfied());
         assertTrue(result.generalGaps().isEmpty());
-        assertEquals(new BigDecimal("4.0"), result.totalAllocated());
+        assertEquals(0, new BigDecimal("4.0").compareTo(result.totalAllocated()));
     }
 
     @Test
@@ -153,10 +164,6 @@ class DemandFulfillmentServiceTest {
         DemandManpowerDetail group = group(301L, "功能测试", "2.0");
         DemandSpecialModule special = special(501L, 11L, "1.0", "支付模块");
         special.setTestType(null);
-        TestModuleConfig module = new TestModuleConfig();
-        module.setId(11L);
-        module.setTestType("功能测试");
-        when(moduleRepository.findById(11L)).thenReturn(java.util.Optional.of(module));
         given(1001L, List.of(group), List.of(special), List.of(schedule(501L, 301L, 100),
             schedule(null, 301L, 100)));
 
@@ -165,11 +172,170 @@ class DemandFulfillmentServiceTest {
         assertTrue(result.fullySatisfied());
     }
 
+    @Test
+    void batchCalculationLoadsSchedulesAndModulesOnceForAllDemands() {
+        TestDemand first = demand(1001L, "2.0");
+        TestDemand second = demand(1002L, "2.0");
+        DemandManpowerDetail firstGroup = group(301L, "功能测试", "2.0");
+        firstGroup.setDemandId(1001L);
+        DemandManpowerDetail secondGroup = group(302L, "功能测试", "2.0");
+        secondGroup.setDemandId(1002L);
+        DemandSpecialModule firstSpecial = special(501L, 11L, "1.0", "支付模块");
+        firstSpecial.setDemandId(1001L);
+        DemandSpecialModule secondSpecial = special(502L, 12L, "1.0", "消息模块");
+        secondSpecial.setDemandId(1002L);
+        TestModuleConfig payment = module(11L, "支付模块", "功能测试");
+        TestModuleConfig message = module(12L, "消息模块", "功能测试");
+        when(scheduleRepository.findByDemandIdIn(List.of(1001L, 1002L))).thenReturn(List.of());
+        when(moduleRepository.findAllById(anyList())).thenReturn(List.of(payment, message));
+
+        Map<Long, DemandFulfillmentResponse> results = service.calculateBatch(
+            List.of(first, second),
+            Map.of(1001L, List.of(firstGroup), 1002L, List.of(secondGroup)),
+            Map.of(1001L, List.of(firstSpecial), 1002L, List.of(secondSpecial)));
+
+        assertEquals(2, results.size());
+        verify(scheduleRepository, times(1)).findByDemandIdIn(List.of(1001L, 1002L));
+        verify(moduleRepository, times(1)).findAllById(anyList());
+        verify(detailRepository, never()).findByDemandId(any(Long.class));
+        verify(specialRepository, never()).findByDemandIdOrderByIdAsc(any(Long.class));
+    }
+
+    @Test
+    void calculateRejectsNullAndMissingDemandBoundaries() {
+        when(demandRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertBusinessCode(() -> service.calculate((Long) null));
+        assertBusinessCode(() -> service.calculate((TestDemand) null));
+        TestDemand withoutId = new TestDemand();
+        assertBusinessCode(() -> service.calculate(withoutId));
+        assertBusinessCode(() -> service.calculate(999L));
+    }
+
+    @Test
+    void historicalPercentagesUseTwoDecimalDaysAndNullOrZeroDoNotAllocate() {
+        DemandManpowerDetail group = group(301L, "功能测试", "2.0");
+        DemandSpecialModule special = special(501L, 11L, "1.0", "支付模块");
+        given(1001L, List.of(group), List.of(special), List.of(
+            schedule(501L, 301L, 25), schedule(null, 301L, 55),
+            schedule(null, 301L, 0), schedule(null, 301L, null)));
+
+        var result = service.calculate(1001L);
+
+        assertEquals(new BigDecimal("0.25"), result.specialModuleGaps().getFirst().allocated());
+        assertEquals(new BigDecimal("0.55"), result.generalGaps().getFirst().allocated());
+        assertEquals(new BigDecimal("0.80"), result.totalAllocated());
+    }
+
+    @Test
+    void negativePersistedPercentageIsRejected() {
+        DemandManpowerDetail group = group(301L, "功能测试", "2.0");
+        given(1001L, List.of(group), List.of(), List.of(schedule(null, 301L, -10)));
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service.calculate(1001L));
+
+        assertEquals("DEMAND_MANPOWER_STRUCTURE_INVALID", error.getErrorCode());
+
+        group.setTestType(" ");
+        BusinessException blank = assertThrows(BusinessException.class,
+            () -> service.calculate(1001L));
+        assertEquals("DEMAND_MANPOWER_STRUCTURE_INVALID", blank.getErrorCode());
+    }
+
+    @Test
+    void percentageAboveOneHundredRemainsHistoricalCompatible() {
+        DemandManpowerDetail group = group(301L, "功能测试", "2.0");
+        given(1001L, List.of(group), List.of(), List.of(schedule(null, 301L, 200)));
+
+        var result = service.calculate(1001L);
+
+        assertEquals(new BigDecimal("2.00"), result.totalAllocated());
+        assertTrue(result.fullySatisfied());
+    }
+
+    @Test
+    void missingModuleConfigIsRejected() {
+        DemandManpowerDetail group = group(301L, "功能测试", "2.0");
+        DemandSpecialModule special = special(501L, 11L, "1.0", "支付模块");
+        given(1001L, List.of(group), List.of(special), List.of());
+        when(moduleRepository.findAllById(List.of(11L))).thenReturn(List.of());
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service.calculate(1001L));
+
+        assertEquals("MODULE_NOT_FOUND", error.getErrorCode());
+    }
+
+    @Test
+    void moduleWithoutGroupOrWithMismatchedGroupIsRejected() {
+        DemandManpowerDetail group = group(301L, "功能测试", "2.0");
+        DemandSpecialModule special = special(501L, 11L, "1.0", "支付模块");
+        given(1001L, List.of(group), List.of(special), List.of());
+        when(moduleRepository.findAllById(List.of(11L)))
+            .thenReturn(List.of(module(11L, "支付模块", "性能测试")));
+
+        BusinessException mismatch = assertThrows(BusinessException.class,
+            () -> service.calculate(1001L));
+        assertEquals("DEMAND_MANPOWER_STRUCTURE_INVALID", mismatch.getErrorCode());
+
+        when(moduleRepository.findAllById(List.of(11L)))
+            .thenReturn(List.of(module(11L, "支付模块", " ")));
+        BusinessException blank = assertThrows(BusinessException.class,
+            () -> service.calculate(1001L));
+        assertEquals("DEMAND_MANPOWER_STRUCTURE_INVALID", blank.getErrorCode());
+    }
+
+    @Test
+    void nullOrBlankDetailTypeIsRejectedAsStructuredDataError() {
+        DemandManpowerDetail group = group(301L, null, "2.0");
+        given(1001L, List.of(group), List.of(), List.of());
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service.calculate(1001L));
+
+        assertEquals("DEMAND_MANPOWER_STRUCTURE_INVALID", error.getErrorCode());
+    }
+
+    @Test
+    void blankDetailTypeIsRejectedAsStructuredDataError() {
+        DemandManpowerDetail group = group(301L, " ", "2.0");
+        given(1001L, List.of(group), List.of(), List.of());
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service.calculate(1001L));
+
+        assertEquals("DEMAND_MANPOWER_STRUCTURE_INVALID", error.getErrorCode());
+    }
+
+    @Test
+    void summaryShortageSumsIndividuallyClampedSpecialGaps() {
+        DemandManpowerDetail group = group(301L, "功能测试", "2.0");
+        DemandSpecialModule first = special(501L, 11L, "1.0", "支付模块");
+        DemandSpecialModule second = special(502L, 12L, "1.0", "消息模块");
+        given(1001L, List.of(group), List.of(first, second), List.of(schedule(501L, 301L, 200)));
+        when(moduleRepository.findAllById(List.of(11L, 12L))).thenReturn(List.of(
+            module(11L, "支付模块", "功能测试"), module(12L, "消息模块", "功能测试")));
+
+        var result = service.calculate(1001L);
+
+        assertEquals(new BigDecimal("1.0"), result.summary().getFirst().shortage());
+        assertEquals(new BigDecimal("1.0"), result.totalShortage());
+        assertFalse(result.fullySatisfied());
+    }
+
     private void given(Long demandId, List<DemandManpowerDetail> groups,
                        List<DemandSpecialModule> specials, List<Schedule> schedules) {
         when(detailRepository.findByDemandId(demandId)).thenReturn(groups);
         when(specialRepository.findByDemandIdOrderByIdAsc(demandId)).thenReturn(specials);
         when(scheduleRepository.findByDemandId(demandId)).thenReturn(schedules);
+        if (!specials.isEmpty()) {
+            List<Long> moduleIds = specials.stream().map(DemandSpecialModule::getModuleId).toList();
+            lenient().when(moduleRepository.findAllById(moduleIds)).thenReturn(specials.stream()
+                .map(special -> module(special.getModuleId(), special.getModuleName(),
+                    special.getTestType() == null ? "功能测试" : special.getTestType()))
+                .toList());
+        }
     }
 
     private static DemandManpowerDetail group(Long id, String testType, String manpower) {
@@ -179,6 +345,26 @@ class DemandFulfillmentServiceTest {
         group.setTestType(testType);
         group.setManpowerDemand(new BigDecimal(manpower));
         return group;
+    }
+
+    private static TestDemand demand(Long id, String manpower) {
+        TestDemand demand = new TestDemand();
+        demand.setId(id);
+        demand.setManpowerDemand(new BigDecimal(manpower));
+        return demand;
+    }
+
+    private static TestModuleConfig module(Long id, String name, String testType) {
+        TestModuleConfig module = new TestModuleConfig();
+        module.setId(id);
+        module.setModuleName(name);
+        module.setTestType(testType);
+        return module;
+    }
+
+    private static void assertBusinessCode(Runnable action) {
+        BusinessException error = assertThrows(BusinessException.class, action::run);
+        assertEquals("DEMAND_NOT_FOUND", error.getErrorCode());
     }
 
     private static DemandSpecialModule special(Long id, Long moduleId, String manpower, String name) {
@@ -192,7 +378,7 @@ class DemandFulfillmentServiceTest {
         return special;
     }
 
-    private static Schedule schedule(Long specialId, Long detailId, int percentage) {
+    private static Schedule schedule(Long specialId, Long detailId, Integer percentage) {
         Schedule schedule = new Schedule();
         schedule.setDemandId(1001L);
         schedule.setDemandManpowerDetailId(detailId);
