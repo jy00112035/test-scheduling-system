@@ -93,4 +93,30 @@ describe('DemandApproval edit loading', () => {
     await Promise.resolve();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
+
+  it('uses fresh disabled detail metadata over an enabled cached module', async () => {
+    const full = { ...demand(5, '状态刷新'), specialModuleDemands: [{ id: 1, demandId: 5, moduleId: 11, moduleName: '支付模块', testType: '功能测试', enabled: false, manpowerDemand: 1, createdAt: '', updatedAt: '', allocatedManpower: null, remainingManpower: null }] };
+    vi.spyOn(api, 'getPendingDemandApprovals').mockResolvedValue([full]);
+    vi.spyOn(api, 'getFieldConfigs').mockResolvedValue([{ fieldName: 'testType', options: '功能测试' }, { fieldName: 'priority', options: '高' }]);
+    vi.spyOn(api, 'getTestModules').mockResolvedValue([{ id: 11, moduleName: '支付模块', testType: '功能测试', enabled: true, sortOrder: 0, lockVersion: 0, createdAt: '', updatedAt: '', referenced: true }]);
+    vi.spyOn(api, 'getDemand').mockResolvedValue(full);
+    render(<DemandApproval />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /修改后批准/ }));
+    expect(await screen.findByText('已停用')).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: '人力需求 1' })).toBeDisabled();
+  });
+
+  it('uses fresh enabled detail metadata over a disabled cached module', async () => {
+    const full = { ...demand(6, '状态恢复'), specialModuleDemands: [{ id: 1, demandId: 6, moduleId: 11, moduleName: '支付模块', testType: '功能测试', enabled: true, manpowerDemand: 1, createdAt: '', updatedAt: '', allocatedManpower: null, remainingManpower: null }] };
+    vi.spyOn(api, 'getPendingDemandApprovals').mockResolvedValue([full]);
+    vi.spyOn(api, 'getFieldConfigs').mockResolvedValue([{ fieldName: 'testType', options: '功能测试' }, { fieldName: 'priority', options: '高' }]);
+    vi.spyOn(api, 'getTestModules').mockResolvedValue([{ id: 11, moduleName: '支付模块', testType: '功能测试', enabled: false, sortOrder: 0, lockVersion: 0, createdAt: '', updatedAt: '', referenced: true }]);
+    vi.spyOn(api, 'getDemand').mockResolvedValue(full);
+    render(<DemandApproval />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /修改后批准/ }));
+    expect(await screen.findByRole('spinbutton', { name: '人力需求 1' })).toBeEnabled();
+    expect(screen.queryByText('已停用')).not.toBeInTheDocument();
+  });
 });
