@@ -1,9 +1,32 @@
 const API_BASE_URL = '/api';
 
+import type {
+  BatchPublishResponse,
+  ScheduleRecommendationRequest,
+  ScheduleRecommendationResponse,
+  ScheduleWriteRequest,
+  TestModule,
+} from '../types';
+
+export type {
+  BatchPublishResponse,
+  ScheduleRecommendationRequest,
+  ScheduleRecommendationResponse,
+  ScheduleWriteRequest,
+  TestModule,
+} from '../types';
+
 interface ApiResponse<T> {
   code: number;
   message: string;
   data: T;
+}
+
+export class ApiError extends Error {
+  constructor(message: string, public readonly errorCode?: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
 }
 
 class ApiService {
@@ -47,7 +70,8 @@ class ApiService {
     const result: ApiResponse<T> = await response.json();
 
     if (result.code !== 200) {
-      throw new Error(result.message || '请求失败');
+      const errorData = result.data as T & { errorCode?: string } | null;
+      throw new ApiError(result.message || '请求失败', errorData?.errorCode);
     }
 
     return result.data;
@@ -338,6 +362,84 @@ class ApiService {
   async deleteFieldConfig(id: number) {
     return this.request<void>(`/field-configs/${id}`, {
       method: 'DELETE',
+    });
+  }
+
+  // Test modules
+  async getTestModules(testType?: string, enabled?: boolean) {
+    const params = new URLSearchParams();
+    if (testType !== undefined) params.set('testType', testType);
+    if (enabled !== undefined) params.set('enabled', String(enabled));
+    const query = params.toString();
+    return this.request<TestModule[]>(`/test-modules${query ? `?${query}` : ''}`);
+  }
+
+  async createTestModule(module: Pick<TestModule, 'moduleName' | 'testType' | 'sortOrder'>) {
+    return this.request<TestModule>('/test-modules', {
+      method: 'POST',
+      body: JSON.stringify(module),
+    });
+  }
+
+  async updateTestModule(
+    id: number,
+    module: Pick<TestModule, 'moduleName' | 'testType' | 'sortOrder'>
+  ) {
+    return this.request<TestModule>(`/test-modules/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(module),
+    });
+  }
+
+  async setTestModuleStatus(id: number, enabled: boolean) {
+    return this.request<TestModule>(`/test-modules/${id}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    });
+  }
+
+  async deleteTestModule(id: number) {
+    return this.request<void>(`/test-modules/${id}`, { method: 'DELETE' });
+  }
+
+  async migrateLegacyStaffModules() {
+    return this.request<{
+      createdRelations: number;
+      duplicateNames: Record<string, string[]>;
+      unmatched: Record<string, string[]>;
+      missingStaffAccounts: string[];
+    }>('/staff/modules/migrate-legacy', { method: 'POST' });
+  }
+
+  // Structured scheduling contracts
+  async recommendScheduleDraft(request: ScheduleRecommendationRequest) {
+    return this.request<ScheduleRecommendationResponse>('/schedules/recommend/draft', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async validateSchedule(request: ScheduleWriteRequest) {
+    return this.request<{ valid: boolean }>('/schedules/validate', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async moveSchedule(
+    id: number,
+    request: Pick<ScheduleWriteRequest, 'staffId' | 'date' | 'percentage'>
+  ) {
+    return this.request<any>(`/schedules/${id}/move`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async batchPublishSchedules(request: { demandIds: number[] }) {
+    return this.request<BatchPublishResponse>('/schedules/batch-publish', {
+      method: 'POST',
+      body: JSON.stringify(request),
     });
   }
 }

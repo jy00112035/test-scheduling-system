@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card, Space, DatePicker, Select, InputNumber, Tag, Button, Popconfirm, Popover, Divider, Tooltip, Checkbox, Modal, Input, Dropdown } from 'antd';
 import { DeleteOutlined, SearchOutlined, DownOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import { formatFamiliarModules } from './workbenchTypes';
 import type { ScheduleItem, DemandItem, StaffItem, DailyStatusEntry } from './workbenchTypes';
 import {
   getWeekDates,
@@ -508,9 +509,9 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                 </td>
                 <td style={{ position: 'sticky', left: 240, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
                   {staff.familiarModules ? (
-                    <Tooltip title={staff.familiarModules}>
+                    <Tooltip title={formatFamiliarModules(staff.familiarModules)}>
                       <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>
-                        {staff.familiarModules}
+                        {formatFamiliarModules(staff.familiarModules)}
                       </div>
                     </Tooltip>
                   ) : '-'}

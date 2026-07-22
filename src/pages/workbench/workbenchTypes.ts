@@ -2,6 +2,8 @@
 // 人力排布工作台 — 共享类型定义
 // ============================================================
 
+import type { DemandSpecialModule, FamiliarModule, ManpowerSummary } from '../../types';
+
 // ---- 基础数据 ----
 
 export interface ScheduleItem {
@@ -13,6 +15,8 @@ export interface ScheduleItem {
   versionType: string;
   version?: string;
   demandId?: number;
+  demandManpowerDetailId?: number;
+  demandSpecialModuleId?: number;
   testManager?: string;
   published?: boolean;
 }
@@ -39,6 +43,9 @@ export interface DemandItem {
   priority?: string;
   testDeviceCount?: number;
   manpowerDetails?: ManpowerDetail[];
+  specialModuleDemands?: DemandSpecialModule[];
+  manpowerSummary?: ManpowerSummary[];
+  manpowerFullySatisfied?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -55,8 +62,15 @@ export interface StaffItem {
   status: string;
   role?: string;
   roles?: string[];
-  familiarModules?: string;
+  familiarModules?: FamiliarModule[] | string;
   confidentialClearance?: boolean;
+}
+
+export function formatFamiliarModules(familiarModules?: FamiliarModule[] | string): string {
+  if (Array.isArray(familiarModules)) {
+    return familiarModules.map(module => module.moduleName).join(', ');
+  }
+  return familiarModules ?? '';
 }
 
 export interface DailyStatusEntry {
