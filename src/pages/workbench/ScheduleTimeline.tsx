@@ -486,7 +486,9 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                 );
               })}
             </tr>
-            {filteredStaffs.map(staff => (
+            {filteredStaffs.map(staff => {
+              const familiarModules = formatFamiliarModules(staff.familiarModules);
+              return (
               <tr key={staff.id}>
                 {/* Sticky columns */}
                 <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 12, whiteSpace: 'nowrap' }}>
@@ -509,9 +511,9 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                 </td>
                 <td style={{ position: 'sticky', left: 240, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
                   {staff.familiarModules ? (
-                    <Tooltip title={formatFamiliarModules(staff.familiarModules)}>
+                    <Tooltip title={familiarModules}>
                       <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>
-                        {formatFamiliarModules(staff.familiarModules)}
+                        {familiarModules}
                       </div>
                     </Tooltip>
                   ) : '-'}
@@ -750,7 +752,8 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                   );
                 })}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

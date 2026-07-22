@@ -68,9 +68,9 @@ export interface StaffItem {
 
 export function formatFamiliarModules(familiarModules?: FamiliarModule[] | string): string {
   if (Array.isArray(familiarModules)) {
-    return familiarModules.map(module => module.moduleName).join(', ');
+    return familiarModules.map(module => module.moduleName).join(', ') || '-';
   }
-  return familiarModules ?? '';
+  return familiarModules || '-';
 }
 
 export interface DailyStatusEntry {

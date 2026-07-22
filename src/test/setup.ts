@@ -1,20 +1,17 @@
 import '@testing-library/jest-dom/vitest';
+import { cleanup } from '@testing-library/react';
+import { afterEach } from 'vitest';
 
-Object.defineProperty(window, 'localStorage', {
-  configurable: true,
-  value: {
-    store: new Map<string, string>(),
-    getItem(key: string) {
-      return this.store.get(key) ?? null;
-    },
-    setItem(key: string, value: string) {
-      this.store.set(key, value);
-    },
-    removeItem(key: string) {
-      this.store.delete(key);
-    },
-    clear() {
-      this.store.clear();
-    },
-  },
+const testWindow = (globalThis as typeof globalThis & { jsdom?: { window: Window } }).jsdom?.window;
+if (testWindow) {
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: testWindow.localStorage,
+  });
+}
+
+afterEach(() => {
+  cleanup();
+  window.localStorage.clear();
+  window.sessionStorage.clear();
 });
