@@ -22,14 +22,16 @@ import com.testscheduling.repository.TestModuleConfigRepository;
 import com.testscheduling.repository.TestStaffModuleRepository;
 import com.testscheduling.repository.TestStaffRepository;
 import com.testscheduling.repository.UserRepository;
+import jakarta.persistence.PessimisticLockException;
+import org.hibernate.exception.LockAcquisitionException;
 import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.transaction.TransactionSystemException;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -43,6 +45,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class ScheduleRecommendationService {
@@ -87,13 +90,27 @@ public class ScheduleRecommendationService {
 
     public ScheduleRecommendationResponse recommend(ScheduleRecommendationRequest request) {
         validateRequest(request);
+        AtomicReference<RuntimeException> concurrencyFailure = new AtomicReference<>();
         try {
-            return transactionTemplate.execute(status -> recommendInTransaction(request));
-        } catch (ConcurrencyFailureException e) {
-            throw dataChangedRetry();
-        } catch (TransactionSystemException e) {
-            if (hasConcurrencyCause(e)) throw dataChangedRetry();
-            throw e;
+            ScheduleRecommendationResponse result = transactionTemplate.execute(status -> {
+                try {
+                    return recommendInTransaction(request);
+                } catch (RuntimeException error) {
+                    if (hasConcurrencyCause(error)) {
+                        concurrencyFailure.set(error);
+                        status.setRollbackOnly();
+                        throw new RecommendationConcurrencySignal();
+                    }
+                    throw error;
+                }
+            });
+            if (concurrencyFailure.get() != null) throw dataChangedRetry();
+            return result;
+        } catch (RuntimeException error) {
+            if (concurrencyFailure.get() != null || hasConcurrencyCause(error)) {
+                throw dataChangedRetry();
+            }
+            throw error;
         }
     }
 
@@ -113,9 +130,7 @@ public class ScheduleRecommendationService {
         List<DemandSpecialModule> specials = specialRepository.findByDemandIdInOrderByDemandIdAscIdAsc(ids);
         Map<Long, List<DemandManpowerDetail>> detailsByDemand = details.stream()
                 .collect(Collectors.groupingBy(DemandManpowerDetail::getDemandId));
-        detailsByDemand.values().forEach(list -> list.sort(Comparator
-                .comparing(DemandManpowerDetail::getTestType, Comparator.nullsFirst(Comparator.naturalOrder()))
-                .thenComparing(DemandManpowerDetail::getId, Comparator.nullsFirst(Comparator.naturalOrder()))));
+        detailsByDemand.replaceAll((demandId, rows) -> orderDetails(rows));
         Map<Long, List<DemandSpecialModule>> specialsByDemand = specials.stream()
                 .collect(Collectors.groupingBy(DemandSpecialModule::getDemandId));
         List<Long> moduleIds = specials.stream().map(DemandSpecialModule::getModuleId)
@@ -277,9 +292,24 @@ public class ScheduleRecommendationService {
 
     private List<DemandSpecialModule> sortedSpecials(List<DemandSpecialModule> specials,
             List<Schedule> existing, List<Schedule> generated) {
+        Map<Long, BigDecimal> remaining = specials.stream().collect(Collectors.toMap(
+                DemandSpecialModule::getId,
+                special -> remainingSpecial(special, existing, generated)));
+        return orderSpecials(specials, remaining);
+    }
+
+    static List<DemandManpowerDetail> orderDetails(List<DemandManpowerDetail> details) {
+        return details.stream().sorted(Comparator
+                .comparing(DemandManpowerDetail::getTestType, Comparator.nullsFirst(Comparator.naturalOrder()))
+                .thenComparing(DemandManpowerDetail::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+    }
+
+    static List<DemandSpecialModule> orderSpecials(List<DemandSpecialModule> specials,
+            Map<Long, BigDecimal> remainingById) {
         return specials.stream().sorted(Comparator
-                .comparing((DemandSpecialModule special) -> remainingSpecial(special, existing, generated),
-                        Comparator.reverseOrder())
+                .comparing((DemandSpecialModule special) -> remainingById.getOrDefault(
+                        special.getId(), BigDecimal.ZERO), Comparator.reverseOrder())
                 .thenComparing(DemandSpecialModule::getId, Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
     }
@@ -306,10 +336,17 @@ public class ScheduleRecommendationService {
         return error("DATA_CHANGED_RETRY", "排班数据已变化，请刷新后重试");
     }
 
+    private static final class RecommendationConcurrencySignal extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+    }
+
     private boolean hasConcurrencyCause(Throwable error) {
         Throwable current = error;
         while (current != null) {
             if (current instanceof ConcurrencyFailureException) return true;
+            if (current instanceof PessimisticLockException
+                    || current instanceof LockAcquisitionException) return true;
+            if (current instanceof SQLException sql && "50200".equals(sql.getSQLState())) return true;
             current = current.getCause();
         }
         return false;

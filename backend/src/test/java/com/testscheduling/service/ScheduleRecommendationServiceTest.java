@@ -11,6 +11,7 @@ import com.testscheduling.entity.TestStaff;
 import com.testscheduling.entity.TestStaffModule;
 import com.testscheduling.entity.TestStaffModuleId;
 import com.testscheduling.entity.StaffDailyStatus;
+import com.testscheduling.entity.User;
 import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.DemandManpowerDetailRepository;
 import com.testscheduling.repository.DemandSpecialModuleRepository;
@@ -20,6 +21,7 @@ import com.testscheduling.repository.TestDemandRepository;
 import com.testscheduling.repository.TestModuleConfigRepository;
 import com.testscheduling.repository.TestStaffModuleRepository;
 import com.testscheduling.repository.TestStaffRepository;
+import com.testscheduling.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -54,6 +56,7 @@ class ScheduleRecommendationServiceTest {
     @Autowired StaffDailyStatusRepository statusRepository;
     @Autowired TestStaffRepository staffRepository;
     @Autowired TestStaffModuleRepository staffModuleRepository;
+    @Autowired UserRepository userRepository;
     @SpyBean ScheduleEligibilityService eligibilitySpy;
 
     @Test
@@ -336,6 +339,74 @@ class ScheduleRecommendationServiceTest {
                 .map(Schedule::getStaffId).toList());
     }
 
+    @Test
+    void excludesInactiveStaffFromCandidates() {
+        TestDemand demand = demand();
+        detail(demand.getId(), "在职 Task7", "1.0");
+        TestStaff inactive = staff("离职人员 Task7", "在职 Task7");
+        inactive.setStatus(TestStaff.StaffStatus.leave);
+        staffRepository.save(inactive);
+
+        ScheduleRecommendationResponse result = service.recommend(request(demand.getId()));
+
+        assertEquals(0, result.generatedSchedules().size());
+        assertEquals("NO_QUALIFIED_STAFF", result.fulfillment().get(0).generalGaps().get(0).reasonCode());
+    }
+
+    @Test
+    void fixedEligibleStaffWinsButFixedIneligibleStaffDoesNotBypassModuleRules() {
+        TestDemand generalDemand = demand();
+        detail(generalDemand.getId(), "固定优先 Task7", "1.0");
+        staff("固定普通 Task7", "固定优先 Task7");
+        TestStaff fixed = staff("固定人员 Task7", "固定优先 Task7");
+        ScheduleRecommendationRequest generalRequest = request(generalDemand.getId());
+        generalRequest.setFixedStaffIds(List.of(fixed.getId()));
+        ScheduleRecommendationResponse generalResult = service.recommend(generalRequest);
+        assertEquals(fixed.getId(), generalResult.generatedSchedules().get(0).getStaffId());
+
+        TestModuleConfig module = module("固定模块 Task7", "固定模块组 Task7");
+        TestDemand specialDemand = demand();
+        detail(specialDemand.getId(), "固定模块组 Task7", "1.0");
+        DemandSpecialModule special = special(specialDemand.getId(), module.getId(), "1.0");
+        TestStaff qualified = staff("模块合格 Task7", "其他组 Task7");
+        TestStaffModule relation = new TestStaffModule();
+        relation.setId(new TestStaffModuleId(qualified.getId(), module.getId()));
+        staffModuleRepository.save(relation);
+        ScheduleRecommendationRequest specialRequest = request(specialDemand.getId());
+        specialRequest.setFixedStaffIds(List.of(fixed.getId()));
+        ScheduleRecommendationResponse specialResult = service.recommend(specialRequest);
+        assertEquals(qualified.getId(), specialResult.generatedSchedules().get(0).getStaffId());
+        assertEquals(special.getId(), specialResult.generatedSchedules().get(0).getDemandSpecialModuleId());
+    }
+
+    @Test
+    void confidentialDemandUsesOnlyClearedStaff() {
+        TestDemand demand = demand();
+        demand.setConfidential(true);
+        demandRepository.save(demand);
+        detail(demand.getId(), "保密 Task7", "1.0");
+        TestStaff uncleared = staff("保密未授权 Task7", "保密 Task7");
+        TestStaff cleared = staff("保密已授权 Task7", "保密 Task7");
+        user(uncleared.getEmpNo(), false);
+        user(cleared.getEmpNo(), true);
+
+        ScheduleRecommendationResponse result = service.recommend(request(demand.getId()));
+
+        assertEquals(cleared.getId(), result.generatedSchedules().get(0).getStaffId());
+    }
+
+    @Test
+    void generalAllocationRequiresExactTestType() {
+        TestDemand demand = demand();
+        detail(demand.getId(), "精确类型 Task7", "1.0");
+        staff("跨类型人员 Task7", "其他类型 Task7");
+
+        ScheduleRecommendationResponse result = service.recommend(request(demand.getId()));
+
+        assertEquals(0, result.generatedSchedules().size());
+        assertEquals("NO_QUALIFIED_STAFF", result.fulfillment().get(0).generalGaps().get(0).reasonCode());
+    }
+
     private TestModuleConfig module(String name, String testType) {
         TestModuleConfig module = new TestModuleConfig();
         module.setModuleName(name);
@@ -397,6 +468,14 @@ class ScheduleRecommendationServiceTest {
         staff.setStatus(TestStaff.StaffStatus.active);
         staff.setCurrentCoefficient(BigDecimal.ONE);
         return staffRepository.save(staff);
+    }
+
+    private User user(String username, boolean clearance) {
+        User user = new User();
+        user.setUsername(username);
+        user.setPassword("encoded");
+        user.setConfidentialClearance(clearance);
+        return userRepository.save(user);
     }
 
     private ScheduleRecommendationRequest request(Long demandId) {
