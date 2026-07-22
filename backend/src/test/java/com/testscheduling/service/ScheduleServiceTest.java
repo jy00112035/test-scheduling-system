@@ -41,6 +41,7 @@ class ScheduleServiceTest {
     @Mock TestStaffRepository testStaffRepository;
     @Mock UserRepository userRepository;
     @Mock ScheduleEligibilityService eligibilityService;
+    @Mock SchedulePublishService publishService;
 
     @InjectMocks ScheduleService scheduleService;
 
@@ -312,20 +313,9 @@ class ScheduleServiceTest {
 
     @Test
     void publishLocksDemandThenSchedulesInIdOrder() {
-        Schedule first = schedule(10L, 20L, 30L, null);
-        first.setId(2L);
-        Schedule second = schedule(10L, 21L, 30L, null);
-        second.setId(1L);
-        when(demandRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(demand(10L)));
-        when(scheduleRepository.findByDemandIdForUpdate(10L)).thenReturn(List.of(second, first));
-
         scheduleService.publishByDemandId(10L);
 
-        InOrder order = inOrder(demandRepository, scheduleRepository);
-        order.verify(demandRepository).findByIdForUpdate(10L);
-        order.verify(scheduleRepository).findByDemandIdForUpdate(10L);
-        verify(scheduleRepository).save(second);
-        verify(scheduleRepository).save(first);
+        verify(publishService).publishOne(10L);
     }
 
     @Test
@@ -346,26 +336,9 @@ class ScheduleServiceTest {
 
     @Test
     void publishesConfidentialScheduleWhenStaffUserHasClearance() {
-        TestDemand demand = demand(1L);
-        demand.setConfidential(true);
-        TestStaff staff = staff(27L);
-        staff.setName("李丹");
-        staff.setEmpNo("B-107126");
-        User user = new User();
-        user.setUsername("B-107126");
-        user.setConfidentialClearance(true);
-        Schedule schedule = schedule(1L, 27L, 30L, null);
-        schedule.setId(938L);
-        schedule.setPublished(false);
-        when(demandRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(demand));
-        when(scheduleRepository.findByDemandIdForUpdate(1L)).thenReturn(List.of(schedule));
-        when(testStaffRepository.findById(27L)).thenReturn(Optional.of(staff));
-        when(userRepository.findByUsername("B-107126")).thenReturn(Optional.of(user));
-
         scheduleService.publishByDemandId(1L);
 
-        assertTrue(schedule.getPublished());
-        verify(scheduleRepository).save(schedule);
+        verify(publishService).publishOne(1L);
     }
 
     private void stubLocks(Long demandId, Long staffId) {

@@ -45,6 +45,9 @@ public class ScheduleService {
     @Autowired
     private ScheduleEligibilityService eligibilityService;
 
+    @Autowired
+    private SchedulePublishService publishService;
+
     public List<Schedule> findAll() {
         return scheduleRepository.findAll();
     }
@@ -187,18 +190,7 @@ public class ScheduleService {
 
     @Transactional
     public void publishByDemandId(Long demandId) {
-        TestDemand demand = demandRepository.findByIdForUpdate(demandId)
-            .orElseThrow(() -> error("DEMAND_NOT_FOUND", "测试需求不存在"));
-        List<Schedule> schedules = scheduleRepository.findByDemandIdForUpdate(demandId);
-        if (Boolean.TRUE.equals(demand.getConfidential())) {
-            for (Schedule s : schedules) {
-                validateStaffConfidentialClearance(s.getStaffId(), "无法发布保密项目排班");
-            }
-        }
-        schedules.forEach(s -> {
-            s.setPublished(true);
-            scheduleRepository.save(s);
-        });
+        publishService.publishOne(demandId);
     }
 
     private void lockScopes(Collection<Schedule> schedules) {

@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 
 @Service
 public class SchedulePublishService {
@@ -37,9 +38,10 @@ public class SchedulePublishService {
     }
 
     public BatchPublishResponse publishBatch(BatchPublishRequest request) {
+        validateRequest(request);
         List<BatchPublishResponse.Success> success = new ArrayList<>();
         List<BatchPublishResponse.Failure> failed = new ArrayList<>();
-        for (Long demandId : new LinkedHashSet<>(request.demandIds())) {
+        for (Long demandId : distinctDemandIds(request.demandIds())) {
             try {
                 success.add(new BatchPublishResponse.Success(demandId, publishOne(demandId)));
             } catch (BusinessException error) {
@@ -48,5 +50,29 @@ public class SchedulePublishService {
             }
         }
         return new BatchPublishResponse(success, failed);
+    }
+
+    private List<Long> distinctDemandIds(List<Long> demandIds) {
+        return new ArrayList<>(new LinkedHashSet<>(demandIds));
+    }
+
+    private void validateRequest(BatchPublishRequest request) {
+        if (request == null) {
+            throw error("BATCH_PUBLISH_REQUEST_REQUIRED", "批量发布请求不能为空");
+        }
+        List<Long> demandIds = request.demandIds();
+        if (demandIds == null || demandIds.isEmpty()) {
+            throw error("BATCH_PUBLISH_IDS_REQUIRED", "需求ID列表不能为空");
+        }
+        if (demandIds.stream().anyMatch(Objects::isNull)) {
+            throw error("BATCH_PUBLISH_ID_INVALID", "需求ID列表不能包含空值");
+        }
+        if (distinctDemandIds(demandIds).size() > 500) {
+            throw error("BATCH_PUBLISH_TOO_LARGE", "批量发布最多支持500个不同需求");
+        }
+    }
+
+    private BusinessException error(String code, String message) {
+        return new BusinessException(code, message);
     }
 }

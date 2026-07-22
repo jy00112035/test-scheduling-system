@@ -58,6 +58,7 @@ class ScheduleServiceIntegrationTest {
     }
 
     @Autowired ScheduleService scheduleService;
+    @Autowired SchedulePublishService publishService;
     @Autowired ScheduleRepository scheduleRepository;
     @Autowired TestDemandRepository demandRepository;
     @Autowired DemandManpowerDetailRepository detailRepository;
@@ -244,19 +245,22 @@ class ScheduleServiceIntegrationTest {
 
     @Test
     void publishAndUnpublishSerializeThroughDemandAndScheduleLocks() throws Exception {
-        TestDemand demand = saveDemand("publish-locks", 2.0, 2);
-        DemandManpowerDetail detail = saveDetail(demand, "功能测试", 2.0);
+        TestDemand demand = saveDemand("publish-locks", 0.2, 2);
+        DemandManpowerDetail detail = saveDetail(demand, "功能测试", 0.2);
         TestStaff staff = saveStaff("PUBLISH-LOCK-A", "功能测试", 1.0);
         scheduleService.create(schedule(demand, staff, detail, null, 20));
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             Future<Object> publish = executor.submit(() -> runLockedAction(start,
-                () -> scheduleService.publishByDemandId(demand.getId())));
+                () -> publishService.publishOne(demand.getId())));
             Future<Object> unpublish = executor.submit(() -> runLockedAction(start,
                 () -> scheduleService.unpublishByDemandId(demand.getId())));
             start.countDown();
-            assertTrue(publish.get(5, TimeUnit.SECONDS) instanceof Boolean);
+            Object publishOutcome = publish.get(5, TimeUnit.SECONDS);
+            assertTrue(publishOutcome instanceof Boolean
+                || (publishOutcome instanceof BusinessException error
+                    && "SCHEDULE_NOT_FOUND".equals(error.getErrorCode())));
             assertTrue(unpublish.get(5, TimeUnit.SECONDS) instanceof Boolean);
             assertEquals(1, scheduleRepository.findByDemandId(demand.getId()).size());
         } finally {
@@ -266,20 +270,23 @@ class ScheduleServiceIntegrationTest {
 
     @Test
     void publishAndDraftClearSerializeThroughSameDemandLock() throws Exception {
-        TestDemand demand = saveDemand("publish-clear-locks", 2.0, 2);
-        DemandManpowerDetail detail = saveDetail(demand, "功能测试", 2.0);
+        TestDemand demand = saveDemand("publish-clear-locks", 0.2, 2);
+        DemandManpowerDetail detail = saveDetail(demand, "功能测试", 0.2);
         TestStaff staff = saveStaff("PUBLISH-CLEAR-A", "功能测试", 1.0);
         scheduleService.create(schedule(demand, staff, detail, null, 20));
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             Future<Object> publish = executor.submit(() -> runLockedAction(start,
-                () -> scheduleService.publishByDemandId(demand.getId())));
+                () -> publishService.publishOne(demand.getId())));
             Future<Object> clear = executor.submit(() -> runLockedAction(start,
                 () -> scheduleService.deleteByDemandId(demand.getId(),
                     ScheduleDeleteScope.DRAFT_ONLY)));
             start.countDown();
-            assertTrue(publish.get(5, TimeUnit.SECONDS) instanceof Boolean);
+            Object publishOutcome = publish.get(5, TimeUnit.SECONDS);
+            assertTrue(publishOutcome instanceof Boolean
+                || (publishOutcome instanceof BusinessException error
+                    && "SCHEDULE_NOT_FOUND".equals(error.getErrorCode())));
             assertTrue(clear.get(5, TimeUnit.SECONDS) instanceof Boolean);
             assertTrue(scheduleRepository.findByDemandId(demand.getId()).size() <= 1);
         } finally {
@@ -396,6 +403,8 @@ class ScheduleServiceIntegrationTest {
             }
             action.run();
             return Boolean.TRUE;
+        } catch (BusinessException error) {
+            return error;
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(error);

@@ -19,7 +19,6 @@ import com.testscheduling.service.ScheduleRecommendationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
-import jakarta.validation.Valid;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -145,17 +144,13 @@ public class ScheduleController {
     @PutMapping("/publish/{demandId}")
     public ApiResponse<Void> publishSchedules(@PathVariable Long demandId) {
         requireSchedulingRole();
-        if (publishService != null) {
-            publishService.publishOne(demandId);
-        } else {
-            scheduleService.publishByDemandId(demandId);
-        }
+        publishService.publishOne(demandId);
         return ApiResponse.success("发布成功", null);
     }
 
     @PostMapping("/batch-publish")
     public ApiResponse<BatchPublishResponse> publishSchedulesBatch(
-            @Valid @RequestBody BatchPublishRequest request) {
+            @RequestBody BatchPublishRequest request) {
         requireSchedulingRole();
         return ApiResponse.success("批量发布完成", publishService.publishBatch(request));
     }

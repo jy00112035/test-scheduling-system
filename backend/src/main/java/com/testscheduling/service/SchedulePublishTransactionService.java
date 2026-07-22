@@ -14,11 +14,15 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 @Service
 public class SchedulePublishTransactionService {
+    private static final int LOCK_CHUNK_SIZE = 500;
 
     private final TestDemandRepository demandRepository;
     private final TestModuleConfigRepository moduleRepository;
@@ -100,17 +104,50 @@ public class SchedulePublishTransactionService {
         List<Long> specialIds = schedules.stream().map(Schedule::getDemandSpecialModuleId)
             .filter(Objects::nonNull).distinct().sorted().toList();
         if (!specialIds.isEmpty()) {
-            var moduleIds = specialRepository.findByIdIn(specialIds).stream()
-                .map(special -> special.getModuleId()).filter(Objects::nonNull)
-                .distinct().sorted().toList();
-            if (!moduleIds.isEmpty()) moduleRepository.findAllByIdInForUpdate(moduleIds);
+            List<Long> moduleIds = new ArrayList<>();
+            for (List<Long> chunk : chunks(specialIds)) {
+                var specials = specialRepository.findByIdIn(chunk);
+                Set<Long> found = specials.stream().map(item -> item.getId()).collect(
+                    java.util.stream.Collectors.toSet());
+                if (found.size() != chunk.size()) {
+                    throw error("MODULE_NOT_FOUND", "特殊模块人力明细不存在");
+                }
+                moduleIds.addAll(specials.stream().map(item -> item.getModuleId())
+                    .filter(Objects::nonNull).toList());
+            }
+            lockModulesById(moduleIds.stream().distinct().sorted().toList());
         }
     }
 
     private void lockStaff(List<Schedule> schedules) {
         List<Long> ids = schedules.stream().map(Schedule::getStaffId)
             .filter(Objects::nonNull).distinct().sorted().toList();
-        if (!ids.isEmpty()) staffRepository.findAllByIdInForUpdate(ids);
+        for (List<Long> chunk : chunks(ids)) {
+            var found = staffRepository.findAllByIdInForUpdate(chunk);
+            if (found.stream().map(item -> item.getId()).collect(
+                    java.util.stream.Collectors.toSet()).size() != chunk.size()) {
+                throw error("STAFF_NOT_FOUND", "测试人员不存在");
+            }
+        }
+    }
+
+    private void lockModulesById(List<Long> ids) {
+        for (List<Long> chunk : chunks(ids)) {
+            var found = moduleRepository.findAllByIdInForUpdate(chunk);
+            if (found.stream().map(item -> item.getId()).collect(
+                    java.util.stream.Collectors.toSet()).size() != chunk.size()) {
+                throw error("MODULE_NOT_FOUND", "模块不存在");
+            }
+        }
+    }
+
+    private <T> List<List<T>> chunks(Collection<T> values) {
+        List<T> source = new ArrayList<>(values);
+        List<List<T>> chunks = new ArrayList<>();
+        for (int start = 0; start < source.size(); start += LOCK_CHUNK_SIZE) {
+            chunks.add(source.subList(start, Math.min(start + LOCK_CHUNK_SIZE, source.size())));
+        }
+        return chunks;
     }
 
     private BusinessException error(String code, String message) {

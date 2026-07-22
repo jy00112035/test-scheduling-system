@@ -9,6 +9,7 @@ import com.testscheduling.exception.BusinessException;
 import com.testscheduling.security.RequestRoleGuard;
 import com.testscheduling.service.ScheduleService;
 import com.testscheduling.service.SchedulePublishService;
+import com.testscheduling.service.SchedulePublishTransactionService;
 import com.testscheduling.service.ScheduleRecommendationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -38,6 +41,7 @@ class ScheduleControllerTest {
     private ScheduleService service;
     private ScheduleRecommendationService recommendationService;
     private SchedulePublishService publishService;
+    private ScheduleController controller;
     private MockMvc mockMvc;
 
     @BeforeEach
@@ -45,7 +49,7 @@ class ScheduleControllerTest {
         service = mock(ScheduleService.class);
         recommendationService = mock(ScheduleRecommendationService.class);
         publishService = mock(SchedulePublishService.class);
-        ScheduleController controller = new ScheduleController();
+        controller = new ScheduleController();
         ReflectionTestUtils.setField(controller, "scheduleService", service);
         ReflectionTestUtils.setField(controller, "recommendationService", recommendationService);
         ReflectionTestUtils.setField(controller, "publishService", publishService);
@@ -146,6 +150,44 @@ class ScheduleControllerTest {
             .andExpect(jsonPath("$.data.failed.length()").value(1))
             .andExpect(jsonPath("$.data.failed[0].reasonCode")
                 .value("GENERAL_MANPOWER_UNFULFILLED"));
+    }
+
+    @Test
+    void batchPublishMapsNullAndEmptyInputsToStableCodes() throws Exception {
+        useRealPublishValidationService();
+        assertBatchError("{}", "BATCH_PUBLISH_IDS_REQUIRED");
+        assertBatchError("{\"demandIds\":null}", "BATCH_PUBLISH_IDS_REQUIRED");
+        assertBatchError("{\"demandIds\":[]}", "BATCH_PUBLISH_IDS_REQUIRED");
+        assertBatchError("{\"demandIds\":[1,null]}", "BATCH_PUBLISH_ID_INVALID");
+    }
+
+    @Test
+    void batchPublishMapsDistinctOversizedInputToStableCode() throws Exception {
+        useRealPublishValidationService();
+        String ids = LongStream.rangeClosed(1, 501).mapToObj(Long::toString)
+            .collect(Collectors.joining(","));
+        assertBatchError("{\"demandIds\":[" + ids + "]}", "BATCH_PUBLISH_TOO_LARGE");
+    }
+
+    @Test
+    void batchPublishMapsMalformedAndMissingBodiesToStableCode() throws Exception {
+        assertBatchError("{", "BATCH_PUBLISH_REQUEST_INVALID");
+        mockMvc.perform(authorized(post("/api/schedules/batch-publish"), "projectManager"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.data.errorCode").value("BATCH_PUBLISH_REQUEST_INVALID"));
+    }
+
+    private void useRealPublishValidationService() {
+        ReflectionTestUtils.setField(controller, "publishService",
+            new SchedulePublishService(mock(SchedulePublishTransactionService.class),
+                mock(com.testscheduling.service.AuditLogService.class)));
+    }
+
+    private void assertBatchError(String body, String code) throws Exception {
+        mockMvc.perform(authorized(post("/api/schedules/batch-publish")
+                .contentType(MediaType.APPLICATION_JSON).content(body), "projectManager"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.data.errorCode").value(code));
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.testscheduling.entity.DemandSpecialModule;
 import com.testscheduling.entity.Schedule;
 import com.testscheduling.entity.TestDemand;
 import com.testscheduling.entity.TestStaff;
+import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.DemandSpecialModuleRepository;
 import com.testscheduling.repository.ScheduleRepository;
 import com.testscheduling.repository.TestDemandRepository;
@@ -51,8 +52,12 @@ class SchedulePublishTransactionServiceTest {
         when(demandRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(demand));
         when(scheduleRepository.findByDemandId(10L)).thenReturn(rows);
         when(scheduleRepository.findByDemandIdForUpdate(10L)).thenReturn(rows);
+        TestStaff firstStaff = new TestStaff();
+        firstStaff.setId(20L);
+        TestStaff secondStaff = new TestStaff();
+        secondStaff.setId(21L);
         when(staffRepository.findAllByIdInForUpdate(List.of(20L, 21L)))
-            .thenReturn(List.of(new TestStaff(), new TestStaff()));
+            .thenReturn(List.of(firstStaff, secondStaff));
         when(fulfillmentService.calculate(10L)).thenReturn(satisfied(10L));
         when(eligibilityService.prepareContext(rows))
             .thenReturn(new ScheduleEligibilityService.ValidationContext());
@@ -80,7 +85,12 @@ class SchedulePublishTransactionServiceTest {
         when(demandRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(demand));
         when(scheduleRepository.findByDemandId(10L)).thenReturn(rows);
         when(scheduleRepository.findByDemandIdForUpdate(10L)).thenReturn(rows);
-        when(staffRepository.findAllByIdInForUpdate(List.of(20L, 21L))).thenReturn(List.of());
+        TestStaff firstStaff = new TestStaff();
+        firstStaff.setId(20L);
+        TestStaff secondStaff = new TestStaff();
+        secondStaff.setId(21L);
+        when(staffRepository.findAllByIdInForUpdate(List.of(20L, 21L)))
+            .thenReturn(List.of(firstStaff, secondStaff));
         when(fulfillmentService.calculate(10L)).thenReturn(satisfied(10L));
         when(eligibilityService.prepareContext(rows))
             .thenReturn(new ScheduleEligibilityService.ValidationContext());
@@ -98,6 +108,41 @@ class SchedulePublishTransactionServiceTest {
         assertFalse(Boolean.TRUE.equals(first.getPublished()));
         assertFalse(Boolean.TRUE.equals(second.getPublished()));
         verify(scheduleRepository, never()).saveAllAndFlush(any());
+    }
+
+    @Test
+    void missingStaffLockRowUsesStableStaffError() {
+        TestDemand demand = demand(10L);
+        Schedule row = schedule(1L, 10L, 20L);
+        when(demandRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(demand));
+        when(scheduleRepository.findByDemandId(10L)).thenReturn(List.of(row));
+        when(staffRepository.findAllByIdInForUpdate(List.of(20L))).thenReturn(List.of());
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service().publishInNewTransaction(10L));
+
+        assertEquals("STAFF_NOT_FOUND", error.getErrorCode());
+        verify(scheduleRepository, never()).findByDemandIdForUpdate(10L);
+    }
+
+    @Test
+    void missingModuleLockRowUsesStableModuleError() {
+        TestDemand demand = demand(10L);
+        Schedule row = schedule(1L, 10L, 20L);
+        row.setDemandSpecialModuleId(30L);
+        DemandSpecialModule special = new DemandSpecialModule();
+        special.setId(30L);
+        special.setModuleId(40L);
+        when(demandRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(demand));
+        when(scheduleRepository.findByDemandId(10L)).thenReturn(List.of(row));
+        when(specialRepository.findByIdIn(List.of(30L))).thenReturn(List.of(special));
+        when(moduleRepository.findAllByIdInForUpdate(List.of(40L))).thenReturn(List.of());
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service().publishInNewTransaction(10L));
+
+        assertEquals("MODULE_NOT_FOUND", error.getErrorCode());
+        verify(staffRepository, never()).findAllByIdInForUpdate(any());
     }
 
     private SchedulePublishTransactionService service() {

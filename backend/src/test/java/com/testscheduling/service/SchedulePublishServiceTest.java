@@ -13,6 +13,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -23,11 +24,12 @@ class SchedulePublishServiceTest {
 
     @Test
     void batchRequestRejectsNullEmptyAndOversizedIds() {
-        assertThrows(BusinessException.class, () -> new BatchPublishRequest(null));
-        assertThrows(BusinessException.class, () -> new BatchPublishRequest(List.of()));
-        assertThrows(BusinessException.class,
-            () -> new BatchPublishRequest(java.util.stream.LongStream.rangeClosed(1, 501)
-                .boxed().toList()));
+        SchedulePublishService service = new SchedulePublishService(transactionService, auditLogService);
+        assertThrows(BusinessException.class, () -> service.publishBatch(null));
+        assertThrows(BusinessException.class, () -> service.publishBatch(new BatchPublishRequest(null)));
+        assertThrows(BusinessException.class, () -> service.publishBatch(new BatchPublishRequest(List.of())));
+        assertThrows(BusinessException.class, () -> service.publishBatch(new BatchPublishRequest(
+            java.util.stream.LongStream.rangeClosed(1, 501).boxed().toList())));
     }
 
     @Test
@@ -62,5 +64,21 @@ class SchedulePublishServiceTest {
             org.mockito.ArgumentMatchers.eq(11L),
             org.mockito.ArgumentMatchers.isNull(),
             org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void failureAuditErrorNeverReplacesOriginalBusinessError() {
+        BusinessException original = new BusinessException(
+            "STAFF_MODULE_NOT_FAMILIAR", "张三不熟悉支付模块");
+        when(transactionService.publishInNewTransaction(10L)).thenThrow(original);
+        doThrow(new IllegalStateException("audit unavailable")).when(auditLogService).record(
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull(),
+            org.mockito.ArgumentMatchers.any());
+
+        BusinessException result = assertThrows(BusinessException.class,
+            () -> new SchedulePublishService(transactionService, auditLogService).publishOne(10L));
+
+        assertEquals(original, result);
     }
 }
