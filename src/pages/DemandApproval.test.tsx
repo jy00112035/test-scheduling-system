@@ -138,7 +138,7 @@ describe('DemandApproval edit loading', () => {
     expect(group).toHaveAttribute('aria-invalid', 'true');
     const errorId = group.getAttribute('aria-describedby');
     expect(errorId).toBeTruthy();
-    expect(document.getElementById(errorId as string)).toHaveTextContent('请选择特殊模块');
+    expect(document.getElementById(errorId as string)).toHaveTextContent('特殊模块所属小组无有效总人力');
     expect(document.getElementById(errorId as string)).not.toHaveTextContent('SPECIAL_MODULE_REQUIRED');
     expect(document.activeElement).toBe(group);
     expect(scrollIntoView).toHaveBeenCalled();

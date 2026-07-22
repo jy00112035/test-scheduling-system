@@ -141,7 +141,7 @@ describe('SpecialModuleDemandEditor', () => {
 
   it('marks every overflow row invalid', () => {
     render(<SpecialModuleDemandEditor rows={[{ testType: '功能测试', moduleId: 11, manpowerDemand: 2 }, { testType: '功能测试', moduleId: 12, manpowerDemand: 2 }]} modules={[moduleFixture(), moduleFixture({ id: 12, moduleName: '搜索模块' })]} manpowerByTestType={{ 功能测试: 3 }} onChange={() => undefined} />);
-    expect(screen.getByRole('combobox', { name: '特殊模块 1' })).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByRole('combobox', { name: '特殊模块 2' })).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('spinbutton', { name: '人力需求 1' })).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('spinbutton', { name: '人力需求 2' })).toHaveAttribute('aria-invalid', 'true');
   });
 });

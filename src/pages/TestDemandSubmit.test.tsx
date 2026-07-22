@@ -111,7 +111,7 @@ describe('TestDemandSubmit special module requests', () => {
     const user = userEvent.setup();
     const total = await screen.findByRole('spinbutton', { name: '功能测试小组总人力' });
     await user.click(screen.getByRole('button', { name: /提交需求/ }));
-    const row = screen.getByRole('combobox', { name: '特殊模块 1' });
+    const row = screen.getByRole('spinbutton', { name: '人力需求 1' });
     expect(total).toHaveAttribute('aria-invalid', 'true');
     const overflowDescription = total.getAttribute('aria-describedby');
     expect(overflowDescription).toBe('demand-overflow-功能测试');
@@ -134,10 +134,9 @@ describe('TestDemandSubmit special module requests', () => {
     renderPage();
     const user = userEvent.setup();
     const moduleControl = await screen.findByRole('combobox', { name: '特殊模块 1' });
-    const groupControl = screen.getByRole('combobox', { name: '小组 1' });
     await user.click(screen.getByRole('button', { name: /提交需求/ }));
     expect(moduleControl).toHaveAttribute('aria-invalid', 'true');
-    expect(document.activeElement).toBe(groupControl);
+    expect(document.activeElement).toBe(moduleControl);
     expect(scrollIntoView).toHaveBeenCalled();
     expect(createDemand).not.toHaveBeenCalled();
   });

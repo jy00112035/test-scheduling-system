@@ -59,9 +59,9 @@ const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
               placeholder="选择小组"
               value={authoritativeTestType || undefined}
               style={{ width: 150 }}
-              status={rowInvalid ? 'error' : undefined}
-              aria-invalid={rowInvalid}
-              aria-describedby={rowInvalid ? rowErrorId : undefined}
+              status={rowInvalid && validation.fieldTarget === 'testType' ? 'error' : undefined}
+              aria-invalid={rowInvalid && validation.fieldTarget === 'testType'}
+              aria-describedby={rowInvalid && validation.fieldTarget === 'testType' ? rowErrorId : undefined}
               onChange={(testType) => updateRow(index, resetSpecialModuleRowForTestType(testType))}
               disabled={disabled || !canEditModules}
               options={Object.entries(manpowerByTestType)
@@ -74,9 +74,9 @@ const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
               disabled={disabled || !canEditModules || !authoritativeTestType}
               value={row.moduleId}
               style={{ width: 180 }}
-              status={rowInvalid ? 'error' : undefined}
-              aria-invalid={rowInvalid}
-              aria-describedby={rowInvalid ? rowErrorId : undefined}
+              status={rowInvalid && validation.fieldTarget === 'moduleId' ? 'error' : undefined}
+              aria-invalid={rowInvalid && validation.fieldTarget === 'moduleId'}
+              aria-describedby={rowInvalid && validation.fieldTarget === 'moduleId' ? rowErrorId : undefined}
               onChange={(moduleId) => updateRow(index, { ...row, moduleId })}
               options={availableModules.map((module) => ({
                 value: module.id,
@@ -93,10 +93,10 @@ const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
               step={0.1}
               precision={1}
               value={row.manpowerDemand}
-              disabled={disabled || (selectedModule?.enabled === false && row.historicalManpowerDemand !== undefined)}
-              status={rowInvalid ? 'error' : undefined}
-              aria-invalid={rowInvalid}
-              aria-describedby={rowInvalid ? rowErrorId : undefined}
+              disabled={disabled || (selectedModule?.enabled === false && row.historicalManpowerDemand === row.manpowerDemand)}
+              status={rowInvalid && (validation.fieldTarget === 'manpowerDemand' || validation.fieldTarget === 'groupTotal') ? 'error' : undefined}
+              aria-invalid={rowInvalid && (validation.fieldTarget === 'manpowerDemand' || validation.fieldTarget === 'groupTotal')}
+              aria-describedby={rowInvalid && (validation.fieldTarget === 'manpowerDemand' || validation.fieldTarget === 'groupTotal') ? rowErrorId : undefined}
               placeholder="人力需求"
               addonAfter="人/天"
               onChange={(manpowerDemand) => updateRow(index, { ...row, manpowerDemand: manpowerDemand ?? undefined })}
