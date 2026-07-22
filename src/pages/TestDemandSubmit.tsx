@@ -360,6 +360,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
                     aria-label={`${testType}小组总人力`}
                     status={specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && specialValidation.testType === testType ? 'error' : undefined}
                     aria-invalid={specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && specialValidation.testType === testType}
+                    aria-describedby={specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && specialValidation.testType === testType ? `demand-overflow-${testType}` : undefined}
                     min={0}
                     step={0.1}
                     precision={1}
@@ -375,6 +376,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
                   {manpowerRemarks[testType] && <span style={{ marginLeft: 8, color: '#666', fontSize: 12 }}>备注：{manpowerRemarks[testType]}</span>}
                 </div>
               ))}
+              {specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && <span id={`demand-overflow-${specialValidation.testType}`} role="alert" style={{ color: '#cf1322' }}>特殊模块人力不能超过小组总人力</span>}
               <Divider style={{ margin: '8px 0' }} />
               <div style={{ textAlign: 'right', fontSize: 14, fontWeight: 500 }}>
                 总计：

@@ -15,6 +15,16 @@ interface SpecialModuleDemandEditorProps {
 // eslint-disable-next-line react-refresh/only-export-components -- Exported pure interaction contract for focused editor tests.
 export const resetSpecialModuleRowForTestType = (testType: string): SpecialModuleDemandInput => ({ testType });
 
+const validationMessages: Record<string, string> = {
+  SPECIAL_MODULE_REQUIRED: '请选择特殊模块',
+  SPECIAL_MODULE_MANPOWER_INVALID: '人力需求必须大于零且最多一位小数',
+  SPECIAL_MODULE_DUPLICATE: '同一特殊模块只能填写一次',
+  MODULE_GROUP_MISMATCH: '特殊模块所属小组无有效总人力',
+  MODULE_NOT_FOUND: '特殊模块不存在',
+  MODULE_DISABLED_FOR_NEW_DEMAND: '停用模块只能保留原人力',
+  SPECIAL_MODULE_EXCEEDS_GROUP: '特殊模块人力不能超过小组总人力',
+};
+
 const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
   rows,
   modules,
@@ -91,7 +101,7 @@ const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
               addonAfter="人/天"
               onChange={(manpowerDemand) => updateRow(index, { ...row, manpowerDemand: manpowerDemand ?? undefined })}
             />
-            {rowInvalid && <span id={rowErrorId} style={{ color: '#cf1322' }}>{validation.errorCode}</span>}
+            {rowInvalid && <span id={rowErrorId} style={{ color: '#cf1322' }}>{validationMessages[validation.errorCode ?? '']}</span>}
             <Button
               aria-label={`删除特殊模块需求 ${index + 1}`}
               icon={<DeleteOutlined />}

@@ -28,6 +28,7 @@ const DemandApproval: React.FC = () => {
   const [modules, setModules] = useState<TestModule[]>([]);
   const [modulesAvailable, setModulesAvailable] = useState(true);
   const [editSpecialModuleRows, setEditSpecialModuleRows] = useState<SpecialModuleDemandInput[]>([]);
+  const specialModuleEditorRef = useRef<HTMLDivElement>(null);
   const [editManpowerRemarks, setEditManpowerRemarks] = useState<Record<string, string | undefined>>({});
   const editRequestSequence = useRef(0);
   const mountedRef = useRef(true);
@@ -141,7 +142,11 @@ const DemandApproval: React.FC = () => {
       id: row.moduleId, moduleName: row.moduleName, testType: row.testType, enabled: row.enabled,
       sortOrder: 0, lockVersion: 0, createdAt: row.createdAt ?? '', updatedAt: row.updatedAt ?? '', referenced: true,
     }));
-    setModules((current) => [...current, ...enrichedModules.filter((item: TestModule) => !current.some((module) => module.id === item.id))]);
+    setModules((current) => {
+      const byId = new Map(current.map((module) => [module.id, module]));
+      enrichedModules.forEach((module: TestModule) => byId.set(module.id, module));
+      return Array.from(byId.values());
+    });
     setEditingDemand(record);
     setEditDateRange([dayjs(record.startDate), dayjs(record.endDate)]);
     setOriginalManpower(orig);
@@ -176,7 +181,10 @@ const DemandApproval: React.FC = () => {
         : '请完善特殊模块人力需求');
       if (specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && specialValidation.testType) {
         document.getElementById(`approval-manpower-${specialValidation.testType}`)?.focus();
+      } else {
+        (specialModuleEditorRef.current?.querySelector('[aria-invalid="true"][role="combobox"], [aria-invalid="true"][role="spinbutton"]') as HTMLElement | null)?.focus();
       }
+      specialModuleEditorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
 
@@ -438,6 +446,7 @@ const DemandApproval: React.FC = () => {
                       aria-label={`${testType}小组总人力`}
                       status={editSpecialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && editSpecialValidation.testType === testType ? 'error' : undefined}
                       aria-invalid={editSpecialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && editSpecialValidation.testType === testType}
+                      aria-describedby={editSpecialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && editSpecialValidation.testType === testType ? `approval-overflow-${testType}` : undefined}
                       min={0}
                       step={0.1}
                       precision={1}
@@ -471,6 +480,7 @@ const DemandApproval: React.FC = () => {
 
             <div style={{ marginBottom: 16 }}>
               <div style={{ marginBottom: 8, fontWeight: 500 }}>特殊模块人力需求</div>
+              <div ref={specialModuleEditorRef}>
               <SpecialModuleDemandEditor
                 rows={editSpecialModuleRows}
                 modules={modules}
@@ -478,11 +488,13 @@ const DemandApproval: React.FC = () => {
                 canEditModules={modulesAvailable}
                 onChange={setEditSpecialModuleRows}
               />
+              </div>
               {calculateManpowerSummary(editManpower, editSpecialModuleRows, modules).map((summary) => (
                 <div key={summary.testType} style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
                   {summary.testType}：总人力 {summary.totalManpower.toFixed(1)}，特殊模块 {summary.specialManpower.toFixed(1)}，通用人力 {summary.generalManpower.toFixed(1)} 人/天
                 </div>
               ))}
+              {editSpecialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && <span id={`approval-overflow-${editSpecialValidation.testType}`} role="alert" style={{ color: '#cf1322' }}>特殊模块人力不能超过小组总人力</span>}
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
