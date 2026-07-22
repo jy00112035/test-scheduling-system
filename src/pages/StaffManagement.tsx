@@ -91,6 +91,12 @@ interface ImportRow {
   confidentialClearance: boolean;
 }
 
+function parseImportCoefficient(value: unknown) {
+  if (value === undefined || value === null || String(value).trim() === '') return 0.3;
+  const parsed = parseFloat(String(value));
+  return Number.isNaN(parsed) ? 0.3 : parsed;
+}
+
 function normalizeFamiliarModules(familiarModules?: FamiliarModule[] | string): FamiliarModule[] {
   return Array.isArray(familiarModules) ? familiarModules : [];
 }
@@ -317,7 +323,7 @@ const StaffManagement: React.FC = () => {
         if (!mountedRef.current || session !== importGenerationRef.current) return;
         try {
           const data = new Uint8Array(e.target?.result as ArrayBuffer);
-          const workbook = XLSX.read(data, { type: 'array', sheetRows: STAFF_IMPORT_MAX_ROWS + 1 });
+          const workbook = XLSX.read(data, { type: 'array', sheetRows: STAFF_IMPORT_MAX_ROWS + 2 });
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
@@ -325,6 +331,7 @@ const StaffManagement: React.FC = () => {
           if (classifyStaffImportLimits(selectedFile.size, jsonData.length) === 'tooManyRows') {
             message.error(`Excel文件最多导入 ${STAFF_IMPORT_MAX_ROWS} 行数据`);
             setImportLoading(false);
+            if (importReaderRef.current === reader) importReaderRef.current = null;
             return;
           }
 
@@ -403,8 +410,8 @@ const StaffManagement: React.FC = () => {
               joinDate: joinDate,
               groupName: groupNameKey ? String(rowObj[groupNameKey] || '').trim() : '',
               testType: testTypeKey ? String(rowObj[testTypeKey] || '').trim() || undefined : undefined,
-              initialCoefficient: initialCoefKey ? parseFloat(String(rowObj[initialCoefKey] || '0.3')) || 0.3 : 0.3,
-              currentCoefficient: currentCoefKey ? parseFloat(String(rowObj[currentCoefKey] || '0.3')) || 0.3 : 0.3,
+              initialCoefficient: initialCoefKey ? parseImportCoefficient(rowObj[initialCoefKey]) : 0.3,
+              currentCoefficient: currentCoefKey ? parseImportCoefficient(rowObj[currentCoefKey]) : 0.3,
               status: parsedStatus.status as ImportRow['status'],
               roles: parsedRoles.roles.length ? parsedRoles.roles : ['testExecutor'],
               ...(() => {
@@ -459,14 +466,20 @@ const StaffManagement: React.FC = () => {
     }
   };
 
+  const hasImportErrors = duplicateEmps.length > 0 || importData.some(row => (
+    row.unmatchedModules.length > 0
+    || row.unavailableModules.length > 0
+    || row.rowErrors.length > 0
+  ));
+
   const handleImportConfirm = async () => {
     if (importSaveSessionRef.current !== null) return;
     if (importData.length === 0) {
       message.error('没有可导入的数据');
       return;
     }
-    if (importData.some(row => row.unmatchedModules.length > 0 || row.unavailableModules.length > 0 || row.rowErrors.length > 0)) {
-      message.error('存在熟悉模块无法导入的人员，请移除或修正后重试');
+    if (hasImportErrors) {
+      message.error('存在无法导入的人员，请移除或修正后重试');
       return;
     }
 
@@ -1332,7 +1345,7 @@ const StaffManagement: React.FC = () => {
               <Space>
                 <Button onClick={resetImportPreview} disabled={importSaving}>返回重新选择</Button>
                 <Button onClick={handleImportCancel} disabled={importSaving}>取消</Button>
-                <Button type="primary" onClick={handleImportConfirm} loading={importLoading} disabled={importSaving || importData.length === 0 || importData.some(row => row.unmatchedModules.length > 0 || row.unavailableModules.length > 0)}>
+                <Button type="primary" onClick={handleImportConfirm} loading={importLoading} disabled={importSaving || importData.length === 0 || hasImportErrors}>
                   确认导入
                 </Button>
               </Space>

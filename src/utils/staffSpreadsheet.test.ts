@@ -32,8 +32,12 @@ describe('staff spreadsheet helpers', () => {
     const guidanceSheet = workbook.Sheets[workbook.SheetNames[1]];
 
     expect(STAFF_IMPORT_TEMPLATE_FILENAME).toBe('人员导入模板.xlsx');
-    expect(XLSX.utils.sheet_to_json(dataSheet, { header: 1 })[0]).toContain('熟悉模块');
-    expect(XLSX.utils.sheet_to_json(guidanceSheet, { header: 1 }).flat().join('')).toContain('全系统唯一模块名称，以英文逗号分隔');
+    const headers = XLSX.utils.sheet_to_json<string[]>(dataSheet, { header: 1 })[0];
+    const guidance = XLSX.utils.sheet_to_json<string[]>(guidanceSheet, { header: 1 }).flat().join('');
+    expect(headers).toContain('熟悉模块');
+    expect(headers).toContain('状态');
+    expect(guidance).toContain('全系统唯一模块名称，以英文逗号分隔');
+    expect(guidance).toContain('状态：填写 在职、休假、离职，或 active、leave、resigned；留空默认为在职');
     expect(XLSX.read(XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }), { type: 'array' }).SheetNames).toEqual(['人员导入', '填写说明']);
   });
 

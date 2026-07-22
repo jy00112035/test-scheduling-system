@@ -6,7 +6,7 @@ import { api } from '../services/api';
 import type { FamiliarModule, TestModule } from '../types';
 import * as XLSX from 'xlsx';
 import { message } from 'antd';
-import { STAFF_IMPORT_MAX_FILE_SIZE } from '../utils/staffSpreadsheet';
+import { buildStaffExportRows, STAFF_IMPORT_MAX_FILE_SIZE, STAFF_IMPORT_MAX_ROWS } from '../utils/staffSpreadsheet';
 
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: { testType: '功能测试' } }) }));
 vi.mock('../context/UserRoleContext', () => ({
@@ -618,6 +618,126 @@ describe('StaffManagement familiar modules', () => {
       await user.upload(input, file); await user.click(screen.getByRole('button', { name: /确\s*定/ }));
       await waitFor(() => expect(TestFileReader.instances).toHaveLength(2));
     } finally { Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader }); }
+  });
+
+  it('rejects a real workbook with 1001 data rows without preview or save', async () => {
+    const createStaff = vi.spyOn(api, 'createStaff');
+    const rows = Array.from({ length: STAFF_IMPORT_MAX_ROWS + 1 }, (_, index) => ({
+      工号: `LIMIT${index + 1}`, 姓名: `边界人员${index + 1}`,
+    }));
+    const data = workbookData(rows);
+    const OriginalFileReader = globalThis.FileReader;
+    class TestFileReader {
+      onload: ((event: any) => void) | null = null;
+      abort() {}
+      readAsArrayBuffer() { this.onload?.({ target: { result: data } }); }
+    }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      render(<StaffManagement />);
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      await user.upload(document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement, new File(['rows'], 'over-limit.xlsx'));
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+
+      expect(await screen.findByText(`Excel文件最多导入 ${STAFF_IMPORT_MAX_ROWS} 行数据`)).toBeInTheDocument();
+      expect(screen.queryByText(`准备导入 ${STAFF_IMPORT_MAX_ROWS} 条人员数据`)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '确认导入' })).not.toBeInTheDocument();
+      expect(createStaff).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader });
+    }
+  });
+
+  it('accepts a real workbook with exactly 1000 data rows', async () => {
+    const rows = Array.from({ length: STAFF_IMPORT_MAX_ROWS }, (_, index) => ({
+      工号: `EXACT${index + 1}`, 姓名: `边界人员${index + 1}`,
+    }));
+    const data = workbookData(rows);
+    const OriginalFileReader = globalThis.FileReader;
+    class TestFileReader {
+      onload: ((event: any) => void) | null = null;
+      abort() {}
+      readAsArrayBuffer() { this.onload?.({ target: { result: data } }); }
+    }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      render(<StaffManagement />);
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      await user.upload(document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement, new File(['rows'], 'exact-limit.xlsx'));
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+
+      expect(await screen.findByText(`准备导入 ${STAFF_IMPORT_MAX_ROWS} 条人员数据`)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '确认导入' })).toBeEnabled();
+    } finally {
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader });
+    }
+  });
+
+  it('preserves numeric and string zero coefficients from an exported workbook in import payloads', async () => {
+    const exportedRow = buildStaffExportRows([{
+      name: '数值零', empNo: 'EMP060', joinDate: '2026-07-22', groupName: '功能测试组',
+      initialCoefficient: 0, currentCoefficient: 0, status: 'active', roles: ['testExecutor'], familiarModules: [],
+    }])[0];
+    const data = workbookData([
+      exportedRow,
+      { ...exportedRow, 工号: 'EMP061', 姓名: '字符串零', 初始系数: '0', 当前系数: '0' },
+    ]);
+    const createStaff = vi.spyOn(api, 'createStaff').mockResolvedValue({ staff: {}, generatedPassword: '' });
+    const OriginalFileReader = globalThis.FileReader;
+    class TestFileReader {
+      onload: ((event: any) => void) | null = null;
+      abort() {}
+      readAsArrayBuffer() { this.onload?.({ target: { result: data } }); }
+    }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      render(<StaffManagement />);
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      await user.upload(document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement, new File(['rows'], 'zero-coefficients.xlsx'));
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+      await user.click(await screen.findByRole('button', { name: '确认导入' }));
+
+      await waitFor(() => expect(createStaff).toHaveBeenCalledTimes(2));
+      expect(createStaff.mock.calls.map(([row]) => ({
+        empNo: row.empNo,
+        initialCoefficient: row.initialCoefficient,
+        currentCoefficient: row.currentCoefficient,
+      }))).toEqual([
+        { empNo: 'EMP060', initialCoefficient: 0, currentCoefficient: 0 },
+        { empNo: 'EMP061', initialCoefficient: 0, currentCoefficient: 0 },
+      ]);
+    } finally {
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader });
+    }
+  });
+
+  it('disables import confirmation for invalid roles and statuses', async () => {
+    const data = workbookData([{
+      工号: 'EMP062', 姓名: '无效编码', 角色: '不存在角色', 状态: '未知状态',
+    }]);
+    const OriginalFileReader = globalThis.FileReader;
+    class TestFileReader {
+      onload: ((event: any) => void) | null = null;
+      abort() {}
+      readAsArrayBuffer() { this.onload?.({ target: { result: data } }); }
+    }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      render(<StaffManagement />);
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      await user.upload(document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement, new File(['rows'], 'invalid-codecs.xlsx'));
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+
+      expect(await screen.findByText('无效角色：不存在角色')).toBeInTheDocument();
+      expect(screen.getByText('无效状态：未知状态')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '确认导入' })).toBeDisabled();
+    } finally {
+      Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader });
+    }
   });
 
   it('keeps staff CRUD usable after module load failure and restores module actions on retry', async () => {

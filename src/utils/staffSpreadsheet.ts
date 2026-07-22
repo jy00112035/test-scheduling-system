@@ -74,12 +74,13 @@ export function buildStaffExportRows(staffs: StaffSpreadsheetRecord[]) {
 export function createStaffImportTemplateWorkbook() {
   const workbook = XLSX.utils.book_new();
   const dataSheet = XLSX.utils.aoa_to_sheet([[
-    '工号', '姓名', '入职日期', '所属项目', '测试类型', '初始系数', '当前系数', '角色', '熟悉模块', '保密权限',
+    '工号', '姓名', '入职日期', '所属项目', '测试类型', '初始系数', '当前系数', '状态', '角色', '熟悉模块', '保密权限',
   ]]);
   const guidanceSheet = XLSX.utils.aoa_to_sheet([
     ['人员导入填写说明'],
     ['熟悉模块：使用全系统唯一模块名称，以英文逗号分隔。'],
-    ['角色可使用英文角色代码或系统显示名称，以英文分号分隔；状态填写 在职、休假、离职 或 active、leave、resigned。'],
+    ['角色可使用英文角色代码或系统显示名称，以英文分号分隔。'],
+    ['状态：填写 在职、休假、离职，或 active、leave、resigned；留空默认为在职。'],
     [`单个文件不超过 ${STAFF_IMPORT_MAX_FILE_SIZE / 1024 / 1024}MB，最多 ${STAFF_IMPORT_MAX_ROWS} 行数据。`],
   ]);
   XLSX.utils.book_append_sheet(workbook, dataSheet, '人员导入');
