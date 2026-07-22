@@ -62,6 +62,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
   const [modules, setModules] = useState<TestModule[]>([]);
   const [modulesAvailable, setModulesAvailable] = useState(true);
   const specialModuleSectionRef = useRef<HTMLDivElement>(null);
+  const persistedBaselineRef = useRef(new Map((initialValues?.specialModuleDemands ?? []).map((row) => [row.moduleId, row.manpowerDemand])));
   const draftId = useRef(isEdit ? `edit_${initialValues?.id}` : 'new').current;
   const hasShownDraftPrompt = useRef(false);
 
@@ -116,7 +117,10 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         form.setFieldsValue(draft.formData);
         setManpowerInputs(draft.manpowerInputs);
         setManpowerRemarks(draft.manpowerRemarks);
-        setSpecialModuleRows(draft.specialModuleDemands ?? []);
+        setSpecialModuleRows((draft.specialModuleDemands ?? []).map((row) => ({
+          ...row,
+          historicalManpowerDemand: isEdit ? persistedBaselineRef.current.get(row.moduleId as number) : undefined,
+        })));
         onDirtyChange?.(true);
         message.success('草稿已恢复');
       },
@@ -183,7 +187,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         moduleId: row.moduleId,
         testType: row.testType,
         manpowerDemand: row.manpowerDemand,
-        historicalManpowerDemand: row.enabled ? undefined : row.manpowerDemand,
+        historicalManpowerDemand: row.manpowerDemand,
       })));
     }
   }, [initialValues, form]);
@@ -266,6 +270,9 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
     }
   };
 
+  const specialValidation = validateSpecialModuleRows(manpowerInputs, specialModuleRows, modules);
+  const displayedTestTypes = Array.from(new Set([...getSelectOptions('testType'), ...Object.keys(manpowerInputs)]));
+
   return (
     <div>
       <Card style={{ marginBottom: 16 }}>
@@ -333,7 +340,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
               <div style={{ marginBottom: 8, color: '#666', fontSize: 12 }}>
                 针对每个测试小组填写所需人力（人/天），不需要的小组填 0
               </div>
-              {getSelectOptions('testType').map(testType => (
+              {displayedTestTypes.map(testType => (
                 <div key={testType} style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -346,9 +353,12 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
                   <Tag color="blue" style={{ minWidth: 80, textAlign: 'center' }}>
                     {testType}
                   </Tag>
+                  {!getSelectOptions('testType').includes(testType) && <Tag>历史小组</Tag>}
                   <InputNumber
                     id={`demand-manpower-${testType}`}
                     aria-label={`${testType}小组总人力`}
+                    status={specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && specialValidation.testType === testType ? 'error' : undefined}
+                    aria-invalid={specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && specialValidation.testType === testType}
                     min={0}
                     step={0.1}
                     precision={1}
@@ -361,6 +371,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
                       [testType]: val ?? 0,
                     }))}
                   />
+                  {manpowerRemarks[testType] && <span style={{ marginLeft: 8, color: '#666', fontSize: 12 }}>备注：{manpowerRemarks[testType]}</span>}
                 </div>
               ))}
               <Divider style={{ margin: '8px 0' }} />
@@ -383,6 +394,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
                 modules={modules}
                 manpowerByTestType={manpowerInputs}
                 disabled={!modulesAvailable && specialModuleRows.length === 0}
+                canEditModules={modulesAvailable}
                 onChange={(rows) => {
                   setSpecialModuleRows(rows);
                   onDirtyChange?.(true);

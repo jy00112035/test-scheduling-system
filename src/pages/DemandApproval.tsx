@@ -26,6 +26,7 @@ const DemandApproval: React.FC = () => {
   const [editPriority, setEditPriority] = useState<string>('');
   const [priorityOptions, setPriorityOptions] = useState<string[]>([]);
   const [modules, setModules] = useState<TestModule[]>([]);
+  const [modulesAvailable, setModulesAvailable] = useState(true);
   const [editSpecialModuleRows, setEditSpecialModuleRows] = useState<SpecialModuleDemandInput[]>([]);
   const [editManpowerRemarks, setEditManpowerRemarks] = useState<Record<string, string | undefined>>({});
   const editRequestSequence = useRef(0);
@@ -40,6 +41,7 @@ const DemandApproval: React.FC = () => {
       if (active) setModules(items);
     }).catch((error: any) => {
       if (active) message.error(error.message || '获取特殊模块配置失败');
+      if (active) setModulesAvailable(false);
     });
     return () => { active = false; mountedRef.current = false; };
   }, []);
@@ -105,7 +107,7 @@ const DemandApproval: React.FC = () => {
     let specialMetadata = record.specialModuleDemands ?? [];
     let specialRows: SpecialModuleDemandInput[] = specialMetadata.map((row: any) => ({
       moduleId: row.moduleId, testType: row.testType, manpowerDemand: row.manpowerDemand,
-      historicalManpowerDemand: row.enabled === false ? row.manpowerDemand : undefined,
+      historicalManpowerDemand: row.manpowerDemand,
     }));
     let priority = record.priority || '';
     try {
@@ -119,7 +121,7 @@ const DemandApproval: React.FC = () => {
       specialMetadata = fullDemand.specialModuleDemands ?? specialMetadata;
       specialRows = specialMetadata.map((row: any) => ({
         moduleId: row.moduleId, testType: row.testType, manpowerDemand: row.manpowerDemand,
-        historicalManpowerDemand: row.enabled === false ? row.manpowerDemand : undefined,
+        historicalManpowerDemand: row.manpowerDemand,
       }));
     } catch (e) {
       if (record.manpowerDetails) {
@@ -202,6 +204,9 @@ const DemandApproval: React.FC = () => {
       setEditLoading(false);
     }
   };
+
+  const editSpecialValidation = validateSpecialModuleRows(editManpower, editSpecialModuleRows, modules);
+  const displayedEditTestTypes = Array.from(new Set([...testTypes, ...Object.keys(editManpower)]));
 
   const handleBatchApprove = async () => {
     try {
@@ -411,7 +416,7 @@ const DemandApproval: React.FC = () => {
                   <span style={{ marginLeft: 12, width: 100, textAlign: 'center' }}>测试经理提交</span>
                   <span style={{ marginLeft: 12, width: 100, textAlign: 'center' }}>项目经理修改</span>
                 </div>
-                {testTypes.map(testType => (
+                {displayedEditTestTypes.map(testType => (
                   <div key={testType} style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -424,12 +429,15 @@ const DemandApproval: React.FC = () => {
                     <Tag color="blue" style={{ minWidth: 80, textAlign: 'center', marginRight: 0 }}>
                       {testType}
                     </Tag>
+                    {!testTypes.includes(testType) && <Tag>历史小组</Tag>}
                     <span style={{ marginLeft: 12, width: 100, textAlign: 'center', fontWeight: 500 }}>
                       {originalManpower[testType] || 0} 人/天
                     </span>
                     <InputNumber
                       id={`approval-manpower-${testType}`}
                       aria-label={`${testType}小组总人力`}
+                      status={editSpecialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && editSpecialValidation.testType === testType ? 'error' : undefined}
+                      aria-invalid={editSpecialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && editSpecialValidation.testType === testType}
                       min={0}
                       step={0.1}
                       precision={1}
@@ -442,6 +450,7 @@ const DemandApproval: React.FC = () => {
                         [testType]: val ?? 0,
                       }))}
                     />
+                    {editManpowerRemarks[testType] && <span style={{ marginLeft: 8, color: '#666', fontSize: 12 }}>备注：{editManpowerRemarks[testType]}</span>}
                   </div>
                 ))}
                 <Divider style={{ margin: '8px 0' }} />
@@ -466,6 +475,7 @@ const DemandApproval: React.FC = () => {
                 rows={editSpecialModuleRows}
                 modules={modules}
                 manpowerByTestType={editManpower}
+                canEditModules={modulesAvailable}
                 onChange={setEditSpecialModuleRows}
               />
               {calculateManpowerSummary(editManpower, editSpecialModuleRows, modules).map((summary) => (

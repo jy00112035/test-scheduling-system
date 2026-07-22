@@ -78,6 +78,9 @@ export function validateSpecialModuleRows(
   const summary = calculateManpowerSummary(manpowerByTestType, rows, modules);
   const overflow = summary.find((item) => item.generalManpower < 0);
   return overflow
-    ? { valid: false, errorCode: 'SPECIAL_MODULE_EXCEEDS_GROUP', testType: overflow.testType }
+    ? {
+      valid: false, errorCode: 'SPECIAL_MODULE_EXCEEDS_GROUP', testType: overflow.testType,
+      rowIndexes: rows.map((row, index) => ((modules?.find((module) => module.id === row.moduleId)?.testType ?? row.testType) === overflow.testType ? index : -1)).filter((index) => index >= 0),
+    }
     : { valid: true };
 }

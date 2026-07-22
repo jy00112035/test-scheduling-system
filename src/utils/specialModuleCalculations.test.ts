@@ -28,7 +28,7 @@ describe('special module calculations', () => {
   it('returns SPECIAL_MODULE_EXCEEDS_GROUP for overflow', () => {
     expect(validateSpecialModuleRows({ 功能测试: 3 }, [
       { moduleId: 11, testType: '功能测试', manpowerDemand: 3.5 },
-    ])).toMatchObject({ valid: false, errorCode: 'SPECIAL_MODULE_EXCEEDS_GROUP' });
+    ])).toMatchObject({ valid: false, errorCode: 'SPECIAL_MODULE_EXCEEDS_GROUP', rowIndexes: [0] });
   });
 
   it('rejects an unknown module ID against the authoritative module list', () => {

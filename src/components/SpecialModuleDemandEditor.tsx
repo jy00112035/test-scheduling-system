@@ -9,6 +9,7 @@ interface SpecialModuleDemandEditorProps {
   manpowerByTestType: Record<string, number>;
   onChange: (rows: SpecialModuleDemandInput[]) => void;
   disabled?: boolean;
+  canEditModules?: boolean;
 }
 
 const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
@@ -17,6 +18,7 @@ const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
   manpowerByTestType,
   onChange,
   disabled = false,
+  canEditModules = true,
 }) => {
   const validation = validateSpecialModuleRows(manpowerByTestType, rows, modules);
   const updateRow = (index: number, row: SpecialModuleDemandInput) => {
@@ -48,7 +50,7 @@ const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
               aria-invalid={rowInvalid}
               aria-describedby={rowInvalid ? rowErrorId : undefined}
               onChange={(testType) => updateRow(index, { testType })}
-              disabled={disabled}
+              disabled={disabled || !canEditModules}
               options={Object.entries(manpowerByTestType)
                 .filter(([, manpower]) => manpower > 0)
                 .map(([testType]) => ({ value: testType, label: testType }))}
@@ -56,7 +58,7 @@ const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
             <Select
               aria-label={`特殊模块 ${index + 1}`}
               placeholder="选择特殊模块"
-              disabled={disabled || !authoritativeTestType}
+              disabled={disabled || !canEditModules || !authoritativeTestType}
               value={row.moduleId}
               style={{ width: 180 }}
               status={rowInvalid ? 'error' : undefined}
@@ -107,7 +109,7 @@ const SpecialModuleDemandEditor: React.FC<SpecialModuleDemandEditorProps> = ({
       {!validation.valid && validation.errorCode !== 'SPECIAL_MODULE_EXCEEDS_GROUP' && validation.errorCode !== 'SPECIAL_MODULE_DUPLICATE' && (
         <div role="alert" style={{ color: '#cf1322', marginBottom: 8 }}>请完善特殊模块、人力需求和所属小组</div>
       )}
-      <Button icon={<PlusOutlined />} disabled={disabled} onClick={() => onChange([...rows, { testType: '' }])}>
+      <Button icon={<PlusOutlined />} disabled={disabled || !canEditModules} onClick={() => onChange([...rows, { testType: '' }])}>
         新增特殊模块需求
       </Button>
     </div>
