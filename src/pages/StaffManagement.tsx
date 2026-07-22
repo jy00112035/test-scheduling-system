@@ -58,7 +58,8 @@ interface Staff {
   currentCoefficient: number;
   status: 'active' | 'leave' | 'resigned';
   role?: string;
-  familiarModules?: FamiliarModule[] | string;
+  familiarModules?: FamiliarModule[];
+  hasStructuredFamiliarModules?: boolean;
   confidentialClearance?: boolean;
 }
 
@@ -97,16 +98,15 @@ function parseImportCoefficient(value: unknown) {
   return Number.isNaN(parsed) ? 0.3 : parsed;
 }
 
-function normalizeFamiliarModules(familiarModules?: FamiliarModule[] | string): FamiliarModule[] {
+function normalizeFamiliarModules(familiarModules?: unknown): FamiliarModule[] {
   return Array.isArray(familiarModules) ? familiarModules : [];
 }
 
-function renderFamiliarModules(familiarModules?: FamiliarModule[] | string) {
-  const structuredModules = normalizeFamiliarModules(familiarModules);
-  if (structuredModules.length > 0) {
+function renderFamiliarModules(familiarModules?: FamiliarModule[]) {
+  if (familiarModules && familiarModules.length > 0) {
     return (
       <Space wrap size={[0, 2]}>
-        {structuredModules.map(module => (
+        {familiarModules.map(module => (
           <Tag key={module.id} color={module.enabled ? 'blue' : 'default'}>
             {module.testType}: {module.moduleName}{!module.enabled && ' (已停用)'}
           </Tag>
@@ -114,7 +114,7 @@ function renderFamiliarModules(familiarModules?: FamiliarModule[] | string) {
       </Space>
     );
   }
-  return typeof familiarModules === 'string' && familiarModules ? familiarModules : '-';
+  return '-';
 }
 
 const roleLabels: Record<string, string> = {
@@ -220,7 +220,13 @@ const StaffManagement: React.FC = () => {
     if (mountedRef.current) setLoading(true);
     try {
       const data = await api.getStaff();
-      if (mountedRef.current) setStaffs(data);
+      if (mountedRef.current) {
+        setStaffs(data.map((staff: Staff & { familiarModules?: unknown }) => ({
+          ...staff,
+          familiarModules: normalizeFamiliarModules(staff.familiarModules),
+          hasStructuredFamiliarModules: Array.isArray(staff.familiarModules),
+        })));
+      }
     } catch (error: any) {
       if (mountedRef.current) message.error(error.message || '获取人员列表失败');
     } finally {
@@ -565,9 +571,9 @@ const StaffManagement: React.FC = () => {
   const handleEdit = async (record: Staff) => {
     if (staffSaveSessionRef.current !== null) return;
     const session = ++editSessionRef.current;
-    const familiarModuleIds = Array.isArray(record.familiarModules)
-      ? record.familiarModules.map(module => module.id)
-      : undefined;
+    const familiarModuleIds = record.hasStructuredFamiliarModules === false
+      ? undefined
+      : (record.familiarModules || []).map(module => module.id);
     familiarModuleEditRef.current = {
       session,
       initialized: familiarModuleIds !== undefined,
@@ -888,7 +894,7 @@ const StaffManagement: React.FC = () => {
       dataIndex: 'familiarModules',
       key: 'familiarModules',
       width: 150,
-      render: (familiarModules: FamiliarModule[] | string) => renderFamiliarModules(familiarModules),
+      render: (familiarModules: FamiliarModule[]) => renderFamiliarModules(familiarModules),
     },
     {
       title: '操作',

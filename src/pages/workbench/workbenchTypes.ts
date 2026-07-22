@@ -22,10 +22,30 @@ export interface ScheduleItem {
 }
 
 export interface ManpowerDetail {
+  id?: number;
   testType: string;
   manpowerDemand: number;
   remark?: string;
 }
+
+export type AllocationTarget =
+  | {
+      kind: 'special';
+      demandId: number;
+      demandManpowerDetailId: number;
+      demandSpecialModuleId: number;
+      testType: string;
+      moduleId: number;
+      moduleName: string;
+      remainingManpower: number;
+    }
+  | {
+      kind: 'general';
+      demandId: number;
+      demandManpowerDetailId: number;
+      testType: string;
+      remainingManpower: number;
+    };
 
 export interface DemandItem {
   id: number;
@@ -45,7 +65,8 @@ export interface DemandItem {
   manpowerDetails?: ManpowerDetail[];
   specialModuleDemands?: DemandSpecialModule[];
   manpowerSummary?: ManpowerSummary[];
-  manpowerFullySatisfied?: boolean;
+  manpowerFullySatisfied?: boolean | null;
+  requiresHistoricalClassification?: boolean | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -62,15 +83,12 @@ export interface StaffItem {
   status: string;
   role?: string;
   roles?: string[];
-  familiarModules?: FamiliarModule[] | string;
+  familiarModules?: FamiliarModule[];
   confidentialClearance?: boolean;
 }
 
-export function formatFamiliarModules(familiarModules?: FamiliarModule[] | string): string {
-  if (Array.isArray(familiarModules)) {
-    return familiarModules.map(module => module.moduleName).join(', ') || '-';
-  }
-  return familiarModules || '-';
+export function formatFamiliarModules(familiarModules?: FamiliarModule[]): string {
+  return familiarModules?.map(module => module.moduleName).join(', ') || '-';
 }
 
 export interface DailyStatusEntry {

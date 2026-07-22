@@ -4,13 +4,15 @@
 // ============================================================
 
 import React, { useMemo } from 'react';
-import { Card, Select, Tabs, Tag, Button } from 'antd';
-import type { DemandItem, ScheduleItem, StaffItem } from './workbenchTypes';
+import { Card, Select, Tabs, Tag, Button, Tooltip } from 'antd';
+import { DragOutlined } from '@ant-design/icons';
+import type { AllocationTarget, DemandItem, ScheduleItem, StaffItem } from './workbenchTypes';
 import {
   filterPendingDemands,
   filterAssignedDemands,
   sortDemandsByRisk,
   getPriorityColor,
+  getAllocationTargets,
 } from './workbenchCalculations';
 import dayjs from 'dayjs';
 
@@ -33,8 +35,8 @@ interface DemandQueueProps {
   onPublishDemand: (demandId: number) => void;
   onPriorityEdit: (demandId: number | null) => void;
   onPriorityChange: (demandId: number, priority: string) => void;
-  onDemandDragStart: (e: React.DragEvent, demand: DemandItem) => void;
-  onDemandDragEnd: () => void;
+  onAllocationTargetDragStart: (e: React.DragEvent, target: AllocationTarget) => void;
+  onAllocationTargetDragEnd: () => void;
 }
 
 const DemandQueue: React.FC<DemandQueueProps> = ({
@@ -54,8 +56,8 @@ const DemandQueue: React.FC<DemandQueueProps> = ({
   onPublishDemand,
   onPriorityEdit,
   onPriorityChange,
-  onDemandDragStart,
-  onDemandDragEnd,
+  onAllocationTargetDragStart,
+  onAllocationTargetDragEnd,
 }) => {
   const staffIds = useMemo(() => staffs.map(s => s.id), [staffs]);
 
@@ -95,6 +97,7 @@ const DemandQueue: React.FC<DemandQueueProps> = ({
     const isUnfulfilled = unfulfilledDemands.has(demand.id);
     const hasChanges = pendingChangeDemandIds.has(demand.id) ||
       demandSchedules.some((s: ScheduleItem) => !s.published);
+    const allocationTargets = getAllocationTargets(demand, schedules);
 
     // 卡片颜色
     let borderColor = '#b7eb8f';
@@ -110,9 +113,6 @@ const DemandQueue: React.FC<DemandQueueProps> = ({
     return (
       <div
         key={demand.id}
-        draggable
-        onDragStart={(e) => onDemandDragStart(e, demand)}
-        onDragEnd={onDemandDragEnd}
         onClick={() => onViewDetail(demand)}
         style={{
           padding: '4px 6px',
@@ -224,17 +224,69 @@ const DemandQueue: React.FC<DemandQueueProps> = ({
               清除
             </Button>
             {hasChanges && (
-              <Button
-                size="small"
-                type="link"
-                style={{ fontSize: 10, padding: 0, height: 16 }}
-                onClick={(e) => { e.stopPropagation(); onPublishDemand(demand.id); }}
-              >
-                发布
-              </Button>
+              <Tooltip title={demand.requiresHistoricalClassification
+                ? '历史排班尚未完成人力归属'
+                : undefined}>
+                <Button
+                  size="small"
+                  type="link"
+                  disabled={demand.requiresHistoricalClassification === true}
+                  style={{ fontSize: 10, padding: 0, height: 16 }}
+                  onClick={(e) => { e.stopPropagation(); onPublishDemand(demand.id); }}
+                >
+                  发布
+                </Button>
+              </Tooltip>
             )}
           </span>
         </div>
+
+        {allocationTargets.length > 0 && (
+          <div style={{ marginTop: 4, display: 'grid', gap: 3 }}>
+            {allocationTargets.map(target => {
+              const label = target.kind === 'special'
+                ? `分配${target.moduleName}，剩余 ${target.remainingManpower} 人天`
+                : `分配${target.testType}通用人力，剩余 ${target.remainingManpower} 人天`;
+              const status = target.remainingManpower > 0 ? '待分配' : '已满足';
+              return (
+                <div
+                  key={target.kind === 'special'
+                    ? `special-${target.demandSpecialModuleId}`
+                    : `general-${target.demandManpowerDetailId}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={label}
+                  draggable
+                  onClick={event => event.stopPropagation()}
+                  onDragStart={event => onAllocationTargetDragStart(event, target)}
+                  onDragEnd={onAllocationTargetDragEnd}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    minHeight: 24,
+                    padding: '2px 5px',
+                    border: '1px solid #d9d9d9',
+                    borderRadius: 3,
+                    background: '#fff',
+                    cursor: 'grab',
+                  }}
+                >
+                  <DragOutlined aria-hidden />
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {target.kind === 'special' ? target.moduleName : `${target.testType}通用`}
+                  </span>
+                  <span style={{ color: '#fa8c16', whiteSpace: 'nowrap' }}>
+                    {target.remainingManpower} 人天
+                  </span>
+                  <Tag color="orange" style={{ margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 3px' }}>
+                    {status}
+                  </Tag>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
@@ -306,7 +358,7 @@ const DemandQueue: React.FC<DemandQueueProps> = ({
     <Card
       className="left-demand-card"
       style={{ width: 270, flexShrink: 0, overflow: 'hidden' }}
-      bodyStyle={{ padding: 0, overflow: 'hidden', height: '100%' }}
+      styles={{ body: { padding: 0, overflow: 'hidden', height: '100%' } }}
     >
       {/* 测试类型筛选 */}
       <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>

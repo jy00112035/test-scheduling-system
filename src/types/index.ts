@@ -28,7 +28,8 @@ export interface TestDemand {
   manpowerDetails?: DemandManpowerDetail[];
   specialModuleDemands?: DemandSpecialModule[];
   manpowerSummary?: ManpowerSummary[];
-  manpowerFullySatisfied?: boolean;
+  manpowerFullySatisfied?: boolean | null;
+  requiresHistoricalClassification?: boolean | null;
 }
 
 export interface DemandManpowerDetail {
@@ -102,6 +103,11 @@ export interface ScheduleWriteRequest {
   demandSpecialModuleId?: number | null;
 }
 
+export interface ScheduleClassificationRequest {
+  demandManpowerDetailId: number;
+  demandSpecialModuleId?: number | null;
+}
+
 export interface ScheduleRecommendationRequest {
   mode: 'FIXED_RANGE' | 'FULL_DEMAND';
   demandIds: number[];
@@ -140,7 +146,7 @@ export interface BackendSchedule {
   id: number;
   demandId: number;
   staffId: number;
-  demandManpowerDetailId: number;
+  demandManpowerDetailId: number | null;
   demandSpecialModuleId: number | null;
   date: string;
   percentage: number;

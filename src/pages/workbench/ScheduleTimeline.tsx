@@ -7,8 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card, Space, DatePicker, Select, InputNumber, Tag, Button, Popconfirm, Popover, Divider, Tooltip, Checkbox, Modal, Input, Dropdown } from 'antd';
 import { DeleteOutlined, SearchOutlined, DownOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { formatFamiliarModules } from './workbenchTypes';
-import type { ScheduleItem, DemandItem, StaffItem, DailyStatusEntry } from './workbenchTypes';
+import type { AllocationTarget, ScheduleItem, DemandItem, StaffItem, DailyStatusEntry } from './workbenchTypes';
 import {
   getWeekDates,
   DAY_LABELS,
@@ -20,6 +19,7 @@ import {
   isAvailableForAssignment,
   getMaxCapacity,
   getVersionTypeColor,
+  isStaffEligibleForAllocationTarget,
 } from './workbenchCalculations';
 import { DailyAvailabilityStatus, DailyStatusLabels, DailyStatusColors } from '../../types';
 
@@ -30,6 +30,7 @@ interface ScheduleTimelineProps {
   weekViewDate: dayjs.Dayjs;
   dailyStatuses: Map<string, DailyStatusEntry>;
   selectedDemand: DemandItem | null;
+  draggedAllocationTarget: AllocationTarget | null;
   draggedSchedule: ScheduleItem | null;
   dragOverCell: string | null;
   dragOverTrash: boolean;
@@ -71,6 +72,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
   weekViewDate,
   dailyStatuses,
   selectedDemand,
+  draggedAllocationTarget,
   draggedSchedule,
   dragOverCell,
   dragOverTrash,
@@ -244,7 +246,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
           />
           <Dropdown
             trigger={['click']}
-            dropdownRender={() => (
+            popupRender={() => (
               <div style={{ padding: 8, background: '#fff', borderRadius: 4, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
                 <div style={{ marginBottom: 4 }}>
                   <Checkbox
@@ -313,7 +315,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
           />
           <Dropdown
             trigger={['click']}
-            dropdownRender={() => (
+            popupRender={() => (
               <div style={{ padding: 8, background: '#fff', borderRadius: 4, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
                 <div style={{ marginBottom: 4 }}>
                   <Checkbox
@@ -352,7 +354,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
         </Space>
       }
       style={{ flex: 1, overflow: 'hidden', minWidth: 0, display: 'flex', flexDirection: 'column' }}
-      bodyStyle={{ padding: 0, overflow: 'auto', flex: 1, minHeight: 0, overscrollBehavior: 'contain' }}
+      styles={{ body: { padding: 0, overflow: 'auto', flex: 1, minHeight: 0, overscrollBehavior: 'contain' } }}
     >
       {/* 表格 */}
       <style>{`
@@ -431,7 +433,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                   onCancel={() => setFilterModalOpen(false)}
                   onOk={() => setFilterModalOpen(false)}
                   width={360}
-                  destroyOnClose={false}
+                  destroyOnHidden={false}
                 >
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ fontSize: 12, color: '#999' }}>取消勾选的测试类型不计入空闲工作量统计：</div>
@@ -487,7 +489,6 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
               })}
             </tr>
             {filteredStaffs.map(staff => {
-              const familiarModules = formatFamiliarModules(staff.familiarModules);
               return (
               <tr key={staff.id}>
                 {/* Sticky columns */}
@@ -510,12 +511,18 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                   {staff.testType || '-'}
                 </td>
                 <td style={{ position: 'sticky', left: 240, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
-                  {staff.familiarModules ? (
-                    <Tooltip title={familiarModules}>
-                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>
-                        {familiarModules}
-                      </div>
-                    </Tooltip>
+                  {staff.familiarModules && staff.familiarModules.length > 0 ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, maxWidth: 130 }}>
+                      {staff.familiarModules.map(module => (
+                        <Tag
+                          key={module.id}
+                          color={module.enabled ? 'blue' : 'default'}
+                          style={{ margin: 0, fontSize: 9, lineHeight: '15px', padding: '0 3px' }}
+                        >
+                          {module.testType}: {module.moduleName}{!module.enabled && '（已停用）'}
+                        </Tag>
+                      ))}
+                    </div>
                   ) : '-'}
                 </td>
 
@@ -530,6 +537,13 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                   const hasConflict = totalPercent > maxCapacity;
                   const isWeekendColumn = [0, 6].includes(date.day());
                   const canAssign = isAvailableForAssignment(dailyStatuses, staff.id, dateStr);
+                  const matchesAllocationTarget = draggedAllocationTarget
+                    ? isStaffEligibleForAllocationTarget(staff, draggedAllocationTarget)
+                    : true;
+                  const canDropAllocation = canAssign && matchesAllocationTarget;
+                  const allocationReason = draggedAllocationTarget?.kind === 'special' && !matchesAllocationTarget
+                    ? `不熟悉${draggedAllocationTarget.moduleName}`
+                    : null;
 
                   const statusBgColor = dailyStatus && dailyStatus !== 'AVAILABLE'
                     ? `${DailyStatusColors[dailyStatus as DailyAvailabilityStatus]}18`
@@ -539,7 +553,9 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                     : statusBgColor || (isWeekendColumn ? '#fff7e6' : '#fff');
 
                   let cellCursor: React.CSSProperties['cursor'] = 'default';
-                  if (selectedDemand) {
+                  if (draggedAllocationTarget) {
+                    cellCursor = canDropAllocation ? 'copy' : 'not-allowed';
+                  } else if (selectedDemand) {
                     cellCursor = canAssign ? 'copy' : 'not-allowed';
                   } else if (canManageDailyAvailability) {
                     cellCursor = 'pointer';
@@ -713,9 +729,14 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
 
                   const cellKey = `${staff.id}-${dateStr}`;
 
-                  return (
+                  const cell = (
                     <td
                       key={dateStr}
+                      aria-label={draggedAllocationTarget
+                        ? `${staff.name}：${canDropAllocation
+                          ? `可分配${draggedAllocationTarget.kind === 'special' ? draggedAllocationTarget.moduleName : `${draggedAllocationTarget.testType}通用人力`}`
+                          : allocationReason || '当前不可分配'}`
+                        : undefined}
                       style={{
                         background: cellBackground,
                         cursor: cellCursor,
@@ -730,7 +751,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                         }
                       }}
                       onDragOver={(e) => {
-                        if (selectedDemand || draggedSchedule) {
+                        if (draggedAllocationTarget || selectedDemand || draggedSchedule) {
                           e.preventDefault();
                           onCellDragOver(cellKey);
                         }
@@ -750,6 +771,11 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                       </div>
                     </td>
                   );
+                  return allocationReason ? (
+                    <Tooltip key={dateStr} title={allocationReason}>
+                      {cell}
+                    </Tooltip>
+                  ) : cell;
                 })}
               </tr>
               );

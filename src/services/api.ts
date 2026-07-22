@@ -5,6 +5,7 @@ import type {
   BackendSchedule,
   ScheduleRecommendationRequest,
   ScheduleRecommendationResponse,
+  ScheduleClassificationRequest,
   ScheduleWriteRequest,
   TestModule,
   TestModuleWriteRequest,
@@ -18,6 +19,7 @@ export type {
   RecommendationSchedule,
   ScheduleRecommendationRequest,
   ScheduleRecommendationResponse,
+  ScheduleClassificationRequest,
   ScheduleWriteRequest,
   TestModule,
   TestModuleWriteRequest,
@@ -226,7 +228,7 @@ class ApiService {
 
   // Schedules
   async getSchedules() {
-    return this.request<any[]>('/schedules');
+    return this.request<BackendSchedule[]>('/schedules');
   }
 
   async getSchedulesByDate(date: string) {
@@ -253,15 +255,15 @@ class ApiService {
     });
   }
 
-  async createSchedule(schedule: any) {
-    return this.request<any>('/schedules', {
+  async createSchedule(schedule: ScheduleWriteRequest) {
+    return this.request<BackendSchedule>('/schedules', {
       method: 'POST',
       body: JSON.stringify(schedule),
     });
   }
 
-  async createSchedulesBatch(schedules: any[]) {
-    return this.request<any[]>('/schedules/batch', {
+  async createSchedulesBatch(schedules: ScheduleWriteRequest[]) {
+    return this.request<BackendSchedule[]>('/schedules/batch', {
       method: 'POST',
       body: JSON.stringify(schedules),
     });
@@ -438,6 +440,13 @@ class ApiService {
     request: Pick<ScheduleWriteRequest, 'staffId' | 'date' | 'percentage'>
   ) {
     return this.request<BackendSchedule>(`/schedules/${id}/move`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async classifySchedule(id: number, request: ScheduleClassificationRequest) {
+    return this.request<BackendSchedule>(`/schedules/${id}/classify`, {
       method: 'POST',
       body: JSON.stringify(request),
     });

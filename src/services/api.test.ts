@@ -280,4 +280,25 @@ describe('ApiService special-module contracts', () => {
       headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
     }));
   });
+
+  it('classifies a historical schedule without placement fields', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(respond({
+      ...legacyScheduleWithNullableFields,
+      demandManpowerDetailId: 30,
+      demandSpecialModuleId: null,
+    }));
+
+    await api.classifySchedule(7, {
+      demandManpowerDetailId: 30,
+      demandSpecialModuleId: null,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/schedules/7/classify', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        demandManpowerDetailId: 30,
+        demandSpecialModuleId: null,
+      }),
+    }));
+  });
 });
