@@ -33,10 +33,14 @@ import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useUserRole } from '../context/UserRoleContext';
 import type { FamiliarModule, TestModule } from '../types';
-import { parseFamiliarModuleNames } from '../utils/staffModuleImport';
+import { createFamiliarModuleNameIndex, parseFamiliarModuleNames } from '../utils/staffModuleImport';
 import {
   buildStaffExportRows,
   createStaffImportTemplateWorkbook,
+  parseStaffRoles,
+  parseStaffStatus,
+  STAFF_IMPORT_MAX_FILE_SIZE,
+  STAFF_IMPORT_MAX_ROWS,
   STAFF_IMPORT_TEMPLATE_FILENAME,
 } from '../utils/staffSpreadsheet';
 
@@ -75,12 +79,14 @@ interface ImportRow {
   testType?: string;
   initialCoefficient: number;
   currentCoefficient: number;
-  status: 'active';
+  status: 'active' | 'leave' | 'resigned';
   roles: string[];
   familiarModuleIds: number[];
   familiarModuleNames: string;
   unmatchedModules: string[];
   unavailableModules: string[];
+  rowErrors: string[];
+  retryError?: string;
   confidentialClearance: boolean;
 }
 
@@ -103,15 +109,6 @@ function renderFamiliarModules(familiarModules?: FamiliarModule[] | string) {
   }
   return typeof familiarModules === 'string' && familiarModules ? familiarModules : '-';
 }
-
-const roleMapping: Record<string, string> = {
-  '测试经理': 'testManager',
-  '资源主管': 'resourceManager',
-  '项目经理': 'projectManager',
-  '测试执行人员': 'testExecutor',
-  '字段管理员': 'fieldAdmin',
-  '测试组长': 'testLead',
-};
 
 const roleLabels: Record<string, string> = {
   testManager: '测试经理',
@@ -272,6 +269,10 @@ const StaffManagement: React.FC = () => {
   // 处理文件选择
   const handleFileChange = (info: any) => {
     if (importSaveSessionRef.current !== null) return;
+    if (!info.fileList?.length) {
+      resetImportPreview();
+      return;
+    }
     const file = info.file.originFileObj || info.file;
     if (file) {
       resetImportPreview();
@@ -284,6 +285,10 @@ const StaffManagement: React.FC = () => {
     if (importSaveSessionRef.current !== null) return;
     if (!selectedFile) {
       message.error('请选择要导入的文件');
+      return;
+    }
+    if (selectedFile.size > STAFF_IMPORT_MAX_FILE_SIZE) {
+      message.error(`Excel文件不能超过 ${STAFF_IMPORT_MAX_FILE_SIZE / 1024 / 1024}MB`);
       return;
     }
     if (modulesLoading || modulesError) {
@@ -310,10 +315,16 @@ const StaffManagement: React.FC = () => {
         if (!mountedRef.current || session !== importGenerationRef.current) return;
         try {
           const data = new Uint8Array(e.target?.result as ArrayBuffer);
-          const workbook = XLSX.read(data, { type: 'array' });
+          const workbook = XLSX.read(data, { type: 'array', sheetRows: STAFF_IMPORT_MAX_ROWS + 1 });
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+          if (jsonData.length > STAFF_IMPORT_MAX_ROWS) {
+            message.error(`Excel文件最多导入 ${STAFF_IMPORT_MAX_ROWS} 行数据`);
+            setImportLoading(false);
+            return;
+          }
 
           if (jsonData.length === 0) {
             message.error('Excel文件为空或格式错误');
@@ -335,6 +346,7 @@ const StaffManagement: React.FC = () => {
           const roleKey = headers.find(h => h === '角色' || h === 'role');
           const familiarModulesKey = headers.find(h => h === '熟悉模块' || h === 'familiarModules');
           const confidentialClearanceKey = headers.find(h => h === '保密权限' || h === 'confidentialClearance');
+          const statusKey = headers.find(h => h === '状态' || h === 'status');
 
           if (!empNoKey || !nameKey) {
             message.error(`Excel文件缺少必要列：工号、姓名。当前表头：${headers.join(', ')}`);
@@ -345,7 +357,10 @@ const StaffManagement: React.FC = () => {
 
           // 解析数据
           const parsedData: ImportRow[] = [];
+          const moduleNameIndex = createFamiliarModuleNameIndex(modules);
           const empNoSet = new Set<string>();
+          const importedEmpNos = new Set<string>();
+          const existingEmpNos = new Set(latestStaffs.map((staff: Staff) => staff.empNo));
 
           for (const row of jsonData) {
             const rowObj = row as Record<string, any>;
@@ -354,14 +369,15 @@ const StaffManagement: React.FC = () => {
             if (!empNo) continue;
 
             // 检查是否与已有数据重复
-            if (latestStaffs.some((s: Staff) => s.empNo === empNo)) {
+            if (existingEmpNos.has(empNo)) {
               empNoSet.add(empNo);
             }
 
             // 检查本次导入数据中是否重复
-            if (parsedData.some(p => p.empNo === empNo)) {
+            if (importedEmpNos.has(empNo)) {
               empNoSet.add(empNo);
             }
+            importedEmpNos.add(empNo);
 
             // 处理日期格式
             let joinDate = joinDateKey ? rowObj[joinDateKey] : dayjs().format('YYYY-MM-DD');
@@ -372,10 +388,12 @@ const StaffManagement: React.FC = () => {
               joinDate = dayjs(joinDate).format('YYYY-MM-DD') || dayjs().format('YYYY-MM-DD');
             }
 
-            const rawRole = roleKey ? String(rowObj[roleKey] || '').trim() : '';
-            const roles: string[] = rawRole
-              ? rawRole.split(';').map(r => roleMapping[r.trim()] || r.trim())
-              : ['testExecutor'];
+            const parsedRoles = parseStaffRoles(roleKey ? rowObj[roleKey] : 'testExecutor');
+            const parsedStatus = parseStaffStatus(statusKey ? rowObj[statusKey] : 'active');
+            const rowErrors = [
+              ...parsedRoles.invalid.map(role => `无效角色：${role}`),
+              ...(parsedStatus.invalid ? [`无效状态：${rowObj[statusKey!]}`] : []),
+            ];
 
             const rowData: ImportRow = {
               name: String(rowObj[nameKey!] || '').trim(),
@@ -385,16 +403,17 @@ const StaffManagement: React.FC = () => {
               testType: testTypeKey ? String(rowObj[testTypeKey] || '').trim() || undefined : undefined,
               initialCoefficient: initialCoefKey ? parseFloat(String(rowObj[initialCoefKey] || '0.3')) || 0.3 : 0.3,
               currentCoefficient: currentCoefKey ? parseFloat(String(rowObj[currentCoefKey] || '0.3')) || 0.3 : 0.3,
-              status: 'active',
-              roles,
+              status: parsedStatus.status as ImportRow['status'],
+              roles: parsedRoles.roles.length ? parsedRoles.roles : ['testExecutor'],
               ...(() => {
                 const familiarModuleNames = familiarModulesKey ? String(rowObj[familiarModulesKey] || '').trim() : '';
-                const parsedModules = parseFamiliarModuleNames(familiarModuleNames, modules);
+                const parsedModules = parseFamiliarModuleNames(familiarModuleNames, moduleNameIndex);
                 return {
                   familiarModuleIds: parsedModules.moduleIds,
                   familiarModuleNames,
                   unmatchedModules: parsedModules.unmatched,
                   unavailableModules: parsedModules.unavailable,
+                  rowErrors,
                 };
               })(),
               confidentialClearance: confidentialClearanceKey ? ['是', 'true', '有', 'yes'].includes(String(rowObj[confidentialClearanceKey] || '').trim()) : false,
@@ -444,7 +463,7 @@ const StaffManagement: React.FC = () => {
       message.error('没有可导入的数据');
       return;
     }
-    if (importData.some(row => row.unmatchedModules.length > 0 || row.unavailableModules.length > 0)) {
+    if (importData.some(row => row.unmatchedModules.length > 0 || row.unavailableModules.length > 0 || row.rowErrors.length > 0)) {
       message.error('存在熟悉模块无法导入的人员，请移除或修正后重试');
       return;
     }
@@ -459,14 +478,34 @@ const StaffManagement: React.FC = () => {
     setImportSaving(true);
     setImportLoading(true);
     try {
-      for (const row of importData) {
+      const retryableRows: ImportRow[] = [];
+      let successCount = 0;
+      for (let index = 0; index < importData.length; index += 1) {
+        const row = importData[index];
         const { familiarModuleNames: _names, unmatchedModules: _unmatched, unavailableModules: _unavailable, ...staffData } = row;
-        await api.createStaff(staffData);
+        try {
+          await api.createStaff(staffData);
+          successCount += 1;
+        } catch (error: any) {
+          retryableRows.push({ ...row, retryError: error.message || '导入失败' });
+          retryableRows.push(...importData.slice(index + 1));
+          break;
+        }
         if (!ownsImportSave()) return;
       }
-      await syncFieldConfigs(importData, ownsImportSave);
-      if (!ownsImportSave()) return;
-      await fetchFieldConfigs();
+      if (retryableRows.length > 0) {
+        if (!ownsImportSave()) return;
+        setImportData(retryableRows);
+        message.warning(`已成功导入 ${successCount} 条，${retryableRows.length} 条待重试`);
+        return;
+      }
+      try {
+        await syncFieldConfigs(importData, ownsImportSave);
+        if (!ownsImportSave()) return;
+        await fetchFieldConfigs();
+      } catch {
+        if (ownsImportSave()) message.warning('人员已导入，但项目/测试类型选项同步失败');
+      }
       if (!ownsImportSave()) return;
       message.success(`成功导入 ${importData.length} 条人员数据`);
       setImportModalVisible(false);
@@ -652,9 +691,13 @@ const StaffManagement: React.FC = () => {
       } else {
         await api.createStaff(staffData);
         if (!ownsStaffSave()) return;
-        await syncFieldConfigs([staffData], ownsStaffSave);
-        if (!ownsStaffSave()) return;
-        await fetchFieldConfigs();
+        try {
+          await syncFieldConfigs([staffData], ownsStaffSave);
+          if (!ownsStaffSave()) return;
+          await fetchFieldConfigs();
+        } catch {
+          if (ownsStaffSave()) message.warning('人员已添加，但项目/测试类型选项同步失败');
+        }
         if (!ownsStaffSave()) return;
         message.success('人员已添加，初始登录密码为 12345678');
       }
@@ -1109,7 +1152,7 @@ const StaffManagement: React.FC = () => {
             </Select>
           </Form.Item>
 
-          {modulesError && <Alert type="warning" showIcon message={`熟悉模块不可用：${modulesError}`} style={{ marginBottom: 16 }} />}
+          {modulesError && <Alert type="warning" showIcon message={`熟悉模块不可用：${modulesError}`} action={<Button size="small" onClick={() => void fetchModules()}>重试</Button>} style={{ marginBottom: 16 }} />}
 
           <Form.Item
             name="confidentialClearance"
@@ -1223,7 +1266,7 @@ const StaffManagement: React.FC = () => {
             <Table
               dataSource={importData}
               rowKey="empNo"
-              pagination={false}
+              pagination={{ pageSize: 20, showSizeChanger: false }}
               scroll={{ y: 300 }}
               size="small"
               columns={[
@@ -1245,6 +1288,8 @@ const StaffManagement: React.FC = () => {
                       <span>{text || '-'}</span>
                       {row.unmatchedModules.length > 0 && <Typography.Text type="danger">未知：{row.unmatchedModules.join('、')}</Typography.Text>}
                       {row.unavailableModules.length > 0 && <Typography.Text type="danger">不可用（已停用）：{row.unavailableModules.join('、')}</Typography.Text>}
+                      {row.rowErrors.map(error => <Typography.Text key={error} type="danger">{error}</Typography.Text>)}
+                      {row.retryError && <Typography.Text type="danger">导入失败：{row.retryError}</Typography.Text>}
                     </Space>
                   ),
                 },

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
 import type { FamiliarModule } from '../types';
-import { buildStaffExportRows, createStaffImportTemplateWorkbook, STAFF_IMPORT_TEMPLATE_FILENAME } from './staffSpreadsheet';
+import { buildStaffExportRows, createStaffImportTemplateWorkbook, parseStaffRoles, parseStaffStatus, STAFF_IMPORT_TEMPLATE_FILENAME } from './staffSpreadsheet';
 
 const historicalModule: FamiliarModule = {
   id: 11, moduleName: '支付模块', testType: '功能测试', enabled: false, sortOrder: 1,
@@ -35,5 +35,16 @@ describe('staff spreadsheet helpers', () => {
     expect(XLSX.utils.sheet_to_json(dataSheet, { header: 1 })[0]).toContain('熟悉模块');
     expect(XLSX.utils.sheet_to_json(guidanceSheet, { header: 1 }).flat().join('')).toContain('全系统唯一模块名称，以英文逗号分隔');
     expect(XLSX.read(XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }), { type: 'array' }).SheetNames).toEqual(['人员导入', '填写说明']);
+  });
+
+  it('round trips multiple roles and every supported status without silent fallback', () => {
+    const rows = buildStaffExportRows(['active', 'leave', 'resigned'].map(status => ({
+      name: status, empNo: status, joinDate: '2026-07-01', groupName: '组', initialCoefficient: 0.3, currentCoefficient: 0.3,
+      status, roles: ['testExecutor', 'testLead'], familiarModules: [],
+    })));
+    expect(rows.map(row => parseStaffRoles(row.角色).roles)).toEqual([['testExecutor', 'testLead'], ['testExecutor', 'testLead'], ['testExecutor', 'testLead']]);
+    expect(rows.map(row => parseStaffStatus(row.状态).status)).toEqual(['active', 'leave', 'resigned']);
+    expect(parseStaffRoles('不存在角色').invalid).toEqual(['不存在角色']);
+    expect(parseStaffStatus('未知状态').invalid).toBe(true);
   });
 });

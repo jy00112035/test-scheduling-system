@@ -5,10 +5,20 @@ export interface FamiliarModuleImportResult {
   unmatched: string[];
   unavailable: string[];
 }
+export type FamiliarModuleNameIndex = Map<string, TestModule[]>;
+
+export function createFamiliarModuleNameIndex(modules: TestModule[]): FamiliarModuleNameIndex {
+  return modules.reduce<FamiliarModuleNameIndex>((index, module) => {
+    const matches = index.get(module.moduleName) || [];
+    matches.push(module);
+    index.set(module.moduleName, matches);
+    return index;
+  }, new Map());
+}
 
 export function parseFamiliarModuleNames(
   input: string | null | undefined,
-  modules: TestModule[],
+  modules: TestModule[] | FamiliarModuleNameIndex,
 ): FamiliarModuleImportResult {
   const names = Array.from(new Set(
     (input || '')
@@ -16,13 +26,7 @@ export function parseFamiliarModuleNames(
       .map(name => name.trim())
       .filter(Boolean),
   ));
-  const modulesByName = new Map<string, TestModule[]>();
-
-  modules.forEach(module => {
-    const matches = modulesByName.get(module.moduleName) || [];
-    matches.push(module);
-    modulesByName.set(module.moduleName, matches);
-  });
+  const modulesByName = modules instanceof Map ? modules : createFamiliarModuleNameIndex(modules);
 
   return names.reduce<FamiliarModuleImportResult>((result, name) => {
     const matches = modulesByName.get(name);

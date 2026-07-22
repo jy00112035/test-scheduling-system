@@ -17,8 +17,35 @@ export interface StaffSpreadsheetRecord {
 }
 
 export const STAFF_IMPORT_TEMPLATE_FILENAME = '人员导入模板.xlsx';
+export const STAFF_IMPORT_MAX_FILE_SIZE = 5 * 1024 * 1024;
+export const STAFF_IMPORT_MAX_ROWS = 1000;
 
+export const staffRoleLabels: Record<string, string> = {
+  testManager: '测试经理', resourceManager: '资源主管', projectManager: '项目经理',
+  testExecutor: '测试执行人员', fieldAdmin: '字段管理员', testLead: '测试组长',
+};
+const roleCodes = new Set(Object.keys(staffRoleLabels));
+const roleByLabel = new Map(Object.entries(staffRoleLabels).map(([code, label]) => [label, code]));
 const statusLabels: Record<string, string> = { active: '在职', leave: '休假', resigned: '离职' };
+const statusByLabel = new Map(Object.entries(statusLabels).map(([status, label]) => [label, status]));
+
+export function serializeStaffRoles(roles?: string[], role?: string) {
+  return (roles?.length ? roles : role ? [role] : []).map(value => staffRoleLabels[value] || value).join(';');
+}
+
+export function parseStaffRoles(input: unknown) {
+  const values = String(input || '').split(/[;,，；]/).map(value => value.trim()).filter(Boolean);
+  const roles = values.map(value => roleCodes.has(value) ? value : roleByLabel.get(value));
+  return { roles: roles.filter((value): value is string => Boolean(value)), invalid: values.filter((_, index) => !roles[index]) };
+}
+
+export function parseStaffStatus(input: unknown) {
+  const value = String(input || '').trim();
+  if (!value) return { status: 'active', invalid: false };
+  if (statusLabels[value]) return { status: value, invalid: false };
+  const status = statusByLabel.get(value);
+  return { status: status || 'active', invalid: !status };
+}
 
 export function buildStaffExportRows(staffs: StaffSpreadsheetRecord[]) {
   return staffs.map(staff => ({
@@ -30,7 +57,7 @@ export function buildStaffExportRows(staffs: StaffSpreadsheetRecord[]) {
     初始系数: staff.initialCoefficient,
     当前系数: staff.currentCoefficient,
     状态: statusLabels[staff.status] || staff.status,
-    角色: (staff.roles?.length ? staff.roles : staff.role ? [staff.role] : []).join(', '),
+    角色: serializeStaffRoles(staff.roles, staff.role),
     熟悉模块: Array.isArray(staff.familiarModules)
       ? staff.familiarModules.map(module => module.moduleName).join(', ')
       : staff.familiarModules || '',
@@ -46,7 +73,8 @@ export function createStaffImportTemplateWorkbook() {
   const guidanceSheet = XLSX.utils.aoa_to_sheet([
     ['人员导入填写说明'],
     ['熟悉模块：使用全系统唯一模块名称，以英文逗号分隔。'],
-    ['角色可使用英文角色代码或系统显示名称；保密权限填写 是 或 否。'],
+    ['角色可使用英文角色代码或系统显示名称，以英文分号分隔；状态填写 在职、休假、离职 或 active、leave、resigned。'],
+    [`单个文件不超过 ${STAFF_IMPORT_MAX_FILE_SIZE / 1024 / 1024}MB，最多 ${STAFF_IMPORT_MAX_ROWS} 行数据。`],
   ]);
   XLSX.utils.book_append_sheet(workbook, dataSheet, '人员导入');
   XLSX.utils.book_append_sheet(workbook, guidanceSheet, '填写说明');
