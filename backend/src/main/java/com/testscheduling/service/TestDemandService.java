@@ -29,18 +29,21 @@ public class TestDemandService {
     private final DemandSpecialModuleService specialModuleService;
     private final ScheduleRepository scheduleRepository;
     private final AuditLogService auditLogService;
+    private final DemandFulfillmentService fulfillmentService;
 
     public TestDemandService(
             TestDemandRepository testDemandRepository,
             DemandManpowerDetailRepository detailRepository,
             DemandSpecialModuleService specialModuleService,
             ScheduleRepository scheduleRepository,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            DemandFulfillmentService fulfillmentService) {
         this.testDemandRepository = testDemandRepository;
         this.detailRepository = detailRepository;
         this.specialModuleService = specialModuleService;
         this.scheduleRepository = scheduleRepository;
         this.auditLogService = auditLogService;
+        this.fulfillmentService = fulfillmentService;
     }
 
     @Transactional(readOnly = true)
@@ -325,7 +328,7 @@ public class TestDemandService {
         demand.setManpowerDetails(details);
         demand.setSpecialModuleDemands(specials);
         demand.setManpowerSummary(specialModuleService.summarize(details, specials));
-        demand.setManpowerFullySatisfied(null);
+        demand.setManpowerFullySatisfied(fulfillmentService.calculate(demand).fullySatisfied());
     }
 
     private boolean quotasChanged(

@@ -83,7 +83,7 @@ class TestDemandServiceTest {
         assertNull(result.getSpecialModuleDemands().getFirst().getRemainingManpower());
         ManpowerSummary summary = result.getManpowerSummary().getFirst();
         assertEquals(new BigDecimal("4.5"), summary.generalManpower());
-        assertNull(result.getManpowerFullySatisfied());
+        assertFalse(result.getManpowerFullySatisfied());
         assertEquals(auditCountBefore + 1, auditLogRepository.count());
         var audit = auditLogRepository.findAll().stream()
             .filter(log -> "DEMAND_SPECIAL_MODULE_CHANGED".equals(log.getActionType()))
@@ -125,6 +125,22 @@ class TestDemandServiceTest {
         assertEquals(new BigDecimal("3.5"), created.getManpowerDemand());
         assertEquals("功能测试", created.getManpowerDetails().getFirst().getTestType());
         assertTrue(created.getSpecialModuleDemands().isEmpty());
+    }
+
+    @Test
+    void enrichmentExposesFulfillmentSummaryAndStatus() {
+        TestDemand created = service.create(demand("满足度回填", "2.0"));
+        Schedule schedule = new Schedule();
+        schedule.setDemandId(created.getId());
+        schedule.setDemandManpowerDetailId(created.getManpowerDetails().getFirst().getId());
+        schedule.setPercentage(200);
+        scheduleRepository.saveAndFlush(schedule);
+
+        TestDemand enriched = service.findById(created.getId());
+
+        assertEquals(0, new BigDecimal("2.0")
+            .compareTo(enriched.getManpowerSummary().getFirst().generalManpower()));
+        assertTrue(enriched.getManpowerFullySatisfied());
     }
 
     @Test
