@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DemandApproval from './DemandApproval';
@@ -49,5 +49,48 @@ describe('DemandApproval edit loading', () => {
     expect(modal).toHaveTextContent('需求B');
     first.resolve(demand(1, '需求A'));
     expect(modal).not.toHaveTextContent('需求A');
+  });
+
+  it('preserves historical details and sends write-only special rows with disabled fallback', async () => {
+    const full = {
+      ...demand(3, '历史需求'),
+      specialModuleDemands: [{ id: 9, demandId: 3, moduleId: 11, moduleName: '支付模块', testType: '功能测试', enabled: false, manpowerDemand: 1, createdAt: '', updatedAt: '', allocatedManpower: null, remainingManpower: null }],
+      manpowerDetails: [{ testType: '功能测试', manpowerDemand: 2 }, { testType: '历史小组', manpowerDemand: 1, remark: '保留备注' }],
+    };
+    vi.spyOn(api, 'getPendingDemandApprovals').mockResolvedValue([full]);
+    vi.spyOn(api, 'getFieldConfigs').mockResolvedValue([{ fieldName: 'testType', options: '功能测试' }, { fieldName: 'priority', options: '高' }]);
+    vi.spyOn(api, 'getTestModules').mockRejectedValue(new Error('模块不可用'));
+    vi.spyOn(api, 'getDemand').mockResolvedValue(full);
+    const approve = vi.spyOn(api, 'approveDemandWithChanges').mockResolvedValue({});
+    render(<DemandApproval />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /修改后批准/ }));
+    const modal = await screen.findByRole('dialog');
+    expect(modal).toHaveTextContent('支付模块');
+    expect(modal).toHaveTextContent('已停用');
+    expect(modal).toHaveTextContent('历史小组');
+    expect(modal).toHaveTextContent('保留备注');
+    expect(screen.getByRole('button', { name: /新增特殊模块需求/ })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '修改并批准' }));
+    await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
+    expect(approve.mock.calls[0][1]).toMatchObject({
+      manpowerDetails: expect.arrayContaining([{ testType: '功能测试', manpowerDemand: 2 }, { testType: '历史小组', manpowerDemand: 1, remark: '保留备注' }]),
+      specialModuleDemands: [{ moduleId: 11, manpowerDemand: 1 }],
+    });
+  });
+
+  it('does not populate an edit modal after unmounting before detail resolution', async () => {
+    const pending = deferred<any>();
+    vi.spyOn(api, 'getPendingDemandApprovals').mockResolvedValue([demand(4, '待卸载')]);
+    vi.spyOn(api, 'getFieldConfigs').mockResolvedValue([{ fieldName: 'testType', options: '功能测试' }]);
+    vi.spyOn(api, 'getTestModules').mockResolvedValue([]);
+    vi.spyOn(api, 'getDemand').mockReturnValue(pending.promise);
+    const { unmount } = render(<DemandApproval />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /修改后批准/ }));
+    unmount();
+    pending.resolve(demand(4, '待卸载'));
+    await Promise.resolve();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });

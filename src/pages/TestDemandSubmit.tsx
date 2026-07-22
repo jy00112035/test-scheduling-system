@@ -23,6 +23,7 @@ import { api } from '../services/api';
 import { useUserRole } from '../context/UserRoleContext';
 import SpecialModuleDemandEditor from '../components/SpecialModuleDemandEditor';
 import { calculateManpowerSummary, validateSpecialModuleRows } from '../utils/specialModuleCalculations';
+import { mergeEditDraftSpecialRows } from '../utils/specialModuleDraftContext';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -62,7 +63,6 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
   const [modules, setModules] = useState<TestModule[]>([]);
   const [modulesAvailable, setModulesAvailable] = useState(true);
   const specialModuleSectionRef = useRef<HTMLDivElement>(null);
-  const persistedBaselineRef = useRef(new Map((initialValues?.specialModuleDemands ?? []).map((row) => [row.moduleId, row.manpowerDemand])));
   const draftId = useRef(isEdit ? `edit_${initialValues?.id}` : 'new').current;
   const hasShownDraftPrompt = useRef(false);
 
@@ -117,10 +117,9 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         form.setFieldsValue(draft.formData);
         setManpowerInputs(draft.manpowerInputs);
         setManpowerRemarks(draft.manpowerRemarks);
-        setSpecialModuleRows((draft.specialModuleDemands ?? []).map((row) => ({
-          ...row,
-          historicalManpowerDemand: isEdit ? persistedBaselineRef.current.get(row.moduleId as number) : undefined,
-        })));
+        setSpecialModuleRows(mergeEditDraftSpecialRows(
+          (initialValues?.specialModuleDemands ?? []), draft.specialModuleDemands ?? [], isEdit,
+        ));
         onDirtyChange?.(true);
         message.success('草稿已恢复');
       },
