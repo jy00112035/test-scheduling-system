@@ -27,6 +27,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -141,6 +142,31 @@ class TestDemandServiceTest {
         assertEquals(0, new BigDecimal("2.0")
             .compareTo(enriched.getManpowerSummary().getFirst().generalManpower()));
         assertTrue(enriched.getManpowerFullySatisfied());
+    }
+
+    @Test
+    void listEnrichmentPopulatesStructureSummaryAndStatusForEveryDemand() {
+        TestModuleConfig module = saveModule("列表支付模块", true);
+        TestDemand withSpecial = demand("列表特殊需求", "2.0");
+        withSpecial.setStatus(TestDemand.DemandStatus.pending);
+        withSpecial.setSpecialModuleDemands(List.of(special(module.getId(), "1.0")));
+        TestDemand savedWithSpecial = service.create(withSpecial);
+
+        TestDemand generalOnly = demand("列表通用需求", "2.0");
+        generalOnly.setStatus(TestDemand.DemandStatus.pending);
+        TestDemand savedGeneralOnly = service.create(generalOnly);
+
+        List<TestDemand> results = service.findPendingAndScheduled().stream()
+            .filter(item -> item.getId().equals(savedWithSpecial.getId())
+                || item.getId().equals(savedGeneralOnly.getId()))
+            .toList();
+
+        assertEquals(2, results.size());
+        for (TestDemand result : results) {
+            assertNotNull(result.getSpecialModuleDemands());
+            assertNotNull(result.getManpowerSummary());
+            assertNotNull(result.getManpowerFullySatisfied());
+        }
     }
 
     @Test

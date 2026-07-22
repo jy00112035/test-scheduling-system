@@ -84,7 +84,8 @@ public class DemandFulfillmentService {
             List<DemandManpowerDetail> details,
             List<DemandSpecialModule> specials,
             List<Schedule> schedules) {
-        boolean historical = schedules.stream().anyMatch(this::isHistoricalSchedule);
+        boolean historical = !specials.isEmpty()
+            && schedules.stream().anyMatch(this::isHistoricalSchedule);
         List<DemandFulfillmentResponse.Gap> specialGaps = new ArrayList<>();
         List<DemandFulfillmentResponse.Gap> generalGaps = new ArrayList<>();
         List<DemandFulfillmentResponse.Summary> summaries = new ArrayList<>();

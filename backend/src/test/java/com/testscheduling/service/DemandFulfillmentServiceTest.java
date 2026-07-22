@@ -132,6 +132,19 @@ class DemandFulfillmentServiceTest {
     }
 
     @Test
+    void structuredDetailsWithoutSpecialsIgnoreDoubleNullHistoricalSchedule() {
+        DemandManpowerDetail group = group(301L, "功能测试", "2.0");
+        given(1001L, List.of(group), List.of(), List.of(
+            schedule(null, null, 200), schedule(null, 301L, 200)));
+
+        var result = service.calculate(1001L);
+
+        assertFalse(result.requiresHistoricalClassification());
+        assertTrue(result.fullySatisfied());
+        assertTrue(result.generalGaps().isEmpty());
+    }
+
+    @Test
     void rawSpecialRowsUseConfiguredModuleGroupWhenTransientTypeIsMissing() {
         DemandManpowerDetail group = group(301L, "功能测试", "2.0");
         DemandSpecialModule special = special(501L, 11L, "1.0", "支付模块");
