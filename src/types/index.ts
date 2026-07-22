@@ -76,6 +76,12 @@ export interface DemandSpecialModuleWriteRequest {
   manpowerDemand: number;
 }
 
+export interface SpecialModuleDemandInput {
+  moduleId?: number;
+  testType: string;
+  manpowerDemand?: number;
+}
+
 export interface ManpowerSummary {
   testType: string;
   totalManpower: number;

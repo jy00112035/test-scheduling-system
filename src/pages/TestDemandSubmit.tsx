@@ -18,9 +18,11 @@ import { SaveOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { saveDraft, getDraft, clearDraft, formatDraftTime, getDraftTimestamp } from '../utils/draftStorage';
 import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
-import { TestDemand, DemandManpowerDetail } from '../types';
+import { TestDemand, DemandManpowerDetail, SpecialModuleDemandInput, TestModule } from '../types';
 import { api } from '../services/api';
 import { useUserRole } from '../context/UserRoleContext';
+import SpecialModuleDemandEditor from '../components/SpecialModuleDemandEditor';
+import { calculateManpowerSummary, validateSpecialModuleRows } from '../utils/specialModuleCalculations';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -56,21 +58,25 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
   const [fieldConfigs, setFieldConfigs] = useState<FieldConfig[]>([]);
   const [manpowerInputs, setManpowerInputs] = useState<Record<string, number>>({});
   const [manpowerRemarks, setManpowerRemarks] = useState<Record<string, string>>({});
+  const [specialModuleRows, setSpecialModuleRows] = useState<SpecialModuleDemandInput[]>([]);
+  const [modules, setModules] = useState<TestModule[]>([]);
+  const specialModuleSectionRef = useRef<HTMLDivElement>(null);
   const draftId = useRef(isEdit ? `edit_${initialValues?.id}` : 'new').current;
   const hasShownDraftPrompt = useRef(false);
 
   useEffect(() => {
-    fetchFieldConfigs();
+    let active = true;
+    Promise.all([api.getFieldConfigs(), api.getTestModules()])
+      .then(([configs, moduleList]) => {
+        if (!active) return;
+        setFieldConfigs(configs);
+        setModules(moduleList);
+      })
+      .catch((error) => {
+        if (active) message.error(error.message || '获取特殊模块配置失败');
+      });
+    return () => { active = false; };
   }, []);
-
-  const fetchFieldConfigs = async () => {
-    try {
-      const configs = await api.getFieldConfigs();
-      setFieldConfigs(configs);
-    } catch (error) {
-      console.error('获取字段配置失败', error);
-    }
-  };
 
   const getFieldConfig = (fieldName: string) => {
     return fieldConfigs.find(c => c.fieldName === fieldName);
@@ -105,6 +111,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         form.setFieldsValue(draft.formData);
         setManpowerInputs(draft.manpowerInputs);
         setManpowerRemarks(draft.manpowerRemarks);
+        setSpecialModuleRows(draft.specialModuleDemands ?? []);
         onDirtyChange?.(true);
         message.success('草稿已恢复');
       },
@@ -123,6 +130,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         formData,
         manpowerInputs,
         manpowerRemarks,
+        specialModuleDemands: specialModuleRows,
       });
       onDirtyChange?.(false);
     };
@@ -139,7 +147,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
       window.removeEventListener('save-demand-draft', handleSaveDraft);
       window.removeEventListener('clear-demand-draft', handleClearDraft);
     };
-  }, [draftId, form, manpowerInputs, manpowerRemarks, onDirtyChange]);
+  }, [draftId, form, manpowerInputs, manpowerRemarks, specialModuleRows, onDirtyChange]);
 
   useEffect(() => {
     if (initialValues) {
@@ -161,6 +169,11 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         setManpowerInputs(map);
         setManpowerRemarks(remarkMap);
       }
+      setSpecialModuleRows((initialValues.specialModuleDemands ?? []).map((row) => ({
+        moduleId: row.moduleId,
+        testType: row.testType,
+        manpowerDemand: row.manpowerDemand,
+      })));
     }
   }, [initialValues, form]);
 
@@ -183,6 +196,14 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
       message.warning('请至少为一个测试类型填写人力需求');
       return;
     }
+    const specialValidation = validateSpecialModuleRows(manpowerInputs, specialModuleRows);
+    if (!specialValidation.valid) {
+      message.warning(specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP'
+        ? `${specialValidation.testType}小组的特殊模块人力超过总人力`
+        : '请完善特殊模块人力需求');
+      specialModuleSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
 
     setLoading(true);
     try {
@@ -192,6 +213,10 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         startDate: values.dateRange[0].format('YYYY-MM-DDTHH:mm'),
         endDate: values.dateRange[1].format('YYYY-MM-DDTHH:mm'),
         manpowerDetails,
+        specialModuleDemands: specialModuleRows.map((row) => ({
+          moduleId: row.moduleId as number,
+          manpowerDemand: row.manpowerDemand as number,
+        })),
         versionType: values.versionType,
         versionPhase: values.versionPhase,
         description: values.description || '',
@@ -320,16 +345,6 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
                       [testType]: val ?? 0,
                     }))}
                   />
-                  <Input
-                    style={{ width: 180, marginLeft: 8 }}
-                    placeholder="所需模块（选填）"
-                    value={manpowerRemarks[testType] || ''}
-                    onChange={(e) => setManpowerRemarks(prev => ({
-                      ...prev,
-                      [testType]: e.target.value,
-                    }))}
-                    maxLength={100}
-                  />
                 </div>
               ))}
               <Divider style={{ margin: '8px 0' }} />
@@ -342,6 +357,25 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
                   })()}
                 </span> 人/天
               </div>
+            </div>
+          </Form.Item>
+
+          <Form.Item label="特殊模块人力需求">
+            <div ref={specialModuleSectionRef}>
+              <SpecialModuleDemandEditor
+                rows={specialModuleRows}
+                modules={modules}
+                manpowerByTestType={manpowerInputs}
+                onChange={(rows) => {
+                  setSpecialModuleRows(rows);
+                  onDirtyChange?.(true);
+                }}
+              />
+              {calculateManpowerSummary(manpowerInputs, specialModuleRows).map((summary) => (
+                <div key={summary.testType} style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
+                  {summary.testType}：总人力 {summary.totalManpower.toFixed(1)}，特殊模块 {summary.specialManpower.toFixed(1)}，通用人力 {summary.generalManpower.toFixed(1)} 人/天
+                </div>
+              ))}
             </div>
           </Form.Item>
 

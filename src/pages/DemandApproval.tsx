@@ -3,7 +3,9 @@ import { Table, Button, Space, Popconfirm, message, Tag, Modal, DatePicker, Inpu
 import { CheckOutlined, CloseOutlined, EditOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '../services/api';
-import { DemandManpowerDetail } from '../types';
+import { DemandManpowerDetail, SpecialModuleDemandInput, TestModule } from '../types';
+import SpecialModuleDemandEditor from '../components/SpecialModuleDemandEditor';
+import { calculateManpowerSummary, validateSpecialModuleRows } from '../utils/specialModuleCalculations';
 
 const { RangePicker } = DatePicker;
 
@@ -23,10 +25,19 @@ const DemandApproval: React.FC = () => {
   const [originalPriority, setOriginalPriority] = useState<string>('');
   const [editPriority, setEditPriority] = useState<string>('');
   const [priorityOptions, setPriorityOptions] = useState<string[]>([]);
+  const [modules, setModules] = useState<TestModule[]>([]);
+  const [editSpecialModuleRows, setEditSpecialModuleRows] = useState<SpecialModuleDemandInput[]>([]);
 
   useEffect(() => {
     fetchPending();
     fetchTestTypes();
+    let active = true;
+    api.getTestModules().then((items) => {
+      if (active) setModules(items);
+    }).catch((error: any) => {
+      if (active) message.error(error.message || '获取特殊模块配置失败');
+    });
+    return () => { active = false; };
   }, []);
 
   const fetchTestTypes = async () => {
@@ -92,6 +103,9 @@ const DemandApproval: React.FC = () => {
     ]);
 
     let details: DemandManpowerDetail[] = [];
+    let specialRows: SpecialModuleDemandInput[] = (record.specialModuleDemands ?? []).map((row: any) => ({
+      moduleId: row.moduleId, testType: row.testType, manpowerDemand: row.manpowerDemand,
+    }));
     let priority = record.priority || '';
     try {
       const fullDemand = await api.getDemand(record.id);
@@ -101,6 +115,9 @@ const DemandApproval: React.FC = () => {
       if (fullDemand.priority) {
         priority = fullDemand.priority;
       }
+      specialRows = (fullDemand.specialModuleDemands ?? specialRows).map((row: any) => ({
+        moduleId: row.moduleId, testType: row.testType, manpowerDemand: row.manpowerDemand,
+      }));
     } catch (e) {
       if (record.manpowerDetails) {
         details = record.manpowerDetails;
@@ -113,6 +130,7 @@ const DemandApproval: React.FC = () => {
     });
     setOriginalManpower(orig);
     setEditManpower({ ...orig });
+    setEditSpecialModuleRows(specialRows);
     setOriginalPriority(priority);
     setEditPriority(priority);
     setEditModalOpen(true);
@@ -133,6 +151,13 @@ const DemandApproval: React.FC = () => {
       message.warning('请至少为一个测试类型填写人力需求');
       return;
     }
+    const specialValidation = validateSpecialModuleRows(editManpower, editSpecialModuleRows);
+    if (!specialValidation.valid) {
+      message.warning(specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP'
+        ? `${specialValidation.testType}小组的特殊模块人力超过总人力`
+        : '请完善特殊模块人力需求');
+      return;
+    }
 
     setEditLoading(true);
     try {
@@ -140,6 +165,10 @@ const DemandApproval: React.FC = () => {
         startDate: editDateRange[0].format('YYYY-MM-DDTHH:mm:ss'),
         endDate: editDateRange[1].format('YYYY-MM-DDTHH:mm:ss'),
         manpowerDetails,
+        specialModuleDemands: editSpecialModuleRows.map((row) => ({
+          moduleId: row.moduleId as number,
+          manpowerDemand: row.manpowerDemand as number,
+        })),
         priority: editPriority,
       });
       message.success('修改并批准成功');
@@ -210,6 +239,19 @@ const DemandApproval: React.FC = () => {
     {
       title: '人力需求', dataIndex: 'manpowerDemand', key: 'manpowerDemand', width: 100,
       render: (v: number) => `${v} 人/天`,
+    },
+    {
+      title: '人力拆分', key: 'manpowerSummary', width: 220,
+      render: (_: any, record: any) => calculateManpowerSummary(
+        (record.manpowerDetails ?? []).reduce((result: Record<string, number>, item: DemandManpowerDetail) => ({
+          ...result, [item.testType]: item.manpowerDemand,
+        }), {}),
+        (record.specialModuleDemands ?? []).map((row: any) => ({
+          moduleId: row.moduleId, testType: row.testType, manpowerDemand: row.manpowerDemand,
+        })),
+      ).map((summary) => (
+        <div key={summary.testType}>{summary.testType}：总 {summary.totalManpower.toFixed(1)} / 特殊 {summary.specialManpower.toFixed(1)} / 通用 {summary.generalManpower.toFixed(1)}</div>
+      )),
     },
     { title: '备注', dataIndex: 'description', key: 'description', width: 120, render: (t: string) => t || '-' },
     { title: '提交人', dataIndex: 'submittedBy', key: 'submittedBy', width: 100 },
@@ -395,6 +437,21 @@ const DemandApproval: React.FC = () => {
                   </span>
                 </div>
               </div>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ marginBottom: 8, fontWeight: 500 }}>特殊模块人力需求</div>
+              <SpecialModuleDemandEditor
+                rows={editSpecialModuleRows}
+                modules={modules}
+                manpowerByTestType={editManpower}
+                onChange={setEditSpecialModuleRows}
+              />
+              {calculateManpowerSummary(editManpower, editSpecialModuleRows).map((summary) => (
+                <div key={summary.testType} style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
+                  {summary.testType}：总人力 {summary.totalManpower.toFixed(1)}，特殊模块 {summary.specialManpower.toFixed(1)}，通用人力 {summary.generalManpower.toFixed(1)} 人/天
+                </div>
+              ))}
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
