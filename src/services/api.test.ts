@@ -4,6 +4,7 @@ import api, {
   type BackendSchedule,
   type DemandSpecialModule,
   type DemandFulfillment,
+  type RecommendationSchedule,
   type ScheduleRecommendationRequest,
   type ScheduleRecommendationResponse,
   type ScheduleWriteRequest,
@@ -111,6 +112,25 @@ const incompleteEnrichedModule: DemandSpecialModule = {
 void invalidSpecialGap;
 void incompleteEnrichedModule;
 
+const legacyScheduleWithNullableFields: BackendSchedule = {
+  id: 7,
+  demandId: 8,
+  staffId: 9,
+  demandManpowerDetailId: 10,
+  demandSpecialModuleId: null,
+  date: '2026-07-01',
+  percentage: 100,
+  product: null,
+  testManager: null,
+  versionType: null,
+  version: null,
+  lockVersion: 0,
+  published: null,
+  createdAt: '2026-07-01T00:00:00',
+};
+
+void legacyScheduleWithNullableFields;
+
 function respond(data: unknown, message = 'success') {
   return new Response(JSON.stringify({ code: 200, message, data }), {
     headers: { 'Content-Type': 'application/json' },
@@ -197,7 +217,7 @@ describe('ApiService special-module contracts', () => {
       demandSpecialModuleId: 40,
     };
     const batch: BatchPublishResponse = { success: [], failed: [] };
-    const generatedSchedule: BackendSchedule = {
+    const generatedSchedule: RecommendationSchedule = {
       id: 99,
       demandId: 10,
       staffId: 20,
@@ -205,12 +225,12 @@ describe('ApiService special-module contracts', () => {
       demandSpecialModuleId: null,
       date: '2026-07-01',
       percentage: 100,
-      product: null,
+      product: '项目',
       testManager: null,
-      versionType: null,
+      versionType: '功能测试',
       version: null,
       lockVersion: 0,
-      published: null,
+      published: false,
       createdAt: '2026-07-01T00:00:00',
     };
     const fetchMock = vi.spyOn(globalThis, 'fetch')
@@ -221,6 +241,9 @@ describe('ApiService special-module contracts', () => {
         staffId: 22,
         date: '2026-07-02',
         percentage: 50,
+        product: null,
+        versionType: null,
+        published: null,
       }))
       .mockResolvedValueOnce(respond(batch));
 
@@ -233,6 +256,9 @@ describe('ApiService special-module contracts', () => {
       staffId: 22,
       date: '2026-07-02',
       percentage: 50,
+      product: null,
+      versionType: null,
+      published: null,
     });
     await api.batchPublishSchedules({ demandIds: [10, 11] });
 

@@ -106,7 +106,7 @@ export interface ScheduleRecommendationRequest {
 }
 
 export interface ScheduleRecommendationResponse {
-  generatedSchedules: BackendSchedule[];
+  generatedSchedules: RecommendationSchedule[];
   fulfillment: Array<{
     demandId: number;
     fullySatisfied: boolean;
@@ -143,6 +143,12 @@ export interface BackendSchedule {
   lockVersion: number;
   published: boolean | null;
   createdAt: string;
+}
+
+export interface RecommendationSchedule extends BackendSchedule {
+  product: string;
+  versionType: string;
+  published: boolean;
 }
 
 export interface DemandFulfillment {

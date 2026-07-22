@@ -15,8 +15,8 @@ export interface ScheduleItem {
   versionType: string;
   version?: string;
   demandId?: number;
-  demandManpowerDetailId?: number;
-  demandSpecialModuleId?: number;
+  demandManpowerDetailId?: number | null;
+  demandSpecialModuleId?: number | null;
   testManager?: string;
   published?: boolean;
 }

@@ -15,6 +15,7 @@ export type {
   BackendSchedule,
   DemandSpecialModule,
   DemandFulfillment,
+  RecommendationSchedule,
   ScheduleRecommendationRequest,
   ScheduleRecommendationResponse,
   ScheduleWriteRequest,
