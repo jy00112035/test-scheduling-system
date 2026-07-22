@@ -707,6 +707,66 @@ describe('ScheduleWorkbench backend scheduling flows', () => {
     await waitFor(() => expect(publishButton).toHaveAttribute('data-publish-loading', 'false'));
   });
 
+  it('holds the shared publish request lock after diagnostics ownership is invalidated', async () => {
+    const batchRequest = deferred<any>();
+    mocks.api.batchPublishSchedules.mockReturnValue(batchRequest.promise);
+    mocks.api.moveSchedule.mockResolvedValue({ ...schedule, date: '2026-07-23' });
+    mocks.api.publishSchedules.mockResolvedValue(undefined);
+    await renderLoaded();
+    mocks.api.getSchedules.mockResolvedValue([{ ...schedule, date: '2026-07-23' }]);
+
+    const publishAllButton = screen.getByText('发布全部待发布排班');
+    fireEvent.click(publishAllButton);
+    await waitFor(() => expect(mocks.api.batchPublishSchedules).toHaveBeenCalledTimes(1));
+    expect(publishAllButton).toHaveAttribute('data-publish-loading', 'true');
+
+    fireEvent.click(screen.getByText('移动排班'));
+    await waitFor(() => expect(mocks.api.moveSchedule).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.api.getSchedules.mock.calls.length).toBeGreaterThan(1));
+
+    fireEvent.click(publishAllButton);
+    fireEvent.click(screen.getByText('发布需求'));
+    expect(mocks.api.batchPublishSchedules).toHaveBeenCalledTimes(1);
+    expect(mocks.api.publishSchedules).not.toHaveBeenCalled();
+    expect(publishAllButton).toHaveAttribute('data-publish-loading', 'true');
+
+    await act(async () => {
+      batchRequest.resolve({
+        success: [],
+        failed: [{ demandId: 1001, reasonCode: 'STALE_FAILURE', reason: '旧发布失败' }],
+      });
+      await batchRequest.promise;
+    });
+    await waitFor(() => expect(publishAllButton).toHaveAttribute('data-publish-loading', 'false'));
+
+    fireEvent.click(screen.getByText('发布需求'));
+    await waitFor(() => expect(mocks.api.publishSchedules).toHaveBeenCalledTimes(1));
+    expect(mocks.api.batchPublishSchedules).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the shared publish request lock when the owning request rejects', async () => {
+    const batchRequest = deferred<any>();
+    mocks.api.batchPublishSchedules.mockReturnValue(batchRequest.promise);
+    mocks.api.publishSchedules.mockResolvedValue(undefined);
+    await renderLoaded();
+
+    const publishAllButton = screen.getByText('发布全部待发布排班');
+    fireEvent.click(publishAllButton);
+    await waitFor(() => expect(mocks.api.batchPublishSchedules).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      batchRequest.reject(new Error('批量发布请求失败'));
+      try {
+        await batchRequest.promise;
+      } catch { /* expected request failure */ }
+    });
+    await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith('批量发布请求失败'));
+    await waitFor(() => expect(publishAllButton).toHaveAttribute('data-publish-loading', 'false'));
+
+    fireEvent.click(screen.getByText('发布需求'));
+    await waitFor(() => expect(mocks.api.publishSchedules).toHaveBeenCalledTimes(1));
+  });
+
   it('classifies a double-null historical schedule without changing placement', async () => {
     const historical = {
       ...schedule,

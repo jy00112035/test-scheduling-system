@@ -58,7 +58,6 @@ const { confirm } = Modal;
 interface PublishRun {
   session: number;
   mutationSession: number;
-  kind: 'single' | 'batch';
 }
 
 // ============================================================
@@ -151,6 +150,7 @@ const ScheduleWorkbench: React.FC = () => {
   const scheduleMutationGenerationRef = useRef(0);
   const recommendationRunRef = useRef<number | null>(null);
   const publishRunRef = useRef<PublishRun | null>(null);
+  const publishHttpInFlightRef = useRef<object | null>(null);
   const scheduleMutationIdsRef = useRef(new Set<number>());
   const classificationIdsRef = useRef(new Set<number>());
   const manualCreateRef = useRef(false);
@@ -274,7 +274,6 @@ const ScheduleWorkbench: React.FC = () => {
         && activePublish.session !== ownerPublishSession
         && activePublish.mutationSession < mutationSession) {
       publishRunRef.current = null;
-      if (activePublish.kind === 'batch') setPublishAllLoading(false);
     }
     setPublishFailures([]);
     return true;
@@ -282,6 +281,20 @@ const ScheduleWorkbench: React.FC = () => {
 
   const ownsScheduleMutation = (mutationSession: number) =>
     scheduleMutationGenerationRef.current === mutationSession;
+
+  const acquirePublishHttpLock = () => {
+    if (publishHttpInFlightRef.current) return null;
+    const owner = {};
+    publishHttpInFlightRef.current = owner;
+    setPublishAllLoading(true);
+    return owner;
+  };
+
+  const releasePublishHttpLock = (owner: object) => {
+    if (publishHttpInFlightRef.current !== owner) return;
+    publishHttpInFlightRef.current = null;
+    if (mountedRef.current) setPublishAllLoading(false);
+  };
 
   const refreshAuthoritativeData = async (
     options: { invalidateDiagnostics?: boolean } = {},
@@ -572,7 +585,7 @@ const ScheduleWorkbench: React.FC = () => {
 
   // ---- 发布全部 ----
   const handlePublishAll = () => {
-    if (publishRunRef.current !== null) return;
+    if (publishHttpInFlightRef.current || publishRunRef.current !== null) return;
     const demandIds = demands
       .filter(demand => demand.requiresHistoricalClassification !== true
         && schedules.some(schedule => schedule.demandId === demand.id && !schedule.published))
@@ -591,16 +604,21 @@ const ScheduleWorkbench: React.FC = () => {
       cancelText: '取消',
       onOk: async () => {
         if (publishRunRef.current !== null) return;
+        const requestOwner = acquirePublishHttpLock();
+        if (!requestOwner) return;
         const mutationSession = beginScheduleMutation();
         const run: PublishRun = {
           session: mutationSession,
           mutationSession,
-          kind: 'batch',
         };
         publishRunRef.current = run;
-        setPublishAllLoading(true);
         try {
-          const result = await api.batchPublishSchedules({ demandIds });
+          let result;
+          try {
+            result = await api.batchPublishSchedules({ demandIds });
+          } finally {
+            releasePublishHttpLock(requestOwner);
+          }
           if (!mountedRef.current) return;
           const mutationCurrent = completeScheduleMutation(mutationSession, run.session);
           const reconciled = mutationCurrent
@@ -649,7 +667,6 @@ const ScheduleWorkbench: React.FC = () => {
         } finally {
           if (publishRunRef.current === run) {
             publishRunRef.current = null;
-            if (mountedRef.current) setPublishAllLoading(false);
           }
         }
       },
@@ -658,7 +675,7 @@ const ScheduleWorkbench: React.FC = () => {
 
   // ---- 发布 ----
   const handlePublishDemand = async (demandId: number) => {
-    if (publishRunRef.current !== null) return;
+    if (publishHttpInFlightRef.current || publishRunRef.current !== null) return;
     const demand = demands.find(item => item.id === demandId);
     if (demand?.requiresHistoricalClassification) {
       message.warning('历史排班尚未完成人力归属，无法发布');
@@ -669,15 +686,20 @@ const ScheduleWorkbench: React.FC = () => {
       return;
     }
 
+    const requestOwner = acquirePublishHttpLock();
+    if (!requestOwner) return;
     const mutationSession = beginScheduleMutation();
     const run: PublishRun = {
       session: mutationSession,
       mutationSession,
-      kind: 'single',
     };
     publishRunRef.current = run;
     try {
-      await api.publishSchedules(demandId);
+      try {
+        await api.publishSchedules(demandId);
+      } finally {
+        releasePublishHttpLock(requestOwner);
+      }
       if (!mountedRef.current) return;
       const mutationCurrent = completeScheduleMutation(mutationSession, run.session);
       const reconciled = mutationCurrent
