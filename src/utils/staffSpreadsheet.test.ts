@@ -48,6 +48,14 @@ describe('staff spreadsheet helpers', () => {
     expect(parseStaffStatus('未知状态').invalid).toBe(true);
   });
 
+  it.each([
+    ['active', ['testExecutor']], ['leave', ['testManager', 'testLead']], ['resigned', ['fieldAdmin', 'projectManager']],
+  ])('preserves status %s and roles %j through an export row', (status, roles) => {
+    const row = buildStaffExportRows([{ name: '人员', empNo: 'EMP', joinDate: '2026-01-01', groupName: '组', initialCoefficient: 0.3, currentCoefficient: 0.3, status, roles, familiarModules: [] }])[0];
+    expect(parseStaffStatus(row.状态)).toEqual({ status, invalid: false });
+    expect(parseStaffRoles(row.角色)).toEqual({ roles, invalid: [] });
+  });
+
   it('accepts exact import size and row boundaries and rejects the next value', () => {
     expect(classifyStaffImportLimits(STAFF_IMPORT_MAX_FILE_SIZE, STAFF_IMPORT_MAX_ROWS)).toBeNull();
     expect(classifyStaffImportLimits(STAFF_IMPORT_MAX_FILE_SIZE + 1)).toBe('fileTooLarge');
