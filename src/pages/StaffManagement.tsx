@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Card,
   Table,
@@ -14,8 +14,8 @@ import {
   InputNumber,
   Upload,
   Alert,
-  Tooltip,
   Switch,
+  Typography,
 } from 'antd';
 import {
   PlusOutlined,
@@ -30,8 +30,10 @@ import * as XLSX from 'xlsx';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useUserRole } from '../context/UserRoleContext';
+import type { FamiliarModule, TestModule } from '../types';
+import { parseFamiliarModuleNames } from '../utils/staffModuleImport';
 
-const { Option } = Select;
+const { Option, OptGroup } = Select;
 
 interface Staff {
   id: number;
@@ -44,7 +46,7 @@ interface Staff {
   currentCoefficient: number;
   status: 'active' | 'leave' | 'resigned';
   role?: string;
-  familiarModules?: string;
+  familiarModules?: FamiliarModule[] | string;
   confidentialClearance?: boolean;
 }
 
@@ -68,8 +70,31 @@ interface ImportRow {
   currentCoefficient: number;
   status: 'active';
   roles: string[];
-  familiarModules: string;
+  familiarModuleIds: number[];
+  familiarModuleNames: string;
+  unmatchedModules: string[];
+  unavailableModules: string[];
   confidentialClearance: boolean;
+}
+
+function normalizeFamiliarModules(familiarModules?: FamiliarModule[] | string): FamiliarModule[] {
+  return Array.isArray(familiarModules) ? familiarModules : [];
+}
+
+function renderFamiliarModules(familiarModules?: FamiliarModule[] | string) {
+  const structuredModules = normalizeFamiliarModules(familiarModules);
+  if (structuredModules.length > 0) {
+    return (
+      <Space wrap size={[0, 2]}>
+        {structuredModules.map(module => (
+          <Tag key={module.id} color={module.enabled ? 'blue' : 'default'}>
+            {module.testType}: {module.moduleName}{!module.enabled && ' (已停用)'}
+          </Tag>
+        ))}
+      </Space>
+    );
+  }
+  return typeof familiarModules === 'string' && familiarModules ? familiarModules : '-';
 }
 
 const roleMapping: Record<string, string> = {
@@ -112,11 +137,54 @@ const StaffManagement: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [modules, setModules] = useState<TestModule[]>([]);
+  const [modulesLoading, setModulesLoading] = useState(true);
+  const [modulesError, setModulesError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const moduleLoadGenerationRef = useRef(0);
 
   useEffect(() => {
+    mountedRef.current = true;
     fetchStaffs();
     fetchFieldConfigs();
+    void fetchModules();
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
+
+  const fetchModules = async () => {
+    const generation = ++moduleLoadGenerationRef.current;
+    if (mountedRef.current) {
+      setModulesLoading(true);
+      setModulesError(null);
+    }
+    try {
+      const moduleList = await api.getTestModules();
+      if (mountedRef.current && generation === moduleLoadGenerationRef.current) {
+        setModules(moduleList);
+      }
+    } catch (error: any) {
+      if (mountedRef.current && generation === moduleLoadGenerationRef.current) {
+        setModulesError(error.message || '模块配置加载失败');
+      }
+    } finally {
+      if (mountedRef.current && generation === moduleLoadGenerationRef.current) {
+        setModulesLoading(false);
+      }
+    }
+  };
+
+  const modulesById = useMemo(() => new Map(modules.map(module => [module.id, module])), [modules]);
+  const groupedModules = useMemo(() => {
+    const grouped = new Map<string, TestModule[]>();
+    modules.forEach(module => {
+      const group = grouped.get(module.testType) || [];
+      group.push(module);
+      grouped.set(module.testType, group);
+    });
+    return Array.from(grouped.entries());
+  }, [modules]);
 
   const fetchStaffs = async () => {
     setLoading(true);
@@ -162,7 +230,7 @@ const StaffManagement: React.FC = () => {
 
   // 下载导入模板
   const downloadTemplate = () => {
-    const template = '工号,姓名,入职日期,所属项目,测试类型,初始系数,当前系数,角色,熟悉模块,保密权限\nEMP001,张三,2024-01-01,功能测试组,功能测试,0.3,0.3,测试执行人员;测试组长,登录模块;支付模块,是\nEMP002,李四,2024-01-15,自动化测试组,自动化测试,0.5,0.5,测试经理,自动化框架,否';
+    const template = '工号,姓名,入职日期,所属项目,测试类型,初始系数,当前系数,角色,熟悉模块,保密权限\nEMP001,张三,2024-01-01,功能测试组,功能测试,0.3,0.3,测试执行人员;测试组长,"登录模块,支付模块",是\nEMP002,李四,2024-01-15,自动化测试组,自动化测试,0.5,0.5,测试经理,自动化框架,否';
     const blob = new Blob([template], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
@@ -183,6 +251,10 @@ const StaffManagement: React.FC = () => {
   const processImport = async () => {
     if (!selectedFile) {
       message.error('请选择要导入的文件');
+      return;
+    }
+    if (modulesLoading || modulesError) {
+      message.error(modulesError || '模块配置仍在加载，暂不能解析熟悉模块');
       return;
     }
 
@@ -274,7 +346,16 @@ const StaffManagement: React.FC = () => {
               currentCoefficient: currentCoefKey ? parseFloat(String(rowObj[currentCoefKey] || '0.3')) || 0.3 : 0.3,
               status: 'active',
               roles,
-              familiarModules: familiarModulesKey ? String(rowObj[familiarModulesKey] || '').trim() : '',
+              ...(() => {
+                const familiarModuleNames = familiarModulesKey ? String(rowObj[familiarModulesKey] || '').trim() : '';
+                const parsedModules = parseFamiliarModuleNames(familiarModuleNames, modules);
+                return {
+                  familiarModuleIds: parsedModules.moduleIds,
+                  familiarModuleNames,
+                  unmatchedModules: parsedModules.unmatched,
+                  unavailableModules: parsedModules.unavailable,
+                };
+              })(),
               confidentialClearance: confidentialClearanceKey ? ['是', 'true', '有', 'yes'].includes(String(rowObj[confidentialClearanceKey] || '').trim()) : false,
             };
             parsedData.push(rowData);
@@ -310,11 +391,16 @@ const StaffManagement: React.FC = () => {
       message.error('没有可导入的数据');
       return;
     }
+    if (importData.some(row => row.unmatchedModules.length > 0 || row.unavailableModules.length > 0)) {
+      message.error('存在熟悉模块无法导入的人员，请移除或修正后重试');
+      return;
+    }
 
     setImportLoading(true);
     try {
       for (const row of importData) {
-        await api.createStaff(row);
+        const { familiarModuleNames: _names, unmatchedModules: _unmatched, unavailableModules: _unavailable, ...staffData } = row;
+        await api.createStaff(staffData);
       }
       await syncFieldConfigs(importData);
       await fetchFieldConfigs();
@@ -350,7 +436,7 @@ const StaffManagement: React.FC = () => {
         ...record,
         joinDate: dayjs(record.joinDate),
         roles: roles && roles.length > 0 ? roles : ['testExecutor'],
-        familiarModules: record.familiarModules || '',
+        familiarModuleIds: normalizeFamiliarModules(record.familiarModules).map(module => module.id),
         confidentialClearance: record.confidentialClearance || false,
       });
     } catch {
@@ -358,7 +444,7 @@ const StaffManagement: React.FC = () => {
         ...record,
         joinDate: dayjs(record.joinDate),
         roles: ['testExecutor'],
-        familiarModules: record.familiarModules || '',
+        familiarModuleIds: normalizeFamiliarModules(record.familiarModules).map(module => module.id),
         confidentialClearance: record.confidentialClearance || false,
       });
     }
@@ -437,7 +523,7 @@ const StaffManagement: React.FC = () => {
         ...values,
         joinDate: values.joinDate.format('YYYY-MM-DD'),
         role: values.roles?.[0] || 'testExecutor',
-        familiarModules: values.familiarModules || '',
+        familiarModuleIds: values.familiarModuleIds || [],
         confidentialClearance: values.confidentialClearance || false,
       };
 
@@ -582,13 +668,7 @@ const StaffManagement: React.FC = () => {
       dataIndex: 'familiarModules',
       key: 'familiarModules',
       width: 150,
-      render: (text: string) => text ? (
-        <Tooltip title={text}>
-          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}>
-            {text}
-          </div>
-        </Tooltip>
-      ) : '-',
+      render: (familiarModules: FamiliarModule[] | string) => renderFamiliarModules(familiarModules),
     },
     {
       title: '操作',
@@ -823,11 +903,41 @@ const StaffManagement: React.FC = () => {
           </Form.Item>
 
           <Form.Item
-            name="familiarModules"
+            name="familiarModuleIds"
             label="熟悉模块"
           >
-            <Input.TextArea rows={2} placeholder="请输入熟悉的模块" />
+            <Select
+              mode="multiple"
+              placeholder={modulesError || '请选择熟悉模块'}
+              loading={modulesLoading}
+              disabled={modulesLoading || Boolean(modulesError)}
+              optionLabelProp="label"
+              tagRender={({ value, closable, onClose }) => {
+                const module = modulesById.get(value as number);
+                if (!module) return <Tag closable={closable} onClose={onClose}>{String(value)}</Tag>;
+                return (
+                  <Tag color={module.enabled ? 'blue' : 'default'} closable={closable} onClose={onClose}>
+                    {module.testType}: {module.moduleName}{!module.enabled && ' (已停用)'}
+                  </Tag>
+                );
+              }}
+            >
+              {groupedModules.map(([testType, moduleList]) => (
+                <OptGroup key={testType} label={testType}>
+                  {moduleList.map(module => (
+                    <Option key={module.id} value={module.id} disabled={!module.enabled} label={`${module.testType}: ${module.moduleName}${module.enabled ? '' : ' (已停用)'}`}>
+                      <Space size={4}>
+                        <span>{module.moduleName}</span>
+                        {!module.enabled && <Typography.Text type="secondary">已停用</Typography.Text>}
+                      </Space>
+                    </Option>
+                  ))}
+                </OptGroup>
+              ))}
+            </Select>
           </Form.Item>
+
+          {modulesError && <Alert type="warning" showIcon message={`熟悉模块不可用：${modulesError}`} style={{ marginBottom: 16 }} />}
 
           <Form.Item
             name="confidentialClearance"
@@ -874,7 +984,7 @@ const StaffManagement: React.FC = () => {
                 下载导入模板
               </Button>
               <Alert
-                message="提示：Excel文件需要包含表头，支持的列有：工号、姓名、入职日期、所属项目、测试类型、初始系数、当前系数、角色"
+                message="提示：Excel文件需要包含表头。熟悉模块使用全系统唯一模块名称，以英文逗号分隔。"
                 type="info"
                 showIcon
               />
@@ -950,8 +1060,14 @@ const StaffManagement: React.FC = () => {
                     return roles.map(r => roleLabels[r] || r).join('; ');
                   },
                 },
-                { title: '熟悉模块', dataIndex: 'familiarModules', key: 'familiarModules', width: 150,
-                  render: (text: string) => text || '-',
+                { title: '熟悉模块', dataIndex: 'familiarModuleNames', key: 'familiarModuleNames', width: 150,
+                  render: (text: string, row: ImportRow) => (
+                    <Space direction="vertical" size={0}>
+                      <span>{text || '-'}</span>
+                      {row.unmatchedModules.length > 0 && <Typography.Text type="danger">未知：{row.unmatchedModules.join('、')}</Typography.Text>}
+                      {row.unavailableModules.length > 0 && <Typography.Text type="danger">不可用（已停用）：{row.unavailableModules.join('、')}</Typography.Text>}
+                    </Space>
+                  ),
                 },
                 { title: '保密权限', dataIndex: 'confidentialClearance', key: 'confidentialClearance', width: 80,
                   render: (val: boolean) => val ? '是' : '否',
@@ -961,7 +1077,7 @@ const StaffManagement: React.FC = () => {
             <div style={{ marginTop: 16, textAlign: 'right' }}>
               <Space>
                 <Button onClick={handleImportCancel}>取消</Button>
-                <Button type="primary" onClick={handleImportConfirm} loading={importLoading}>
+                <Button type="primary" onClick={handleImportConfirm} loading={importLoading} disabled={importData.some(row => row.unmatchedModules.length > 0 || row.unavailableModules.length > 0)}>
                   确认导入
                 </Button>
               </Space>
