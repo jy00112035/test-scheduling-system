@@ -66,6 +66,9 @@ public class TestDemand {
     @Transient
     private Boolean manpowerFullySatisfied;
 
+    @Transient
+    private Boolean requiresHistoricalClassification;
+
     @Version
     @Column(name = "lock_version")
     private Long lockVersion;

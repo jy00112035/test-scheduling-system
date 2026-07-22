@@ -65,8 +65,8 @@ export interface DemandItem {
   manpowerDetails?: ManpowerDetail[];
   specialModuleDemands?: DemandSpecialModule[];
   manpowerSummary?: ManpowerSummary[];
-  manpowerFullySatisfied?: boolean | null;
-  requiresHistoricalClassification?: boolean | null;
+  manpowerFullySatisfied: boolean;
+  requiresHistoricalClassification: boolean;
   createdAt?: string;
   updatedAt?: string;
 }

@@ -298,7 +298,7 @@ public class TestDemandService {
         }
         List<DemandManpowerDetail> details = detailRepository.findByDemandId(demand.getId());
         List<DemandSpecialModule> specials = specialModuleService.findByDemandId(demand.getId());
-        applyEnrichment(demand, details, specials);
+        applyEnrichment(demand, details, specials, fulfillmentService.calculate(demand));
         return demand;
     }
 
@@ -328,22 +328,28 @@ public class TestDemandService {
     private void applyEnrichment(
             TestDemand demand,
             List<DemandManpowerDetail> details,
-            List<DemandSpecialModule> specials) {
-        demand.setManpowerDetails(details);
-        demand.setSpecialModuleDemands(specials);
-        demand.setManpowerSummary(specialModuleService.summarize(details, specials));
-        demand.setManpowerFullySatisfied(fulfillmentService.calculate(demand).fullySatisfied());
-    }
-
-    private void applyEnrichment(
-            TestDemand demand,
-            List<DemandManpowerDetail> details,
             List<DemandSpecialModule> specials,
             DemandFulfillmentResponse fulfillment) {
         demand.setManpowerDetails(details);
         demand.setSpecialModuleDemands(specials);
         demand.setManpowerSummary(specialModuleService.summarize(details, specials));
-        demand.setManpowerFullySatisfied(fulfillment != null && fulfillment.fullySatisfied());
+        if (fulfillment == null) {
+            throw new IllegalStateException("需求人力满足状态缺失");
+        }
+        Map<Long, DemandFulfillmentResponse.SpecialModuleSummary> specialSummaryById =
+            fulfillment.specialModules().stream().collect(java.util.stream.Collectors.toMap(
+                DemandFulfillmentResponse.SpecialModuleSummary::demandSpecialModuleId,
+                java.util.function.Function.identity()));
+        for (DemandSpecialModule special : specials) {
+            DemandFulfillmentResponse.SpecialModuleSummary summary = specialSummaryById.get(special.getId());
+            if (summary == null) {
+                throw new IllegalStateException("特殊模块人力满足状态缺失: " + special.getId());
+            }
+            special.setAllocatedManpower(summary.allocated());
+            special.setRemainingManpower(summary.remaining());
+        }
+        demand.setManpowerFullySatisfied(fulfillment.fullySatisfied());
+        demand.setRequiresHistoricalClassification(fulfillment.requiresHistoricalClassification());
     }
 
     private boolean quotasChanged(

@@ -1,6 +1,7 @@
 package com.testscheduling.controller;
 
 import com.testscheduling.config.GlobalExceptionHandler;
+import com.testscheduling.entity.DemandSpecialModule;
 import com.testscheduling.entity.TestDemand;
 import com.testscheduling.exception.BusinessException;
 import com.testscheduling.service.TestDemandService;
@@ -11,10 +12,14 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.math.BigDecimal;
+import java.util.List;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -61,5 +66,30 @@ class TestDemandControllerTest {
             .andExpect(jsonPath("$.code").value(400))
             .andExpect(jsonPath("$.data.errorCode")
                 .value("MODULE_DISABLED_FOR_NEW_DEMAND"));
+    }
+
+    @Test
+    void pendingDemandSerializesAuthoritativeSpecialAllocationAndHistoricalFlag() throws Exception {
+        TestDemand demand = new TestDemand();
+        demand.setId(1001L);
+        demand.setManpowerFullySatisfied(false);
+        demand.setRequiresHistoricalClassification(true);
+        DemandSpecialModule special = new DemandSpecialModule();
+        special.setId(501L);
+        special.setDemandId(1001L);
+        special.setModuleId(11L);
+        special.setManpowerDemand(new BigDecimal("2.0"));
+        special.setAllocatedManpower(new BigDecimal("0.5"));
+        special.setRemainingManpower(new BigDecimal("1.5"));
+        demand.setSpecialModuleDemands(List.of(special));
+        when(service.findPendingAndScheduled()).thenReturn(List.of(demand));
+
+        mockMvc.perform(get("/api/demands/pending"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data[0].manpowerFullySatisfied").value(false))
+            .andExpect(jsonPath("$.data[0].requiresHistoricalClassification").value(true))
+            .andExpect(jsonPath("$.data[0].specialModuleDemands[0].manpowerDemand").value(2.0))
+            .andExpect(jsonPath("$.data[0].specialModuleDemands[0].allocatedManpower").value(0.5))
+            .andExpect(jsonPath("$.data[0].specialModuleDemands[0].remainingManpower").value(1.5));
     }
 }

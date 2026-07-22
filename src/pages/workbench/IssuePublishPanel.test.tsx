@@ -15,6 +15,7 @@ describe('IssuePublishPanel backend fulfillment', () => {
         manpowerDemand: 5,
         versionType: '维护',
         status: 'pending',
+        manpowerFullySatisfied: false,
         requiresHistoricalClassification: true,
         manpowerDetails: [{ id: 301, testType: '功能测试', manpowerDemand: 5 }],
         manpowerSummary: [{
@@ -44,6 +45,20 @@ describe('IssuePublishPanel backend fulfillment', () => {
           reasonCode: 'INSUFFICIENT_CAPACITY',
           reason: '通用人力可用容量不足',
         }],
+        specialModules: [{
+          demandManpowerDetailId: 301, demandSpecialModuleId: 501,
+          moduleId: 11, moduleName: '支付模块', testType: '功能测试',
+          required: 2, allocated: 1, remaining: 1,
+        }],
+        summary: [{
+          demandManpowerDetailId: 301, testType: '功能测试', required: 5,
+          specialRequired: 2, generalRequired: 3,
+          specialAllocated: 1, generalAllocated: 1,
+          specialRemaining: 1, generalRemaining: 2, shortage: 3,
+        }],
+        totalRequired: 5,
+        totalAllocated: 2,
+        totalShortage: 3,
       }]}
       publishFailures={[{
         demandId: 1001,
@@ -75,6 +90,7 @@ describe('IssuePublishPanel backend fulfillment', () => {
         manpowerDemand: 1,
         versionType: '维护',
         status: 'pending',
+        manpowerFullySatisfied: false,
         requiresHistoricalClassification: true,
       }]}
     />);

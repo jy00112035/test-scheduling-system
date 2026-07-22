@@ -92,6 +92,27 @@ class DemandFulfillmentServiceTest {
     }
 
     @Test
+    void reportsZeroPartialAndFullSpecialAllocationsByOwnership() {
+        DemandManpowerDetail group = group(301L, "功能测试", "7.0");
+        DemandSpecialModule zero = special(501L, 11L, "1.0", "支付模块");
+        DemandSpecialModule partial = special(502L, 12L, "2.0", "消息模块");
+        DemandSpecialModule full = special(503L, 13L, "1.0", "账户模块");
+        given(1001L, List.of(group), List.of(zero, partial, full), List.of(
+            schedule(502L, 301L, 50),
+            schedule(503L, 301L, 100),
+            schedule(999L, 301L, 100)));
+
+        var result = service.calculate(1001L);
+
+        assertEquals(List.of(501L, 502L, 503L), result.specialModules().stream()
+            .map(DemandFulfillmentResponse.SpecialModuleSummary::demandSpecialModuleId)
+            .toList());
+        assertSpecialSummary(result, 501L, "1.0", "0", "1.0");
+        assertSpecialSummary(result, 502L, "2.0", "0.5", "1.5");
+        assertSpecialSummary(result, 503L, "1.0", "1.0", "0.0");
+    }
+
+    @Test
     void overAllocationClampsShortageToZero() {
         DemandManpowerDetail group = group(301L, "功能测试", "4.0");
         DemandSpecialModule special = special(501L, 11L, "1.0", "支付模块");
@@ -199,6 +220,21 @@ class DemandFulfillmentServiceTest {
         verify(moduleRepository, times(1)).findAllById(anyList());
         verify(detailRepository, never()).findByDemandId(any(Long.class));
         verify(specialRepository, never()).findByDemandIdOrderByIdAsc(any(Long.class));
+    }
+
+    private void assertSpecialSummary(
+            DemandFulfillmentResponse result,
+            Long specialId,
+            String required,
+            String allocated,
+            String remaining) {
+        DemandFulfillmentResponse.SpecialModuleSummary summary = result.specialModules().stream()
+            .filter(candidate -> candidate.demandSpecialModuleId().equals(specialId))
+            .findFirst()
+            .orElseThrow();
+        assertEquals(0, new BigDecimal(required).compareTo(summary.required()));
+        assertEquals(0, new BigDecimal(allocated).compareTo(summary.allocated()));
+        assertEquals(0, new BigDecimal(remaining).compareTo(summary.remaining()));
     }
 
     @Test

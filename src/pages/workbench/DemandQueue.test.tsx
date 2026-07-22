@@ -8,8 +8,10 @@ import {
 } from './workbenchCalculations';
 import type { DemandItem } from './workbenchTypes';
 
-function demand(overrides: Partial<DemandItem> = {}): DemandItem {
-  return {
+function demand(overrides: Partial<Omit<DemandItem, 'requiresHistoricalClassification'>> & {
+  requiresHistoricalClassification?: boolean | null;
+} = {}): DemandItem {
+  const item = {
     id: 1001,
     product: '示例产品',
     version: 'v2.0.0',
@@ -18,7 +20,13 @@ function demand(overrides: Partial<DemandItem> = {}): DemandItem {
     manpowerDemand: 8,
     versionType: '维护',
     status: 'pending',
+    manpowerFullySatisfied: false,
+    requiresHistoricalClassification: false,
     ...overrides,
+  };
+  return {
+    ...item,
+    requiresHistoricalClassification: item.requiresHistoricalClassification ?? false,
   };
 }
 

@@ -34,7 +34,7 @@ const editDemand: TestDemand = {
   priority: '高', testDeviceCount: 1, manpowerDetails: [
     { testType: '功能测试', manpowerDemand: 2 }, { testType: '历史小组', manpowerDemand: 1, remark: '历史备注' },
   ],
-  specialModuleDemands: [{ id: 1, demandId: 7, moduleId: 11, manpowerDemand: 1, moduleName: '支付模块', testType: '功能测试', enabled: true, createdAt: '', updatedAt: '', allocatedManpower: null, remainingManpower: null }],
+  specialModuleDemands: [{ id: 1, demandId: 7, moduleId: 11, manpowerDemand: 1, moduleName: '支付模块', testType: '功能测试', enabled: true, createdAt: '', updatedAt: '', allocatedManpower: 0, remainingManpower: 1 }],
 };
 
 function renderPage(props: Partial<React.ComponentProps<typeof TestDemandSubmit>> = {}) {

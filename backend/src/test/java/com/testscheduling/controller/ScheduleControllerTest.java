@@ -4,6 +4,7 @@ import com.testscheduling.config.GlobalExceptionHandler;
 import com.testscheduling.dto.ScheduleDeleteScope;
 import com.testscheduling.dto.BatchPublishResponse;
 import com.testscheduling.dto.ScheduleRecommendationResponse;
+import com.testscheduling.dto.DemandFulfillmentResponse;
 import com.testscheduling.entity.Schedule;
 import com.testscheduling.exception.BusinessException;
 import com.testscheduling.security.RequestRoleGuard;
@@ -20,6 +21,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.LocalDate;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
@@ -347,6 +349,44 @@ class ScheduleControllerTest {
             .andExpect(jsonPath("$.code").value(200));
 
         verify(recommendationService).recommend(any());
+    }
+
+    @Test
+    void recommendationEndpointSerializesAuthoritativeTotalsAndGapReasons() throws Exception {
+        DemandFulfillmentResponse.SpecialModuleSummary special =
+            new DemandFulfillmentResponse.SpecialModuleSummary(
+                301L, 501L, 11L, "支付模块", "功能测试",
+                new BigDecimal("2.0"), new BigDecimal("0.5"), new BigDecimal("1.5"));
+        DemandFulfillmentResponse.Summary summary = new DemandFulfillmentResponse.Summary(
+            301L, "功能测试", new BigDecimal("5.0"), new BigDecimal("2.0"),
+            new BigDecimal("3.0"), new BigDecimal("0.5"), new BigDecimal("3.0"),
+            new BigDecimal("1.5"), BigDecimal.ZERO, new BigDecimal("1.5"));
+        ScheduleRecommendationResponse.Gap gap = new ScheduleRecommendationResponse.Gap(
+            301L, 501L, new BigDecimal("1.5"),
+            "NO_QUALIFIED_STAFF", "没有熟悉该模块的可用人员");
+        ScheduleRecommendationResponse.Fulfillment fulfillment =
+            new ScheduleRecommendationResponse.Fulfillment(
+                1001L, false, true, List.of(gap), List.of(), List.of(special),
+                List.of(summary), new BigDecimal("5.0"), new BigDecimal("3.5"),
+                new BigDecimal("1.5"));
+        when(recommendationService.recommend(any())).thenReturn(
+            new ScheduleRecommendationResponse(List.of(), List.of(fulfillment)));
+
+        mockMvc.perform(authorized(post("/api/schedules/recommend/draft"), "projectManager")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"mode\":\"FULL_DEMAND\",\"demandIds\":[1001]}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.fulfillment[0].requiresHistoricalClassification").value(true))
+            .andExpect(jsonPath("$.data.fulfillment[0].specialModules[0].remaining").value(1.5))
+            .andExpect(jsonPath("$.data.fulfillment[0].summary[0].specialRemaining").value(1.5))
+            .andExpect(jsonPath("$.data.fulfillment[0].summary[0].generalRemaining").value(0.0))
+            .andExpect(jsonPath("$.data.fulfillment[0].totalRequired").value(5.0))
+            .andExpect(jsonPath("$.data.fulfillment[0].totalAllocated").value(3.5))
+            .andExpect(jsonPath("$.data.fulfillment[0].totalShortage").value(1.5))
+            .andExpect(jsonPath("$.data.fulfillment[0].specialModuleGaps[0].reasonCode")
+                .value("NO_QUALIFIED_STAFF"))
+            .andExpect(jsonPath("$.data.fulfillment[0].specialModuleGaps[0].reason")
+                .value("没有熟悉该模块的可用人员"));
     }
 
     @Test

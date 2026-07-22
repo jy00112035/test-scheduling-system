@@ -244,8 +244,7 @@ export function getAllocationTargets(
 
   for (const special of demand.specialModuleDemands || []) {
     const detail = detailByTestType.get(special.testType);
-    const remaining = special.remainingManpower
-      ?? Math.max(0, Number(special.manpowerDemand) - Number(special.allocatedManpower || 0));
+    const remaining = special.remainingManpower;
     if (detail?.id == null || remaining <= 0) continue;
     targets.push({
       kind: 'special',

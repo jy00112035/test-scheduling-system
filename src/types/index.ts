@@ -68,8 +68,8 @@ export interface DemandSpecialModule {
   moduleName: string;
   testType: string;
   enabled: boolean;
-  allocatedManpower: number | null;
-  remainingManpower: number | null;
+  allocatedManpower: number;
+  remainingManpower: number;
 }
 
 export interface DemandSpecialModuleWriteRequest {
@@ -139,7 +139,36 @@ export interface ScheduleRecommendationResponse {
       reasonCode: string;
       reason: string;
     }>;
+    specialModules: SpecialModuleFulfillment[];
+    summary: ManpowerFulfillmentSummary[];
+    totalRequired: number;
+    totalAllocated: number;
+    totalShortage: number;
   }>;
+}
+
+export interface SpecialModuleFulfillment {
+  demandManpowerDetailId: number;
+  demandSpecialModuleId: number;
+  moduleId: number;
+  moduleName: string;
+  testType: string;
+  required: number;
+  allocated: number;
+  remaining: number;
+}
+
+export interface ManpowerFulfillmentSummary {
+  demandManpowerDetailId: number;
+  testType: string;
+  required: number;
+  specialRequired: number;
+  generalRequired: number;
+  specialAllocated: number;
+  generalAllocated: number;
+  specialRemaining: number;
+  generalRemaining: number;
+  shortage: number;
 }
 
 export interface BackendSchedule {
@@ -189,16 +218,8 @@ export interface DemandFulfillment {
     allocated: number;
     shortage: number;
   }>;
-  summary: Array<{
-    demandManpowerDetailId: number;
-    testType: string;
-    required: number;
-    specialRequired: number;
-    generalRequired: number;
-    specialAllocated: number;
-    generalAllocated: number;
-    shortage: number;
-  }>;
+  specialModules: SpecialModuleFulfillment[];
+  summary: ManpowerFulfillmentSummary[];
   totalRequired: number;
   totalAllocated: number;
   totalShortage: number;

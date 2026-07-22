@@ -112,6 +112,18 @@ class ScheduleRecommendationServiceTest {
                 .demandSpecialModuleId());
         assertEquals(0, result.fulfillment().get(0).generalGaps().size());
         assertEquals(detail.getId(), result.generatedSchedules().get(0).getDemandManpowerDetailId());
+        ScheduleRecommendationResponse.Fulfillment fulfillment = result.fulfillment().getFirst();
+        assertEquals(0, new BigDecimal("2.0").compareTo(fulfillment.totalRequired()));
+        assertEquals(0, new BigDecimal("1.0").compareTo(fulfillment.totalAllocated()));
+        assertEquals(0, new BigDecimal("1.0").compareTo(fulfillment.totalShortage()));
+        assertEquals(0, new BigDecimal("0.0").compareTo(
+            fulfillment.specialModules().getFirst().allocated()));
+        assertEquals(0, new BigDecimal("1.0").compareTo(
+            fulfillment.specialModules().getFirst().remaining()));
+        assertEquals(0, new BigDecimal("1.0").compareTo(
+            fulfillment.summary().getFirst().specialRemaining()));
+        assertEquals(0, new BigDecimal("0.0").compareTo(
+            fulfillment.summary().getFirst().generalRemaining()));
     }
 
     @Test
@@ -431,6 +443,10 @@ class ScheduleRecommendationServiceTest {
         assertEquals(2, result.generatedSchedules().size());
         assertFalse(result.fulfillment().get(0).fullySatisfied());
         assertTrue(result.fulfillment().get(0).requiresHistoricalClassification());
+        assertEquals(0, new BigDecimal("2.0").compareTo(
+            result.fulfillment().getFirst().totalRequired()));
+        assertEquals(0, new BigDecimal("4.0").compareTo(
+            result.fulfillment().getFirst().totalAllocated()));
         assertEquals(detail.getId(), result.generatedSchedules().get(0).getDemandManpowerDetailId());
         assertEquals(special.getId(), result.generatedSchedules().get(0).getDemandSpecialModuleId());
     }

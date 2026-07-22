@@ -123,7 +123,7 @@ public class DemandFulfillmentService {
             .reduce(0, Integer::sum));
         BigDecimal shortage = shortage(required, allocated);
         return new DemandFulfillmentResponse(
-            demand.getId(), shortage.signum() == 0, false, List.of(), List.of(), List.of(),
+            demand.getId(), shortage.signum() == 0, false, List.of(), List.of(), List.of(), List.of(),
             required, allocated, shortage);
     }
 
@@ -139,6 +139,7 @@ public class DemandFulfillmentService {
             && schedules.stream().anyMatch(this::isHistoricalSchedule);
         List<DemandFulfillmentResponse.Gap> specialGaps = new ArrayList<>();
         List<DemandFulfillmentResponse.Gap> generalGaps = new ArrayList<>();
+        List<DemandFulfillmentResponse.SpecialModuleSummary> specialSummaries = new ArrayList<>();
         List<DemandFulfillmentResponse.Summary> summaries = new ArrayList<>();
         BigDecimal totalRequired = BigDecimal.ZERO;
         BigDecimal totalAllocated = percentToDays(schedules.stream()
@@ -164,6 +165,10 @@ public class DemandFulfillmentService {
                 specialAllocated = specialAllocated.add(allocated);
                 BigDecimal gap = shortage(special.getManpowerDemand(), allocated);
                 specialShortage = specialShortage.add(gap);
+                specialSummaries.add(new DemandFulfillmentResponse.SpecialModuleSummary(
+                    detail.getId(), special.getId(), special.getModuleId(),
+                    moduleName(special, modules), detail.getTestType(),
+                    value(special.getManpowerDemand()), allocated, gap));
                 if (gap.signum() > 0) {
                     specialGaps.add(new DemandFulfillmentResponse.Gap(
                         detail.getId(), special.getId(), special.getModuleId(),
@@ -185,6 +190,7 @@ public class DemandFulfillmentService {
             summaries.add(new DemandFulfillmentResponse.Summary(
                 detail.getId(), detail.getTestType(), value(detail.getManpowerDemand()),
                 specialRequired, generalRequired, specialAllocated, generalAllocated,
+                specialShortage, generalGap,
                 specialShortage.add(generalGap)));
             totalRequired = totalRequired.add(value(detail.getManpowerDemand()));
             totalAllocated = totalAllocated.add(specialAllocated).add(generalAllocated);
@@ -197,7 +203,8 @@ public class DemandFulfillmentService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add));
         return new DemandFulfillmentResponse(
             demandId, !historical && totalShortage.signum() == 0, historical,
-            specialGaps, generalGaps, summaries, totalRequired, totalAllocated, totalShortage);
+            specialGaps, generalGaps, specialSummaries, summaries,
+            totalRequired, totalAllocated, totalShortage);
     }
 
     private Map<Long, TestModuleConfig> loadModules(List<DemandSpecialModule> specials) {

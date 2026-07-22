@@ -80,8 +80,10 @@ class TestDemandServiceTest {
         assertEquals(payment.getModuleName(),
             result.getSpecialModuleDemands().getFirst().getModuleName());
         assertEquals("功能测试", result.getSpecialModuleDemands().getFirst().getTestType());
-        assertNull(result.getSpecialModuleDemands().getFirst().getAllocatedManpower());
-        assertNull(result.getSpecialModuleDemands().getFirst().getRemainingManpower());
+        assertEquals(0, BigDecimal.ZERO.compareTo(
+            result.getSpecialModuleDemands().getFirst().getAllocatedManpower()));
+        assertEquals(0, new BigDecimal("2.0").compareTo(
+            result.getSpecialModuleDemands().getFirst().getRemainingManpower()));
         ManpowerSummary summary = result.getManpowerSummary().getFirst();
         assertEquals(new BigDecimal("4.5"), summary.generalManpower());
         assertFalse(result.getManpowerFullySatisfied());
@@ -142,6 +144,43 @@ class TestDemandServiceTest {
         assertEquals(0, new BigDecimal("2.0")
             .compareTo(enriched.getManpowerSummary().getFirst().generalManpower()));
         assertTrue(enriched.getManpowerFullySatisfied());
+    }
+
+    @Test
+    void enrichmentTransitionsHistoricalFlagAfterScheduleClassification() {
+        TestModuleConfig module = saveModule("历史归类响应模块", true);
+        TestDemand request = demand("历史归类响应", "2.0");
+        request.setSpecialModuleDemands(List.of(special(module.getId(), "1.0")));
+        TestDemand created = service.create(request);
+        DemandManpowerDetail detail = created.getManpowerDetails().getFirst();
+        DemandSpecialModule special = created.getSpecialModuleDemands().getFirst();
+        Schedule historical = new Schedule();
+        historical.setDemandId(created.getId());
+        historical.setPercentage(100);
+        historical = scheduleRepository.saveAndFlush(historical);
+
+        TestDemand before = service.findById(created.getId());
+
+        assertTrue(before.getRequiresHistoricalClassification());
+        assertFalse(before.getManpowerFullySatisfied());
+
+        historical.setDemandManpowerDetailId(detail.getId());
+        historical.setDemandSpecialModuleId(special.getId());
+        scheduleRepository.saveAndFlush(historical);
+        Schedule general = new Schedule();
+        general.setDemandId(created.getId());
+        general.setDemandManpowerDetailId(detail.getId());
+        general.setPercentage(100);
+        scheduleRepository.saveAndFlush(general);
+
+        TestDemand after = service.findById(created.getId());
+
+        assertFalse(after.getRequiresHistoricalClassification());
+        assertTrue(after.getManpowerFullySatisfied());
+        assertEquals(0, new BigDecimal("1.0").compareTo(
+            after.getSpecialModuleDemands().getFirst().getAllocatedManpower()));
+        assertEquals(0, BigDecimal.ZERO.compareTo(
+            after.getSpecialModuleDemands().getFirst().getRemainingManpower()));
     }
 
     @Test

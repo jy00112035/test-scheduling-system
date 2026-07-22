@@ -245,14 +245,7 @@ const ScheduleWorkbench: React.FC = () => {
           published: s.published ?? false,
         };
       });
-      const normalizedDemands: DemandItem[] = demandsData.map((demand: DemandItem) => ({
-        ...demand,
-        requiresHistoricalClassification: demand.requiresHistoricalClassification
-          ?? ((demand.specialModuleDemands?.length || 0) > 0
-            && normalizedSchedules.some(schedule => schedule.demandId === demand.id
-              && schedule.demandManpowerDetailId == null
-              && schedule.demandSpecialModuleId == null)),
-      }));
+      const normalizedDemands: DemandItem[] = demandsData;
       const normalizedStaffs: StaffItem[] = staffData.map((staff: StaffItem & { familiarModules?: unknown }) => ({
         ...staff,
         familiarModules: Array.isArray(staff.familiarModules) ? staff.familiarModules : [],

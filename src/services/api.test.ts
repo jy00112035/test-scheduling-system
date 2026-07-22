@@ -63,6 +63,16 @@ const completeFulfillmentResponse: DemandFulfillment = {
     allocated: 0,
     shortage: 1,
   }],
+  specialModules: [{
+    demandManpowerDetailId: 30,
+    demandSpecialModuleId: 40,
+    moduleId: 50,
+    moduleName: '支付模块',
+    testType: '功能测试',
+    required: 2,
+    allocated: 1,
+    remaining: 1,
+  }],
   summary: [{
     demandManpowerDetailId: 30,
     testType: '功能测试',
@@ -71,6 +81,8 @@ const completeFulfillmentResponse: DemandFulfillment = {
     generalRequired: 1,
     specialAllocated: 1,
     generalAllocated: 0,
+    specialRemaining: 1,
+    generalRemaining: 1,
     shortage: 2,
   }],
   totalRequired: 3,
@@ -105,7 +117,9 @@ const incompleteEnrichedModule: DemandSpecialModule = {
   testType: null,
   // @ts-expect-error enriched module metadata is populated before the response is serialized
   enabled: null,
+  // @ts-expect-error enriched allocation is authoritative and never null
   allocatedManpower: null,
+  // @ts-expect-error enriched remaining manpower is authoritative and never null
   remainingManpower: null,
 };
 

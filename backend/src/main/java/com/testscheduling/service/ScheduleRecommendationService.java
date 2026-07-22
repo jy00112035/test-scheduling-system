@@ -234,7 +234,9 @@ public class ScheduleRecommendationService {
             com.testscheduling.dto.DemandFulfillmentResponse calculated = authoritative.get(demand.getId());
             return new ScheduleRecommendationResponse.Fulfillment(demand.getId(), calculated.fullySatisfied(),
                     calculated.requiresHistoricalClassification(),
-                    toGaps(specialGaps), toGaps(generalGaps));
+                    toGaps(specialGaps), toGaps(generalGaps),
+                    calculated.specialModules(), calculated.summary(),
+                    calculated.totalRequired(), calculated.totalAllocated(), calculated.totalShortage());
         }).toList();
         return new ScheduleRecommendationResponse(persisted, fulfillment);
     }

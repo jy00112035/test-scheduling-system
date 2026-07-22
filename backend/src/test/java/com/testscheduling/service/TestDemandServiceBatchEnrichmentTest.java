@@ -16,6 +16,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -71,6 +74,52 @@ class TestDemandServiceBatchEnrichmentTest {
         verify(fulfillmentService, never()).calculate(org.mockito.ArgumentMatchers.any(TestDemand.class));
     }
 
+    @Test
+    void listEnrichmentCopiesSpecialAllocationsAndHistoricalFlagsFromFulfillment() {
+        TestDemand historical = demand(1001L);
+        TestDemand classified = demand(1002L);
+        TestDemandRepository demandRepository = mock(TestDemandRepository.class);
+        DemandManpowerDetailRepository detailRepository = mock(DemandManpowerDetailRepository.class);
+        DemandSpecialModuleService specialService = mock(DemandSpecialModuleService.class);
+        DemandFulfillmentService fulfillmentService = mock(DemandFulfillmentService.class);
+        when(demandRepository.findByStatusIn(anyList())).thenReturn(List.of(historical, classified));
+        DemandManpowerDetail historicalDetail = detail(1001L, 301L);
+        DemandManpowerDetail classifiedDetail = detail(1002L, 302L);
+        DemandSpecialModule historicalSpecial = special(1001L, 501L);
+        DemandSpecialModule classifiedSpecial = special(1002L, 502L);
+        Map<Long, List<DemandManpowerDetail>> details = Map.of(
+            1001L, List.of(historicalDetail), 1002L, List.of(classifiedDetail));
+        Map<Long, List<DemandSpecialModule>> specials = Map.of(
+            1001L, List.of(historicalSpecial), 1002L, List.of(classifiedSpecial));
+        when(detailRepository.findByDemandIdIn(List.of(1001L, 1002L)))
+            .thenReturn(List.of(historicalDetail, classifiedDetail));
+        when(specialService.findByDemandIds(List.of(1001L, 1002L))).thenReturn(specials);
+        when(specialService.summarize(anyList(), anyList())).thenReturn(List.of());
+        when(fulfillmentService.calculateBatch(
+            List.of(historical, classified), details, specials)).thenReturn(Map.of(
+                1001L, fulfillment(1001L, false, true, 301L, 501L, "0.5", "1.5"),
+                1002L, fulfillment(1002L, true, false, 302L, 502L, "2.0", "0.0")));
+
+        TestDemandService service = new TestDemandService(
+            demandRepository, detailRepository, specialService, mock(ScheduleRepository.class),
+            mock(AuditLogService.class), fulfillmentService);
+
+        List<TestDemand> result = service.findPendingAndScheduled();
+
+        assertFalse(result.get(0).getManpowerFullySatisfied());
+        assertTrue(result.get(0).getRequiresHistoricalClassification());
+        assertEquals(0, new BigDecimal("0.5").compareTo(
+            result.get(0).getSpecialModuleDemands().getFirst().getAllocatedManpower()));
+        assertEquals(0, new BigDecimal("1.5").compareTo(
+            result.get(0).getSpecialModuleDemands().getFirst().getRemainingManpower()));
+        assertTrue(result.get(1).getManpowerFullySatisfied());
+        assertFalse(result.get(1).getRequiresHistoricalClassification());
+        assertEquals(0, new BigDecimal("2.0").compareTo(
+            result.get(1).getSpecialModuleDemands().getFirst().getAllocatedManpower()));
+        assertEquals(0, new BigDecimal("0.0").compareTo(
+            result.get(1).getSpecialModuleDemands().getFirst().getRemainingManpower()));
+    }
+
     private static TestDemand demand(Long id) {
         TestDemand demand = new TestDemand();
         demand.setId(id);
@@ -85,6 +134,35 @@ class TestDemandServiceBatchEnrichmentTest {
         detail.setTestType("功能测试");
         detail.setManpowerDemand(new BigDecimal("2.0"));
         return detail;
+    }
+
+    private static DemandSpecialModule special(Long demandId, Long id) {
+        DemandSpecialModule special = new DemandSpecialModule();
+        special.setDemandId(demandId);
+        special.setId(id);
+        special.setModuleId(id + 100L);
+        special.setManpowerDemand(new BigDecimal("2.0"));
+        special.setModuleName("模块 " + id);
+        special.setTestType("功能测试");
+        return special;
+    }
+
+    private static DemandFulfillmentResponse fulfillment(
+            Long demandId,
+            boolean fullySatisfied,
+            boolean historical,
+            Long detailId,
+            Long specialId,
+            String allocated,
+            String remaining) {
+        return new DemandFulfillmentResponse(
+            demandId, fullySatisfied, historical, List.of(), List.of(), List.of(
+                new DemandFulfillmentResponse.SpecialModuleSummary(
+                    detailId, specialId, specialId + 100L, "模块 " + specialId,
+                    "功能测试", new BigDecimal("2.0"),
+                    new BigDecimal(allocated), new BigDecimal(remaining))),
+            List.of(), new BigDecimal("2.0"), new BigDecimal(allocated),
+            new BigDecimal(remaining));
     }
 
     private static DemandFulfillmentResponse fulfilled(Long demandId) {
