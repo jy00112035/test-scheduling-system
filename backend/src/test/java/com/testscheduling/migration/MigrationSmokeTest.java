@@ -42,13 +42,23 @@ class MigrationSmokeTest {
             () -> assertColumnExists("TEST_MODULE_CONFIG", "LOCK_VERSION")
         );
 
-        assertEquals(List.of("1", "2"), jdbc.queryForList(
+        assertEquals(List.of("1", "2", "3"), jdbc.queryForList(
             "select \"version\" from \"flyway_schema_history\" "
                 + "where \"success\" = true and \"type\" = 'SQL' order by \"installed_rank\"",
             String.class));
         assertEquals(0, jdbc.queryForObject(
             "select count(*) from \"flyway_schema_history\" where \"type\" = 'BASELINE'",
             Integer.class));
+    }
+
+    @Test
+    void createsScheduleIndexesForEligibilityQueries() {
+        assertAll(
+            () -> assertIndexExists("IDX_SCHEDULE_DEMAND_ID"),
+            () -> assertIndexExists("IDX_SCHEDULE_STAFF_DATE"),
+            () -> assertIndexExists("IDX_SCHEDULE_SPECIAL_MODULE_ID"),
+            () -> assertIndexExists("IDX_SCHEDULE_MANPOWER_DETAIL_ID")
+        );
     }
 
     @Test
@@ -99,5 +109,11 @@ class MigrationSmokeTest {
         assertEquals(1, jdbc.queryForObject(
             "select count(*) from information_schema.columns where table_name = ? and column_name = ?",
             Integer.class, tableName, columnName));
+    }
+
+    private void assertIndexExists(String indexName) {
+        assertEquals(1, jdbc.queryForObject(
+            "select count(*) from information_schema.indexes where index_name = ?",
+            Integer.class, indexName));
     }
 }

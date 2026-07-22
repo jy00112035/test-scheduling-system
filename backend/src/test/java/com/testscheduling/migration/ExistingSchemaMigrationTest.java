@@ -44,15 +44,15 @@ class ExistingSchemaMigrationTest {
                 .migrate()
                 .migrationsExecuted;
 
-            assertEquals(1, migrationsExecuted);
-            assertEquals(3, jdbc.queryForObject(
+            assertEquals(2, migrationsExecuted);
+            assertEquals(4, jdbc.queryForObject(
                 "select count(*) from \"flyway_schema_history\" where \"success\" = true",
                 Integer.class));
             assertEquals(1, jdbc.queryForObject(
                 "select count(*) from \"flyway_schema_history\" "
                     + "where \"version\" is null and \"type\" = 'TABLE'",
                 Integer.class));
-            assertEquals(List.of("1:BASELINE", "2:SQL"), jdbc.query(
+            assertEquals(List.of("1:BASELINE", "2:SQL", "3:SQL"), jdbc.query(
                 "select \"version\", \"type\" from \"flyway_schema_history\" "
                     + "where \"success\" = true and \"version\" is not null "
                     + "order by \"installed_rank\"",
@@ -70,6 +70,9 @@ class ExistingSchemaMigrationTest {
                 "select count(*) from users where username = 'legacy-sentinel' "
                     + "and display_name = 'Legacy User'",
                 Integer.class));
+            assertEquals(1, jdbc.queryForObject(
+                "select count(*) from information_schema.indexes "
+                    + "where index_name = 'IDX_SCHEDULE_STAFF_DATE'", Integer.class));
         }
     }
 }

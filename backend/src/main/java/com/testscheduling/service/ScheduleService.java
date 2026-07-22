@@ -83,13 +83,13 @@ public class ScheduleService {
             throw error("SCHEDULE_REQUIRED", "排班信息不能为空");
         }
         lockScopes(schedules);
-        List<Schedule> saved = new ArrayList<>();
+        ScheduleEligibilityService.ValidationContext context =
+            eligibilityService.prepareContext(schedules);
         for (Schedule schedule : schedules) {
-            eligibilityService.validate(schedule, null);
-            // Query-based eligibility checks must see earlier rows in this transaction.
-            saved.add(scheduleRepository.saveAndFlush(schedule));
+            eligibilityService.validate(schedule, null, context);
+            context.addSchedule(schedule);
         }
-        return saved;
+        return scheduleRepository.saveAll(schedules);
     }
 
     @Transactional
@@ -129,8 +129,13 @@ public class ScheduleService {
     @Transactional
     public Schedule classifyHistorical(
             Long id, Long demandManpowerDetailId, Long demandSpecialModuleId) {
-        Schedule snapshot = findById(id);
-        Schedule existing = lockExisting(id, snapshot.getStaffId());
+        TestDemand demand = demandRepository.findByScheduleIdForUpdate(id)
+            .orElseThrow(() -> error("SCHEDULE_NOT_FOUND", "排班记录不存在"));
+        Schedule existing = scheduleRepository.findByDemandIdForUpdate(demand.getId()).stream()
+            .filter(schedule -> Objects.equals(schedule.getId(), id))
+            .findFirst()
+            .orElseThrow(() -> error("SCHEDULE_NOT_FOUND", "排班记录不存在"));
+        lockStaffIds(Collections.singletonList(existing.getStaffId()));
         if (existing.getDemandManpowerDetailId() != null
                 || existing.getDemandSpecialModuleId() != null) {
             throw error("SCHEDULE_ALREADY_CLASSIFIED", "排班已经完成人力归属");
@@ -147,7 +152,9 @@ public class ScheduleService {
     public void delete(Long id) {
         Schedule snapshot = findById(id);
         lockDemandIds(List.of(snapshot.getDemandId()));
-        Schedule existing = scheduleRepository.findByIdForUpdate(id)
+        Schedule existing = scheduleRepository.findByDemandIdForUpdate(snapshot.getDemandId()).stream()
+            .filter(schedule -> Objects.equals(schedule.getId(), id))
+            .findFirst()
             .orElseThrow(() -> error("SCHEDULE_NOT_FOUND", "排班记录不存在"));
         if (Boolean.TRUE.equals(existing.getPublished())) {
             throw error("PUBLISHED_SCHEDULE_PROTECTED", "已发布排班必须先取消发布或按需求清理全部");
@@ -163,6 +170,7 @@ public class ScheduleService {
     @Transactional
     public void deleteByDemandId(Long demandId, ScheduleDeleteScope scope) {
         lockDemandIds(List.of(demandId));
+        scheduleRepository.findByDemandIdForUpdate(demandId);
         if (scope == ScheduleDeleteScope.ALL) {
             scheduleRepository.deleteByDemandId(demandId);
         } else {
@@ -176,18 +184,18 @@ public class ScheduleService {
 
     @Transactional
     public void publishByDemandId(Long demandId) {
-        TestDemand demand = demandRepository.findById(demandId).orElse(null);
-        if (demand != null && Boolean.TRUE.equals(demand.getConfidential())) {
-            List<Schedule> schedules = scheduleRepository.findByDemandId(demandId);
+        TestDemand demand = demandRepository.findByIdForUpdate(demandId)
+            .orElseThrow(() -> error("DEMAND_NOT_FOUND", "测试需求不存在"));
+        List<Schedule> schedules = scheduleRepository.findByDemandIdForUpdate(demandId);
+        if (Boolean.TRUE.equals(demand.getConfidential())) {
             for (Schedule s : schedules) {
                 validateStaffConfidentialClearance(s.getStaffId(), "无法发布保密项目排班");
             }
         }
-        scheduleRepository.findByDemandId(demandId)
-            .forEach(s -> {
-                s.setPublished(true);
-                scheduleRepository.save(s);
-            });
+        schedules.forEach(s -> {
+            s.setPublished(true);
+            scheduleRepository.save(s);
+        });
     }
 
     private void lockScopes(Collection<Schedule> schedules) {
@@ -266,18 +274,21 @@ public class ScheduleService {
     private void validateStaffConfidentialClearance(Long staffId, String actionMessage) {
         TestStaff staff = testStaffRepository.findById(staffId).orElse(null);
         if (staff == null) {
-            throw new RuntimeException("人员不存在");
+            throw error("STAFF_NOT_FOUND", "人员不存在");
         }
 
         User user = userRepository.findByUsername(staff.getEmpNo()).orElse(null);
         if (user == null || !Boolean.TRUE.equals(user.getConfidentialClearance())) {
-            throw new RuntimeException(staff.getName() + " 不具备保密权限，" + actionMessage);
+            throw error("CONFIDENTIAL_CLEARANCE_REQUIRED",
+                staff.getName() + " 不具备保密权限，" + actionMessage);
         }
     }
 
     @Transactional
     public void unpublishByDemandId(Long demandId) {
-        scheduleRepository.findByDemandId(demandId)
+        demandRepository.findByIdForUpdate(demandId)
+            .orElseThrow(() -> error("DEMAND_NOT_FOUND", "测试需求不存在"));
+        scheduleRepository.findByDemandIdForUpdate(demandId)
             .forEach(s -> {
                 s.setPublished(false);
                 scheduleRepository.save(s);

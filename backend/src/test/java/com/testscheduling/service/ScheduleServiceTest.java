@@ -69,8 +69,10 @@ class ScheduleServiceTest {
         stubLocks(10L, 30L);
         when(demandRepository.findByIdForUpdate(20L)).thenReturn(Optional.of(demand(20L)));
         when(testStaffRepository.findByIdForUpdate(40L)).thenReturn(Optional.of(staff(40L)));
-        when(scheduleRepository.saveAndFlush(any(Schedule.class)))
-            .thenAnswer(invocation -> invocation.getArgument(0));
+        when(scheduleRepository.saveAll(List.of(secondDemand, firstDemand, sameDemand)))
+            .thenReturn(List.of(secondDemand, firstDemand, sameDemand));
+        when(eligibilityService.prepareContext(any())).thenReturn(
+            new ScheduleEligibilityService.ValidationContext());
 
         List<Schedule> result = scheduleService.createBatch(
             List.of(secondDemand, firstDemand, sameDemand));
@@ -82,12 +84,15 @@ class ScheduleServiceTest {
         locks.verify(testStaffRepository).findByIdForUpdate(30L);
         locks.verify(testStaffRepository).findByIdForUpdate(40L);
         InOrder writes = inOrder(eligibilityService, scheduleRepository);
-        writes.verify(eligibilityService).validate(secondDemand, null);
-        writes.verify(scheduleRepository).saveAndFlush(secondDemand);
-        writes.verify(eligibilityService).validate(firstDemand, null);
-        writes.verify(scheduleRepository).saveAndFlush(firstDemand);
-        writes.verify(eligibilityService).validate(sameDemand, null);
-        writes.verify(scheduleRepository).saveAndFlush(sameDemand);
+        writes.verify(eligibilityService).validate(
+            org.mockito.ArgumentMatchers.eq(secondDemand),
+            org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.any());
+        writes.verify(eligibilityService).validate(
+            org.mockito.ArgumentMatchers.eq(firstDemand),
+            org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.any());
+        writes.verify(eligibilityService).validate(
+            org.mockito.ArgumentMatchers.eq(sameDemand),
+            org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -236,9 +241,9 @@ class ScheduleServiceTest {
     void classifyHistoricalCompletesAttributionAndFullyValidates() {
         Schedule historical = schedule(10L, 20L, null, null);
         historical.setId(99L);
-        when(scheduleRepository.findById(99L)).thenReturn(Optional.of(historical));
-        stubLocks(10L, 20L);
-        when(scheduleRepository.findByIdForUpdate(99L)).thenReturn(Optional.of(historical));
+        when(demandRepository.findByScheduleIdForUpdate(99L)).thenReturn(Optional.of(demand(10L)));
+        when(scheduleRepository.findByDemandIdForUpdate(10L)).thenReturn(List.of(historical));
+        when(testStaffRepository.findByIdForUpdate(20L)).thenReturn(Optional.of(staff(20L)));
         when(scheduleRepository.save(historical)).thenReturn(historical);
 
         Schedule result = scheduleService.classifyHistorical(99L, 30L, 50L);
@@ -253,9 +258,9 @@ class ScheduleServiceTest {
     void classifyRejectsScheduleThatAlreadyHasAnyAttribution() {
         Schedule attributed = schedule(10L, 20L, 30L, null);
         attributed.setId(99L);
-        when(scheduleRepository.findById(99L)).thenReturn(Optional.of(attributed));
-        stubLocks(10L, 20L);
-        when(scheduleRepository.findByIdForUpdate(99L)).thenReturn(Optional.of(attributed));
+        when(demandRepository.findByScheduleIdForUpdate(99L)).thenReturn(Optional.of(demand(10L)));
+        when(scheduleRepository.findByDemandIdForUpdate(10L)).thenReturn(List.of(attributed));
+        when(testStaffRepository.findByIdForUpdate(20L)).thenReturn(Optional.of(staff(20L)));
 
         BusinessException error = assertThrows(BusinessException.class,
             () -> scheduleService.classifyHistorical(99L, 30L, 50L));
@@ -271,7 +276,7 @@ class ScheduleServiceTest {
         published.setPublished(true);
         when(scheduleRepository.findById(99L)).thenReturn(Optional.of(published));
         when(demandRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(demand(10L)));
-        when(scheduleRepository.findByIdForUpdate(99L)).thenReturn(Optional.of(published));
+        when(scheduleRepository.findByDemandIdForUpdate(10L)).thenReturn(List.of(published));
 
         BusinessException error = assertThrows(BusinessException.class,
             () -> scheduleService.delete(99L));
@@ -292,6 +297,54 @@ class ScheduleServiceTest {
     }
 
     @Test
+    void classifyUsesLockedScheduleScopeWithoutUnlockedRead() {
+        Schedule historical = schedule(10L, 20L, null, null);
+        historical.setId(99L);
+        when(demandRepository.findByScheduleIdForUpdate(99L)).thenReturn(Optional.of(demand(10L)));
+        when(scheduleRepository.findByDemandIdForUpdate(10L)).thenReturn(List.of(historical));
+        when(testStaffRepository.findByIdForUpdate(20L)).thenReturn(Optional.of(staff(20L)));
+        when(scheduleRepository.save(historical)).thenReturn(historical);
+
+        scheduleService.classifyHistorical(99L, 30L, null);
+
+        verify(scheduleRepository, never()).findById(99L);
+    }
+
+    @Test
+    void publishLocksDemandThenSchedulesInIdOrder() {
+        Schedule first = schedule(10L, 20L, 30L, null);
+        first.setId(2L);
+        Schedule second = schedule(10L, 21L, 30L, null);
+        second.setId(1L);
+        when(demandRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(demand(10L)));
+        when(scheduleRepository.findByDemandIdForUpdate(10L)).thenReturn(List.of(second, first));
+
+        scheduleService.publishByDemandId(10L);
+
+        InOrder order = inOrder(demandRepository, scheduleRepository);
+        order.verify(demandRepository).findByIdForUpdate(10L);
+        order.verify(scheduleRepository).findByDemandIdForUpdate(10L);
+        verify(scheduleRepository).save(second);
+        verify(scheduleRepository).save(first);
+    }
+
+    @Test
+    void batchSavesOnceAfterAllRowsValidate() {
+        Schedule first = schedule(10L, 20L, 30L, null);
+        Schedule second = schedule(10L, 21L, 30L, null);
+        stubLocks(10L, 20L);
+        when(testStaffRepository.findByIdForUpdate(21L)).thenReturn(Optional.of(staff(21L)));
+        when(scheduleRepository.saveAll(List.of(first, second))).thenReturn(List.of(first, second));
+        when(eligibilityService.prepareContext(any())).thenReturn(
+            new ScheduleEligibilityService.ValidationContext());
+
+        scheduleService.createBatch(List.of(first, second));
+
+        verify(scheduleRepository).saveAll(List.of(first, second));
+        verify(scheduleRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
     void publishesConfidentialScheduleWhenStaffUserHasClearance() {
         TestDemand demand = demand(1L);
         demand.setConfidential(true);
@@ -304,8 +357,8 @@ class ScheduleServiceTest {
         Schedule schedule = schedule(1L, 27L, 30L, null);
         schedule.setId(938L);
         schedule.setPublished(false);
-        when(demandRepository.findById(1L)).thenReturn(Optional.of(demand));
-        when(scheduleRepository.findByDemandId(1L)).thenReturn(List.of(schedule));
+        when(demandRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(demand));
+        when(scheduleRepository.findByDemandIdForUpdate(1L)).thenReturn(List.of(schedule));
         when(testStaffRepository.findById(27L)).thenReturn(Optional.of(staff));
         when(userRepository.findByUsername("B-107126")).thenReturn(Optional.of(user));
 

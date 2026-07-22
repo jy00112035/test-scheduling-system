@@ -68,6 +68,61 @@ class ScheduleControllerTest {
     }
 
     @Test
+    void createRejectsMissingSchedulingRole() throws Exception {
+        mockMvc.perform(post("/api/schedules")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(scheduleJson()))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.data.errorCode").value("FORBIDDEN"));
+    }
+
+    @Test
+    void updateRejectsMalformedRoleAttribute() throws Exception {
+        mockMvc.perform(authorized(put("/api/schedules/{id}", 9L), "projectManager")
+                .requestAttr("username", "tester")
+                .requestAttr("roles", "projectManager")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(scheduleJson()))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.data.errorCode").value("FORBIDDEN"));
+    }
+
+    @Test
+    void publishRejectsMissingSchedulingRole() throws Exception {
+        mockMvc.perform(put("/api/schedules/publish/{demandId}", 10L))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.data.errorCode").value("FORBIDDEN"));
+    }
+
+    @Test
+    void unpublishRejectsMissingSchedulingRole() throws Exception {
+        mockMvc.perform(put("/api/schedules/unpublish/{demandId}", 10L))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.data.errorCode").value("FORBIDDEN"));
+    }
+
+    @Test
+    void publishPropagatesStableBusinessErrorShape() throws Exception {
+        doThrow(new BusinessException("DEMAND_NOT_FOUND", "测试需求不存在"))
+            .when(service).publishByDemandId(10L);
+
+        mockMvc.perform(authorized(put("/api/schedules/publish/{demandId}", 10L),
+                "projectManager"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.data.errorCode").value("DEMAND_NOT_FOUND"));
+    }
+
+    @Test
+    void deletePropagatesStableBusinessErrorShape() throws Exception {
+        doThrow(new BusinessException("PUBLISHED_SCHEDULE_PROTECTED", "已发布排班受保护"))
+            .when(service).delete(9L);
+
+        mockMvc.perform(authorized(delete("/api/schedules/{id}", 9L), "fieldAdmin"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.data.errorCode").value("PUBLISHED_SCHEDULE_PROTECTED"));
+    }
+
+    @Test
     void validateReturnsStableErrorForMissingDemandId() throws Exception {
         doThrow(new BusinessException("DEMAND_REQUIRED", "需求ID不能为空"))
             .when(service).validateOnly(any(Schedule.class));
@@ -173,7 +228,7 @@ class ScheduleControllerTest {
         when(service.update(eq(9L), any(Schedule.class))).thenThrow(
             new BusinessException("STAFF_CAPACITY_EXCEEDED", "人员当日容量不足"));
 
-        mockMvc.perform(put("/api/schedules/{id}", 9L)
+        mockMvc.perform(authorized(put("/api/schedules/{id}", 9L), "projectManager")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(scheduleJson()))
             .andExpect(status().isBadRequest())
@@ -185,7 +240,7 @@ class ScheduleControllerTest {
     void batchCreateDelegatesEverySubmittedRow() throws Exception {
         when(service.createBatch(any())).thenReturn(List.of(schedule(), schedule()));
 
-        mockMvc.perform(post("/api/schedules/batch")
+        mockMvc.perform(authorized(post("/api/schedules/batch"), "projectManager")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("[" + scheduleJson() + "," + scheduleJson() + "]"))
             .andExpect(status().isOk())
@@ -200,7 +255,7 @@ class ScheduleControllerTest {
                 "PUBLISHED_SCHEDULE_PROTECTED", "已发布排班受保护"))
             .when(service).delete(9L);
 
-        mockMvc.perform(delete("/api/schedules/{id}", 9L))
+        mockMvc.perform(authorized(delete("/api/schedules/{id}", 9L), "fieldAdmin"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.data.errorCode").value("PUBLISHED_SCHEDULE_PROTECTED"));
     }

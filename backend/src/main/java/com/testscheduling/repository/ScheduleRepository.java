@@ -35,6 +35,17 @@ public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
     @Query("select s from Schedule s where s.id = :id")
     Optional<Schedule> findByIdForUpdate(@Param("id") Long id);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from Schedule s where s.demandId = :demandId order by s.id")
+    List<Schedule> findByDemandIdForUpdate(@Param("demandId") Long demandId);
+
+    @Query("select s from Schedule s where s.staffId in :staffIds "
+        + "and s.date between :startDate and :endDate")
+    List<Schedule> findByStaffIdInAndDateBetween(
+        @Param("staffIds") Collection<Long> staffIds,
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate);
+
     boolean existsByDemandId(Long demandId);
 
     @Query("SELECT s FROM Schedule s WHERE s.date BETWEEN :startDate AND :endDate")

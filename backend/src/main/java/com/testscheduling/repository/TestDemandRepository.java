@@ -26,4 +26,9 @@ public interface TestDemandRepository extends JpaRepository<TestDemand, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select d from TestDemand d where d.id = :id")
     Optional<TestDemand> findByIdForUpdate(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select d from TestDemand d where d.id = "
+        + "(select s.demandId from Schedule s where s.id = :scheduleId)")
+    Optional<TestDemand> findByScheduleIdForUpdate(@Param("scheduleId") Long scheduleId);
 }

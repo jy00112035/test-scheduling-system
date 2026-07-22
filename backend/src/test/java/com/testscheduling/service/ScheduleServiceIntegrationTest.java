@@ -18,6 +18,8 @@ import com.testscheduling.repository.TestStaffModuleRepository;
 import com.testscheduling.repository.TestStaffRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.persistence.EntityManagerFactory;
+import org.hibernate.stat.Statistics;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -38,7 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@SpringBootTest
+@SpringBootTest(properties = "spring.jpa.properties.hibernate.generate_statistics=true")
 class ScheduleServiceIntegrationTest {
 
     private static final LocalDate DATE = LocalDate.of(2026, 7, 22);
@@ -58,6 +60,7 @@ class ScheduleServiceIntegrationTest {
     @Autowired TestModuleConfigRepository moduleRepository;
     @Autowired TestStaffRepository staffRepository;
     @Autowired TestStaffModuleRepository staffModuleRepository;
+    @Autowired EntityManagerFactory entityManagerFactory;
 
     @Test
     void persistsCrossGroupSpecialScheduleWithOptimisticVersion() {
@@ -89,6 +92,37 @@ class ScheduleServiceIntegrationTest {
                 schedule(demand, second, detail, null, 60))));
 
         assertEquals("SCHEDULE_BUCKET_EXCEEDED", error.getErrorCode());
+        assertTrue(scheduleRepository.findByDemandId(demand.getId()).isEmpty());
+    }
+
+    @Test
+    void batchRejectsCumulativeStaffCapacity() {
+        TestDemand demand = saveDemand("batch-capacity", 2.0, 3);
+        DemandManpowerDetail detail = saveDetail(demand, "功能测试", 2.0);
+        TestStaff staff = saveStaff("BATCH-CAPACITY-A", "功能测试", 1.0);
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> scheduleService.createBatch(List.of(
+                schedule(demand, staff, detail, null, 60),
+                schedule(demand, staff, detail, null, 60))));
+
+        assertEquals("STAFF_CAPACITY_EXCEEDED", error.getErrorCode());
+        assertTrue(scheduleRepository.findByDemandId(demand.getId()).isEmpty());
+    }
+
+    @Test
+    void batchRejectsCumulativeDeviceCount() {
+        TestDemand demand = saveDemand("batch-devices", 2.0, 1);
+        DemandManpowerDetail detail = saveDetail(demand, "功能测试", 2.0);
+        TestStaff first = saveStaff("BATCH-DEVICE-A", "功能测试", 1.0);
+        TestStaff second = saveStaff("BATCH-DEVICE-B", "功能测试", 1.0);
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> scheduleService.createBatch(List.of(
+                schedule(demand, first, detail, null, 20),
+                schedule(demand, second, detail, null, 20))));
+
+        assertEquals("TEST_DEVICE_CAPACITY_EXCEEDED", error.getErrorCode());
         assertTrue(scheduleRepository.findByDemandId(demand.getId()).isEmpty());
     }
 
@@ -172,6 +206,84 @@ class ScheduleServiceIntegrationTest {
             assertEquals(1, scheduleRepository.findByStaffIdAndDate(staff.getId(), DATE).size());
         } finally {
             executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void batchUsesBoundedPreloadAndSingleSavePath() {
+        TestDemand demand = saveDemand("batch-query-count", 5.0, 5);
+        DemandManpowerDetail detail = saveDetail(demand, "功能测试", 5.0);
+        TestStaff first = saveStaff("BATCH-QUERY-A", "功能测试", 1.0);
+        TestStaff second = saveStaff("BATCH-QUERY-B", "功能测试", 1.0);
+        TestStaff third = saveStaff("BATCH-QUERY-C", "功能测试", 1.0);
+        Statistics statistics = entityManagerFactory.unwrap(
+            org.hibernate.SessionFactory.class).getStatistics();
+        statistics.clear();
+
+        scheduleService.createBatch(List.of(
+            schedule(demand, first, detail, null, 30),
+            schedule(demand, second, detail, null, 30),
+            schedule(demand, third, detail, null, 30)));
+
+        assertTrue(statistics.getPrepareStatementCount() < 20,
+            "batch should use bounded preload queries, count="
+                + statistics.getPrepareStatementCount());
+        assertEquals(3, scheduleRepository.findByDemandId(demand.getId()).size());
+    }
+
+    @Test
+    void publishAndUnpublishSerializeThroughDemandAndScheduleLocks() throws Exception {
+        TestDemand demand = saveDemand("publish-locks", 2.0, 2);
+        DemandManpowerDetail detail = saveDetail(demand, "功能测试", 2.0);
+        TestStaff staff = saveStaff("PUBLISH-LOCK-A", "功能测试", 1.0);
+        scheduleService.create(schedule(demand, staff, detail, null, 20));
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Object> publish = executor.submit(() -> runLockedAction(start,
+                () -> scheduleService.publishByDemandId(demand.getId())));
+            Future<Object> unpublish = executor.submit(() -> runLockedAction(start,
+                () -> scheduleService.unpublishByDemandId(demand.getId())));
+            start.countDown();
+            assertTrue(publish.get() instanceof Boolean);
+            assertTrue(unpublish.get() instanceof Boolean);
+            assertEquals(1, scheduleRepository.findByDemandId(demand.getId()).size());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void publishAndDraftClearSerializeThroughSameDemandLock() throws Exception {
+        TestDemand demand = saveDemand("publish-clear-locks", 2.0, 2);
+        DemandManpowerDetail detail = saveDetail(demand, "功能测试", 2.0);
+        TestStaff staff = saveStaff("PUBLISH-CLEAR-A", "功能测试", 1.0);
+        scheduleService.create(schedule(demand, staff, detail, null, 20));
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Object> publish = executor.submit(() -> runLockedAction(start,
+                () -> scheduleService.publishByDemandId(demand.getId())));
+            Future<Object> clear = executor.submit(() -> runLockedAction(start,
+                () -> scheduleService.deleteByDemandId(demand.getId(),
+                    ScheduleDeleteScope.DRAFT_ONLY)));
+            start.countDown();
+            assertTrue(publish.get() instanceof Boolean);
+            assertTrue(clear.get() instanceof Boolean);
+            assertTrue(scheduleRepository.findByDemandId(demand.getId()).size() <= 1);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private Object runLockedAction(CountDownLatch start, Runnable action) {
+        try {
+            start.await();
+            action.run();
+            return Boolean.TRUE;
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(error);
         }
     }
 

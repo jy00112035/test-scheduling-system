@@ -34,11 +34,7 @@ public class ScheduleController {
 
     @GetMapping("/{id}")
     public ApiResponse<Schedule> getScheduleById(@PathVariable Long id) {
-        try {
-            return ApiResponse.success(scheduleService.findById(id));
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+        return ApiResponse.success(scheduleService.findById(id));
     }
 
     @GetMapping("/date/{date}")
@@ -61,16 +57,19 @@ public class ScheduleController {
 
     @PostMapping
     public ApiResponse<Schedule> createSchedule(@RequestBody Schedule schedule) {
+        requireSchedulingRole();
         return ApiResponse.success("创建成功", scheduleService.create(schedule));
     }
 
     @PostMapping("/batch")
     public ApiResponse<List<Schedule>> createSchedulesBatch(@RequestBody List<Schedule> schedules) {
+        requireSchedulingRole();
         return ApiResponse.success("批量创建成功", scheduleService.createBatch(schedules));
     }
 
     @PutMapping("/{id}")
     public ApiResponse<Schedule> updateSchedule(@PathVariable Long id, @RequestBody Schedule schedule) {
+        requireSchedulingRole();
         return ApiResponse.success("更新成功", scheduleService.update(id, schedule));
     }
 
@@ -113,6 +112,7 @@ public class ScheduleController {
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteSchedule(@PathVariable Long id) {
+        requireSchedulingRole();
         scheduleService.delete(id);
         return ApiResponse.success("删除成功", null);
     }
@@ -124,22 +124,16 @@ public class ScheduleController {
 
     @PutMapping("/publish/{demandId}")
     public ApiResponse<Void> publishSchedules(@PathVariable Long demandId) {
-        try {
-            scheduleService.publishByDemandId(demandId);
-            return ApiResponse.success("发布成功", null);
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+        requireSchedulingRole();
+        scheduleService.publishByDemandId(demandId);
+        return ApiResponse.success("发布成功", null);
     }
 
     @PutMapping("/unpublish/{demandId}")
     public ApiResponse<Void> unpublishSchedules(@PathVariable Long demandId) {
-        try {
-            scheduleService.unpublishByDemandId(demandId);
-            return ApiResponse.success("取消发布成功", null);
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+        requireSchedulingRole();
+        scheduleService.unpublishByDemandId(demandId);
+        return ApiResponse.success("取消发布成功", null);
     }
 
     @GetMapping("/gantt-view")

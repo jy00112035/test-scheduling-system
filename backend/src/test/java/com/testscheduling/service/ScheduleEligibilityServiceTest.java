@@ -263,6 +263,35 @@ class ScheduleEligibilityServiceTest {
         assertEquals("SPECIAL_MODULE_NOT_FOUND", error.getErrorCode());
     }
 
+    @Test
+    void rejectsNullOrNonPositiveDetailManpowerBeforeArithmetic() {
+        Schedule schedule = generalSchedule();
+        stubBaseEligibility("功能测试");
+        when(detailRepository.findById(301L)).thenAnswer(invocation -> {
+            DemandManpowerDetail detail = new DemandManpowerDetail();
+            detail.setId(301L);
+            detail.setDemandId(1001L);
+            detail.setTestType("功能测试");
+            detail.setManpowerDemand(null);
+            return Optional.of(detail);
+        });
+
+        BusinessException nullError = assertThrows(BusinessException.class,
+            () -> service.validate(schedule, null));
+        assertEquals("SCHEDULE_DETAIL_MANPOWER_INVALID", nullError.getErrorCode());
+
+        DemandManpowerDetail invalid = new DemandManpowerDetail();
+        invalid.setId(301L);
+        invalid.setDemandId(1001L);
+        invalid.setTestType("功能测试");
+        invalid.setManpowerDemand(BigDecimal.ZERO);
+        when(detailRepository.findById(301L)).thenReturn(Optional.of(invalid));
+
+        BusinessException nonPositiveError = assertThrows(BusinessException.class,
+            () -> service.validate(schedule, null));
+        assertEquals("SCHEDULE_DETAIL_MANPOWER_INVALID", nonPositiveError.getErrorCode());
+    }
+
     private Schedule specialSchedule() {
         Schedule schedule = generalSchedule();
         schedule.setDemandSpecialModuleId(501L);
