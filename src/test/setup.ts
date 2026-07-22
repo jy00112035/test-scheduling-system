@@ -10,6 +10,23 @@ if (testWindow) {
   });
 }
 
+if (!window.matchMedia) {
+  window.matchMedia = (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    dispatchEvent: () => false,
+  });
+}
+
+const nativeGetComputedStyle = window.getComputedStyle.bind(window);
+window.getComputedStyle = (element: Element, pseudoElement?: string | null) =>
+  nativeGetComputedStyle(element, pseudoElement ? null : pseudoElement);
+
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
