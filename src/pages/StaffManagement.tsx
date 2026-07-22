@@ -482,7 +482,7 @@ const StaffManagement: React.FC = () => {
       let successCount = 0;
       for (let index = 0; index < importData.length; index += 1) {
         const row = importData[index];
-        const { familiarModuleNames: _names, unmatchedModules: _unmatched, unavailableModules: _unavailable, ...staffData } = row;
+        const { familiarModuleNames: _names, unmatchedModules: _unmatched, unavailableModules: _unavailable, rowErrors: _rowErrors, retryError: _retryError, ...staffData } = row;
         try {
           await api.createStaff(staffData);
           successCount += 1;

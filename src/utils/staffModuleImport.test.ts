@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TestModule } from '../types';
-import { parseFamiliarModuleNames } from './staffModuleImport';
+import { createFamiliarModuleNameIndex, parseFamiliarModuleNames } from './staffModuleImport';
 
 const moduleFixture = (overrides: Partial<TestModule> = {}): TestModule => ({
   id: 11,
@@ -60,5 +60,10 @@ describe('parseFamiliarModuleNames', () => {
     expect(result.moduleIds).toEqual([]);
     expect(result.unmatched).toEqual([]);
     expect(result.unavailable).toEqual(['历史模块']);
+  });
+
+  it('accepts a prebuilt name index for batch parsing', () => {
+    const index = createFamiliarModuleNameIndex([moduleFixture(), moduleFixture({ id: 12, moduleName: '登录模块' })]);
+    expect(parseFamiliarModuleNames('支付模块,登录模块', index).moduleIds).toEqual([11, 12]);
   });
 });

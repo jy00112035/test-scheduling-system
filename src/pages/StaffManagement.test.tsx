@@ -538,4 +538,27 @@ describe('StaffManagement familiar modules', () => {
       Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader });
     }
   });
+
+  it('keeps only failed import rows for retry after a partial commit', async () => {
+    const createStaff = vi.spyOn(api, 'createStaff')
+      .mockResolvedValueOnce({ staff: {}, generatedPassword: '' })
+      .mockRejectedValueOnce(new Error('工号冲突'))
+      .mockResolvedValueOnce({ staff: {}, generatedPassword: '' });
+    const OriginalFileReader = globalThis.FileReader;
+    class TestFileReader { onload: ((event: any) => void) | null = null; abort() {} readAsArrayBuffer() { this.onload?.({ target: { result: workbookData([
+      { 工号: 'EMP030', 姓名: '已提交', 所属项目: '功能测试组' }, { 工号: 'EMP031', 姓名: '待重试', 所属项目: '功能测试组' },
+    ]) } }); } }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: TestFileReader });
+    try {
+      render(<StaffManagement />); const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /导入人员/ }));
+      await user.upload(document.querySelector('.ant-modal input[type="file"]') as HTMLInputElement, new File(['x'], 'x.xlsx'));
+      await user.click(screen.getByRole('button', { name: /确\s*定/ }));
+      await user.click(await screen.findByRole('button', { name: '确认导入' }));
+      expect(await screen.findByText('导入失败：工号冲突')).toBeInTheDocument();
+      expect(screen.queryByText('已提交')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: '确认导入' }));
+      await waitFor(() => expect(createStaff).toHaveBeenCalledTimes(3));
+    } finally { Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OriginalFileReader }); }
+  });
 });
