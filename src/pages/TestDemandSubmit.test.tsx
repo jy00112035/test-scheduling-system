@@ -113,6 +113,9 @@ describe('TestDemandSubmit special module requests', () => {
     await user.click(screen.getByRole('button', { name: /提交需求/ }));
     const row = screen.getByRole('combobox', { name: '特殊模块 1' });
     expect(total).toHaveAttribute('aria-invalid', 'true');
+    const overflowDescription = total.getAttribute('aria-describedby');
+    expect(overflowDescription).toBe('demand-overflow-功能测试');
+    expect(document.getElementById(overflowDescription as string)).toHaveTextContent('特殊模块人力不能超过小组总人力');
     expect(row).toHaveAttribute('aria-invalid', 'true');
     expect(document.activeElement).toBe(total);
     expect(scrollIntoView).toHaveBeenCalled();

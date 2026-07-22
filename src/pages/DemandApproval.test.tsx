@@ -119,4 +119,29 @@ describe('DemandApproval edit loading', () => {
     expect(await screen.findByRole('spinbutton', { name: '人力需求 1' })).toBeEnabled();
     expect(screen.queryByText('已停用')).not.toBeInTheDocument();
   });
+
+  it('focuses and scrolls to the first invalid special row without approving', async () => {
+    const full = { ...demand(7, '校验需求'), specialModuleDemands: [] };
+    vi.spyOn(api, 'getPendingDemandApprovals').mockResolvedValue([full]);
+    vi.spyOn(api, 'getFieldConfigs').mockResolvedValue([{ fieldName: 'testType', options: '功能测试' }, { fieldName: 'priority', options: '高' }]);
+    vi.spyOn(api, 'getTestModules').mockResolvedValue([]);
+    vi.spyOn(api, 'getDemand').mockResolvedValue(full);
+    const approve = vi.spyOn(api, 'approveDemandWithChanges').mockResolvedValue({});
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+    render(<DemandApproval />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /修改后批准/ }));
+    await user.click(screen.getByRole('button', { name: /新增特殊模块需求/ }));
+    const group = screen.getByRole('combobox', { name: '小组 1' });
+    await user.click(screen.getByRole('button', { name: '修改并批准' }));
+    expect(group).toHaveAttribute('aria-invalid', 'true');
+    const errorId = group.getAttribute('aria-describedby');
+    expect(errorId).toBeTruthy();
+    expect(document.getElementById(errorId as string)).toHaveTextContent('请选择特殊模块');
+    expect(document.getElementById(errorId as string)).not.toHaveTextContent('SPECIAL_MODULE_REQUIRED');
+    expect(document.activeElement).toBe(group);
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(approve).not.toHaveBeenCalled();
+  });
 });
