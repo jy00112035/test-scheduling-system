@@ -28,6 +28,7 @@ import java.util.stream.Collectors;
 public class DemandFulfillmentService {
 
     private static final BigDecimal ONE_HUNDRED = new BigDecimal("100");
+    private static final int BULK_QUERY_CHUNK_SIZE = 500;
 
     private final TestDemandRepository demandRepository;
     private final DemandManpowerDetailRepository detailRepository;
@@ -87,6 +88,7 @@ public class DemandFulfillmentService {
             requireDemand(demand);
             return demand.getId();
         }).toList();
+        // Recommendation callers cap demandIds at 500, keeping this demand-scoped IN query bounded.
         List<Schedule> schedules = demandIds.isEmpty()
             ? List.of()
             : scheduleRepository.findByDemandIdIn(demandIds);
@@ -204,12 +206,18 @@ public class DemandFulfillmentService {
             .map(DemandSpecialModule::getModuleId)
             .filter(id -> id != null)
             .distinct()
+            .sorted()
             .toList();
         if (moduleIds.isEmpty()) {
             return Map.of();
         }
-        return moduleRepository.findAllById(moduleIds).stream()
-            .collect(Collectors.toMap(TestModuleConfig::getId, Function.identity()));
+        List<TestModuleConfig> modules = new ArrayList<>();
+        for (int start = 0; start < moduleIds.size(); start += BULK_QUERY_CHUNK_SIZE) {
+            int end = Math.min(start + BULK_QUERY_CHUNK_SIZE, moduleIds.size());
+            modules.addAll(moduleRepository.findAllById(moduleIds.subList(start, end)));
+        }
+        return modules.stream()
+                .collect(Collectors.toMap(TestModuleConfig::getId, Function.identity()));
     }
 
     private String moduleName(

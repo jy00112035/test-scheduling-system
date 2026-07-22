@@ -51,6 +51,10 @@ import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class ScheduleRecommendationService {
+    /** Maximum distinct demand IDs in one recommendation transaction. */
+    static final int MAX_RECOMMENDATION_DEMANDS = 500;
+    /** Keeps every derived IN query below common database parameter limits. */
+    static final int BULK_QUERY_CHUNK_SIZE = 500;
     private static final BigDecimal STEP = new BigDecimal("0.1");
     private static final int STEP_PERCENT = 10;
 
@@ -133,6 +137,7 @@ public class ScheduleRecommendationService {
         }
         List<TestDemand> demands = new ArrayList<>(demandsById.values());
         demands.sort(demandComparator());
+        // Demand-scoped reads are bounded by MAX_RECOMMENDATION_DEMANDS.
         List<DemandManpowerDetail> details = detailRepository.findByDemandIdIn(ids);
         List<DemandSpecialModule> specials = specialRepository.findByDemandIdInOrderByDemandIdAscIdAsc(ids);
         Map<Long, List<DemandManpowerDetail>> detailsByDemand = details.stream()
@@ -142,8 +147,7 @@ public class ScheduleRecommendationService {
                 .collect(Collectors.groupingBy(DemandSpecialModule::getDemandId));
         List<Long> moduleIds = specials.stream().map(DemandSpecialModule::getModuleId)
                 .filter(Objects::nonNull).distinct().sorted().toList();
-        List<TestModuleConfig> lockedModules = moduleIds.isEmpty() ? List.of()
-                : moduleRepository.findAllByIdInForUpdate(moduleIds);
+        List<TestModuleConfig> lockedModules = fetchChunks(moduleIds, moduleRepository::findAllByIdInForUpdate);
         requireAllRows(moduleIds, lockedModules.stream().map(TestModuleConfig::getId).toList(),
                 "MODULE_NOT_FOUND", "特殊模块不存在");
         Map<Long, TestModuleConfig> modules = lockedModules.stream()
@@ -159,25 +163,31 @@ public class ScheduleRecommendationService {
         Set<Long> fixed = ids(request.getFixedStaffIds());
         List<Long> staffIds = activeSnapshot.stream().map(TestStaff::getId)
                 .filter(Objects::nonNull).filter(id -> !excluded.contains(id)).distinct().sorted().toList();
-        List<TestStaff> staff = staffIds.isEmpty() ? List.of() : staffRepository.findAllByIdInForUpdate(staffIds);
+        List<TestStaff> staff = fetchChunks(staffIds, staffRepository::findAllByIdInForUpdate);
         requireAllRows(staffIds, staff.stream().map(TestStaff::getId).toList(),
                 "STAFF_NOT_FOUND", "测试人员不存在");
-        staff = staff.stream().filter(s -> s.getStatus() == TestStaff.StaffStatus.active).toList();
+        staff = staff.stream().filter(s -> s.getStatus() == TestStaff.StaffStatus.active)
+                .sorted(Comparator.comparing(TestStaff::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
         Map<Long, TestStaff> staffById = staff.stream().collect(Collectors.toMap(TestStaff::getId, Function.identity()));
-        Set<TestStaffModuleId> familiar = staffModuleRepository
-                .findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc(new ArrayList<>(staffById.keySet()))
+        List<Long> lockedStaffIds = new ArrayList<>(staffById.keySet());
+        Set<TestStaffModuleId> familiar = fetchChunks(lockedStaffIds,
+                staffModuleRepository::findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc)
                 .stream().map(TestStaffModule::getId).collect(Collectors.toSet());
-        Map<String, User> users = userRepository.findByUsernameIn(staff.stream().map(TestStaff::getEmpNo)
-                .filter(Objects::nonNull).toList()).stream()
+        List<String> usernames = staff.stream().map(TestStaff::getEmpNo)
+                .filter(Objects::nonNull).distinct().sorted().toList();
+        Map<String, User> users = fetchChunks(usernames, userRepository::findByUsernameIn).stream()
                 .collect(Collectors.toMap(User::getUsername, Function.identity()));
         DateBounds bounds = bounds(request, demands);
         Map<Long, List<Schedule>> allByStaff = new HashMap<>();
         if (bounds.start != null) {
-            scheduleRepository.findByStaffIdInAndDateBetween(new ArrayList<>(staffById.keySet()), bounds.start, bounds.end)
+            fetchChunks(lockedStaffIds, chunk -> scheduleRepository.findByStaffIdInAndDateBetween(
+                    chunk, bounds.start, bounds.end))
                     .forEach(s -> allByStaff.computeIfAbsent(s.getStaffId(), ignored -> new ArrayList<>()).add(s));
         }
         List<StaffDailyStatus> statuses = bounds.start == null ? List.of()
-                : statusRepository.findByStaffIdInAndDateBetween(new ArrayList<>(staffById.keySet()), bounds.start, bounds.end);
+                : fetchChunks(lockedStaffIds, chunk -> statusRepository.findByStaffIdInAndDateBetween(
+                        chunk, bounds.start, bounds.end));
         Map<String, StaffDailyStatus> statusByDate = statuses.stream().collect(Collectors.toMap(
                 s -> key(s.getStaffId(), s.getDate()), Function.identity(), (a, b) -> a));
         List<Schedule> generated = new ArrayList<>();
@@ -491,9 +501,20 @@ public class ScheduleRecommendationService {
                 && (request.getDateRange() == null || request.getDateRange().startDate() == null
                 || request.getDateRange().endDate() == null || request.getDateRange().startDate().isAfter(request.getDateRange().endDate())))
             throw error("INVALID_DATE_RANGE", "指定日期范围无效");
+        if (request.getDemandIds().stream().distinct().count() > MAX_RECOMMENDATION_DEMANDS)
+            throw error("RECOMMENDATION_SCOPE_TOO_LARGE", "一次推荐最多处理500个不同测试需求");
     }
 
     private Set<Long> ids(List<Long> values) { return values == null ? Set.of() : new HashSet<>(values); }
+    private <I, O> List<O> fetchChunks(List<I> values, Function<List<I>, List<O>> query) {
+        if (values.isEmpty()) return List.of();
+        List<O> result = new ArrayList<>();
+        for (int start = 0; start < values.size(); start += BULK_QUERY_CHUNK_SIZE) {
+            int end = Math.min(start + BULK_QUERY_CHUNK_SIZE, values.size());
+            result.addAll(query.apply(new ArrayList<>(values.subList(start, end))));
+        }
+        return result;
+    }
     private void requireAllRows(List<Long> requested, List<Long> returned, String code, String message) {
         Set<Long> expected = new HashSet<>(requested);
         Set<Long> actual = new HashSet<>(returned);

@@ -34,12 +34,14 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
 public class ScheduleEligibilityService {
 
     private static final BigDecimal ONE_HUNDRED = new BigDecimal("100");
+    private static final int BULK_QUERY_CHUNK_SIZE = 500;
 
     private final TestDemandRepository demandRepository;
     private final DemandManpowerDetailRepository detailRepository;
@@ -151,28 +153,31 @@ public class ScheduleEligibilityService {
         Set<Long> specialIds = input.stream().map(Schedule::getDemandSpecialModuleId)
             .filter(Objects::nonNull).collect(Collectors.toSet());
 
-        context.addDemands(demandRepository.findAllById(demandIds));
-        context.addStaff(staffRepository.findAllById(staffIds));
-        context.addDetails(detailRepository.findAllById(detailIds));
-        context.addSpecials(specialRepository.findByDemandIdInOrderByDemandIdAscIdAsc(
-            new ArrayList<>(demandIds)));
+        context.addDemands(fetchChunks(sorted(demandIds), demandRepository::findAllById));
+        context.addStaff(fetchChunks(sorted(staffIds), staffRepository::findAllById));
+        context.addDetails(fetchChunks(sorted(detailIds), detailRepository::findAllById));
+        context.addSpecials(fetchChunks(sorted(demandIds),
+            specialRepository::findByDemandIdInOrderByDemandIdAscIdAsc));
         Set<Long> moduleIds = context.specials.values().stream()
             .map(DemandSpecialModule::getModuleId).filter(Objects::nonNull).collect(Collectors.toSet());
-        context.addModules(moduleRepository.findAllById(moduleIds));
-        context.addStaffModules(staffModuleRepository.findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc(
-            new ArrayList<>(staffIds)));
-        context.addUsers(userRepository.findByUsernameIn(context.staff.values().stream()
-            .map(TestStaff::getEmpNo).filter(Objects::nonNull).toList()));
+        context.addModules(fetchChunks(sorted(moduleIds), moduleRepository::findAllById));
+        context.addStaffModules(fetchChunks(sorted(staffIds),
+            staffModuleRepository::findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc));
+        context.addUsers(fetchChunks(context.staff.values().stream()
+            .map(TestStaff::getEmpNo).filter(Objects::nonNull).distinct().sorted().toList(),
+            userRepository::findByUsernameIn));
 
-        List<Schedule> existing = new ArrayList<>(scheduleRepository.findByDemandIdIn(demandIds));
+        List<Schedule> existing = new ArrayList<>(fetchChunks(sorted(demandIds),
+            scheduleRepository::findByDemandIdIn));
         LocalDate start = input.stream().map(Schedule::getDate).filter(Objects::nonNull)
             .min(LocalDate::compareTo).orElse(null);
         LocalDate end = input.stream().map(Schedule::getDate).filter(Objects::nonNull)
             .max(LocalDate::compareTo).orElse(null);
         if (!staffIds.isEmpty() && start != null && end != null) {
-            existing.addAll(scheduleRepository.findByStaffIdInAndDateBetween(staffIds, start, end));
-            context.addStatuses(dailyStatusRepository.findByStaffIdInAndDateBetween(
-                new ArrayList<>(staffIds), start, end));
+            existing.addAll(fetchChunks(sorted(staffIds), chunk ->
+                scheduleRepository.findByStaffIdInAndDateBetween(chunk, start, end)));
+            context.addStatuses(fetchChunks(sorted(staffIds), chunk ->
+                dailyStatusRepository.findByStaffIdInAndDateBetween(chunk, start, end)));
         }
         context.addSchedules(existing);
         context.calculateSpecialDemandTotals();
@@ -434,6 +439,20 @@ public class ScheduleEligibilityService {
             }
         }
         public void addSchedule(Schedule schedule) { schedules.add(schedule); }
+    }
+
+    private List<Long> sorted(Collection<Long> values) {
+        return values.stream().filter(Objects::nonNull).distinct().sorted().toList();
+    }
+
+    private <I, O> List<O> fetchChunks(List<I> values, Function<List<I>, List<O>> query) {
+        if (values.isEmpty()) return List.of();
+        List<O> result = new ArrayList<>();
+        for (int start = 0; start < values.size(); start += BULK_QUERY_CHUNK_SIZE) {
+            int end = Math.min(start + BULK_QUERY_CHUNK_SIZE, values.size());
+            result.addAll(query.apply(new ArrayList<>(values.subList(start, end))));
+        }
+        return result;
     }
 
     private record StaffDateKey(Long staffId, LocalDate date) { }
