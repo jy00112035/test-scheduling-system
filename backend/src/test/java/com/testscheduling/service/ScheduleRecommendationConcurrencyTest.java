@@ -25,7 +25,6 @@ import org.springframework.transaction.TransactionStatus;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -47,6 +46,7 @@ class ScheduleRecommendationConcurrencyTest {
     @Mock StaffDailyStatusRepository statusRepository;
     @Mock UserRepository userRepository;
     @Mock ScheduleEligibilityService eligibilityService;
+    @Mock DemandFulfillmentService fulfillmentService;
     @Mock PlatformTransactionManager transactionManager;
     @Mock TransactionStatus transactionStatus;
 
@@ -56,13 +56,12 @@ class ScheduleRecommendationConcurrencyTest {
         DemandManpowerDetail detail = detail(demand.getId());
         TestStaff staff = staff();
         when(transactionManager.getTransaction(any())).thenReturn(transactionStatus);
-        when(demandRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(demand));
+        when(demandRepository.findAllByIdInForUpdate(List.of(1L))).thenReturn(List.of(demand));
         when(detailRepository.findByDemandIdIn(List.of(1L))).thenReturn(List.of(detail));
         when(specialRepository.findByDemandIdInOrderByDemandIdAscIdAsc(List.of(1L))).thenReturn(List.of());
-        when(moduleRepository.findAllById(List.of())).thenReturn(List.of());
         when(scheduleRepository.findByDemandIdIn(List.of(1L))).thenReturn(List.of());
         when(staffRepository.findByStatus(TestStaff.StaffStatus.active)).thenReturn(List.of(staff));
-        when(staffRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(staff));
+        when(staffRepository.findAllByIdInForUpdate(List.of(2L))).thenReturn(List.of(staff));
         when(staffModuleRepository.findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc(List.of(2L)))
                 .thenReturn(List.of());
         when(userRepository.findByUsernameIn(List.of("E2"))).thenReturn(List.of());
@@ -78,7 +77,7 @@ class ScheduleRecommendationConcurrencyTest {
         ScheduleRecommendationService service = new ScheduleRecommendationService(
                 demandRepository, detailRepository, specialRepository, moduleRepository, staffRepository,
                 staffModuleRepository, scheduleRepository, statusRepository, userRepository,
-                eligibilityService, transactionManager);
+                eligibilityService, fulfillmentService, transactionManager);
 
         var error = assertThrows(com.testscheduling.exception.BusinessException.class,
                 () -> service.recommend(request()));

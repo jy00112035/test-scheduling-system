@@ -18,6 +18,10 @@ public interface TestModuleConfigRepository extends JpaRepository<TestModuleConf
     @Query("select m from TestModuleConfig m where m.id = :moduleId")
     Optional<TestModuleConfig> findByIdForUpdate(@Param("moduleId") Long moduleId);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select m from TestModuleConfig m where m.id in :moduleIds order by m.id")
+    List<TestModuleConfig> findAllByIdInForUpdate(@Param("moduleIds") List<Long> moduleIds);
+
     boolean existsByModuleName(String moduleName);
 
     List<TestModuleConfig> findAllByOrderByTestTypeAscSortOrderAscModuleNameAsc();

@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.stereotype.Repository;
 import jakarta.persistence.LockModeType;
 import java.time.LocalDate;
@@ -28,6 +29,10 @@ public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
     List<Schedule> findByStaffIdAndDate(Long staffId, LocalDate date);
 
     void deleteByDemandIdAndPublishedFalse(Long demandId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from Schedule s where s.demandId in :demandIds and s.published = false")
+    int deleteDraftsByDemandIdIn(@Param("demandIds") Collection<Long> demandIds);
 
     void deleteByDemandId(Long demandId);
 

@@ -22,6 +22,7 @@ import com.testscheduling.repository.TestModuleConfigRepository;
 import com.testscheduling.repository.TestStaffModuleRepository;
 import com.testscheduling.repository.TestStaffRepository;
 import com.testscheduling.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import jakarta.persistence.PessimisticLockException;
 import org.hibernate.exception.LockAcquisitionException;
 import org.springframework.dao.ConcurrencyFailureException;
@@ -42,6 +43,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -62,8 +64,10 @@ public class ScheduleRecommendationService {
     private final StaffDailyStatusRepository statusRepository;
     private final UserRepository userRepository;
     private final ScheduleEligibilityService eligibilityService;
+    private final DemandFulfillmentService fulfillmentService;
     private final TransactionTemplate transactionTemplate;
 
+    @Autowired
     public ScheduleRecommendationService(TestDemandRepository demandRepository,
             DemandManpowerDetailRepository detailRepository,
             DemandSpecialModuleRepository specialRepository,
@@ -74,6 +78,7 @@ public class ScheduleRecommendationService {
             StaffDailyStatusRepository statusRepository,
             UserRepository userRepository,
             ScheduleEligibilityService eligibilityService,
+            DemandFulfillmentService fulfillmentService,
             PlatformTransactionManager transactionManager) {
         this.demandRepository = demandRepository;
         this.detailRepository = detailRepository;
@@ -85,6 +90,7 @@ public class ScheduleRecommendationService {
         this.statusRepository = statusRepository;
         this.userRepository = userRepository;
         this.eligibilityService = eligibilityService;
+        this.fulfillmentService = fulfillmentService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -116,13 +122,14 @@ public class ScheduleRecommendationService {
 
     private ScheduleRecommendationResponse recommendInTransaction(ScheduleRecommendationRequest request) {
         List<Long> ids = request.getDemandIds().stream().distinct().sorted().toList();
-        Map<Long, TestDemand> demandsById = new LinkedHashMap<>();
-        for (Long id : ids) {
-            demandsById.put(id, demandRepository.findByIdForUpdate(id)
-                    .orElseThrow(() -> error("DEMAND_NOT_FOUND", "测试需求不存在")));
-        }
+        List<TestDemand> lockedDemands = demandRepository.findAllByIdInForUpdate(ids);
+        requireAllRows(ids, lockedDemands.stream().map(TestDemand::getId).toList(),
+                "DEMAND_NOT_FOUND", "测试需求不存在");
+        Map<Long, TestDemand> demandsById = lockedDemands.stream()
+                .collect(Collectors.toMap(TestDemand::getId, Function.identity(), (left, right) -> left,
+                        LinkedHashMap::new));
         if (Boolean.TRUE.equals(request.getReplaceExistingDrafts())) {
-            ids.forEach(scheduleRepository::deleteByDemandIdAndPublishedFalse);
+            scheduleRepository.deleteDraftsByDemandIdIn(ids);
         }
         List<TestDemand> demands = new ArrayList<>(demandsById.values());
         demands.sort(demandComparator());
@@ -135,9 +142,11 @@ public class ScheduleRecommendationService {
                 .collect(Collectors.groupingBy(DemandSpecialModule::getDemandId));
         List<Long> moduleIds = specials.stream().map(DemandSpecialModule::getModuleId)
                 .filter(Objects::nonNull).distinct().sorted().toList();
-        moduleIds.forEach(moduleId -> moduleRepository.findByIdForUpdate(moduleId)
-                .orElseThrow(() -> error("MODULE_NOT_FOUND", "特殊模块不存在")));
-        Map<Long, TestModuleConfig> modules = moduleRepository.findAllById(moduleIds).stream()
+        List<TestModuleConfig> lockedModules = moduleIds.isEmpty() ? List.of()
+                : moduleRepository.findAllByIdInForUpdate(moduleIds);
+        requireAllRows(moduleIds, lockedModules.stream().map(TestModuleConfig::getId).toList(),
+                "MODULE_NOT_FOUND", "特殊模块不存在");
+        Map<Long, TestModuleConfig> modules = lockedModules.stream()
                 .collect(Collectors.toMap(TestModuleConfig::getId, Function.identity()));
         validateSpecialStructure(demands, detailsByDemand, specialsByDemand, modules);
 
@@ -145,12 +154,15 @@ public class ScheduleRecommendationService {
                 .filter(s -> !Boolean.TRUE.equals(request.getReplaceExistingDrafts())
                         || Boolean.TRUE.equals(s.getPublished()))
                 .collect(Collectors.toCollection(ArrayList::new));
-        List<TestStaff> staff = staffRepository.findByStatus(TestStaff.StaffStatus.active);
+        List<TestStaff> activeSnapshot = staffRepository.findByStatus(TestStaff.StaffStatus.active);
         Set<Long> excluded = ids(request.getExcludedStaffIds());
         Set<Long> fixed = ids(request.getFixedStaffIds());
-        staff = staff.stream().filter(s -> !excluded.contains(s.getId())).toList();
-        staff.stream().map(TestStaff::getId).sorted().forEach(staffId -> staffRepository.findByIdForUpdate(staffId)
-                .orElseThrow(() -> error("STAFF_NOT_FOUND", "测试人员不存在")));
+        List<Long> staffIds = activeSnapshot.stream().map(TestStaff::getId)
+                .filter(Objects::nonNull).filter(id -> !excluded.contains(id)).distinct().sorted().toList();
+        List<TestStaff> staff = staffIds.isEmpty() ? List.of() : staffRepository.findAllByIdInForUpdate(staffIds);
+        requireAllRows(staffIds, staff.stream().map(TestStaff::getId).toList(),
+                "STAFF_NOT_FOUND", "测试人员不存在");
+        staff = staff.stream().filter(s -> s.getStatus() == TestStaff.StaffStatus.active).toList();
         Map<Long, TestStaff> staffById = staff.stream().collect(Collectors.toMap(TestStaff::getId, Function.identity()));
         Set<TestStaffModuleId> familiar = staffModuleRepository
                 .findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc(new ArrayList<>(staffById.keySet()))
@@ -204,10 +216,14 @@ public class ScheduleRecommendationService {
         }
         if (!generated.isEmpty()) validateGenerated(generated);
         List<Schedule> persisted = generated.isEmpty() ? List.of() : scheduleRepository.saveAllAndFlush(generated);
+        Map<Long, com.testscheduling.dto.DemandFulfillmentResponse> authoritative =
+                fulfillmentService.calculateBatch(demands, detailsByDemand, specialsByDemand);
         List<ScheduleRecommendationResponse.Fulfillment> fulfillment = demands.stream().map(demand -> {
             List<GapDraft> specialGaps = specialGapsByDemand.getOrDefault(demand.getId(), List.of());
             List<GapDraft> generalGaps = generalGapsByDemand.getOrDefault(demand.getId(), List.of());
-            return new ScheduleRecommendationResponse.Fulfillment(demand.getId(), specialGaps.isEmpty() && generalGaps.isEmpty(),
+            com.testscheduling.dto.DemandFulfillmentResponse calculated = authoritative.get(demand.getId());
+            return new ScheduleRecommendationResponse.Fulfillment(demand.getId(), calculated.fullySatisfied(),
+                    calculated.requiresHistoricalClassification(),
                     toGaps(specialGaps), toGaps(generalGaps));
         }).toList();
         return new ScheduleRecommendationResponse(persisted, fulfillment);
@@ -258,6 +274,7 @@ public class ScheduleRecommendationService {
         return new GapDraft(detail == null ? null : detail.getId(), special == null ? null : special.getId(), remaining, code);
     }
 
+    /** Fixed staff IDs affect priority only after all eligibility filters pass. */
     private Comparator<TestStaff> candidateComparator(Set<Long> fixed, List<LocalDate> dates,
             LocalDate date, Map<Long, List<Schedule>> schedules, Map<String, StaffDailyStatus> statuses) {
         return Comparator.comparing((TestStaff staff) -> !fixed.contains(staff.getId()))
@@ -386,8 +403,11 @@ public class ScheduleRecommendationService {
             Map<String, StaffDailyStatus> statuses) {
         BigDecimal coefficient = staff.getCurrentCoefficient() == null ? BigDecimal.ONE : staff.getCurrentCoefficient();
         StaffDailyStatus status = statuses.get(key(staff.getId(), date));
-        BigDecimal factor = status == null || status.getStatus() == StaffDailyStatus.DailyAvailabilityStatus.AVAILABLE
-                ? BigDecimal.ONE : BigDecimal.ONE.subtract(BigDecimal.valueOf(status.getPercentage()).divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP));
+        BigDecimal unavailable = Optional.ofNullable(status)
+                .filter(value -> value.getStatus() != StaffDailyStatus.DailyAvailabilityStatus.AVAILABLE)
+                .map(StaffDailyStatus::getPercentage).map(value -> value == null ? BigDecimal.ZERO : BigDecimal.valueOf(value))
+                .orElse(BigDecimal.ZERO).max(BigDecimal.ZERO).min(BigDecimal.valueOf(100));
+        BigDecimal factor = BigDecimal.ONE.subtract(unavailable.divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP));
         int total = schedules.getOrDefault(staff.getId(), List.of()).stream().filter(s -> date.equals(s.getDate()))
                 .map(Schedule::getPercentage).filter(Objects::nonNull).mapToInt(Integer::intValue).sum();
         return coefficient.multiply(BigDecimal.valueOf(100)).multiply(factor).setScale(0, RoundingMode.FLOOR).intValue() - total;
@@ -461,6 +481,12 @@ public class ScheduleRecommendationService {
     private void validateRequest(ScheduleRecommendationRequest request) {
         if (request == null || request.getMode() == null || request.getDemandIds() == null || request.getDemandIds().isEmpty())
             throw error("DEMAND_REQUIRED", "需求ID不能为空");
+        if (request.getDemandIds().stream().anyMatch(Objects::isNull))
+            throw error("DEMAND_REQUIRED", "需求ID不能为空");
+        if (request.getFixedStaffIds() != null && request.getFixedStaffIds().stream().anyMatch(Objects::isNull))
+            throw error("STAFF_REQUIRED", "人员ID不能为空");
+        if (request.getExcludedStaffIds() != null && request.getExcludedStaffIds().stream().anyMatch(Objects::isNull))
+            throw error("STAFF_REQUIRED", "人员ID不能为空");
         if (request.getMode() == ScheduleRecommendationRequest.Mode.FIXED_RANGE
                 && (request.getDateRange() == null || request.getDateRange().startDate() == null
                 || request.getDateRange().endDate() == null || request.getDateRange().startDate().isAfter(request.getDateRange().endDate())))
@@ -468,6 +494,11 @@ public class ScheduleRecommendationService {
     }
 
     private Set<Long> ids(List<Long> values) { return values == null ? Set.of() : new HashSet<>(values); }
+    private void requireAllRows(List<Long> requested, List<Long> returned, String code, String message) {
+        Set<Long> expected = new HashSet<>(requested);
+        Set<Long> actual = new HashSet<>(returned);
+        if (expected.size() != actual.size() || !expected.equals(actual)) throw error(code, message);
+    }
     private BigDecimal value(BigDecimal value) { return value == null ? BigDecimal.ZERO : value; }
     private String key(Long staffId, LocalDate date) { return staffId + ":" + date; }
     private List<ScheduleRecommendationResponse.Gap> toGaps(List<GapDraft> gaps) { return gaps.stream().map(g ->

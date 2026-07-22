@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -405,6 +406,72 @@ class ScheduleRecommendationServiceTest {
 
         assertEquals(0, result.generatedSchedules().size());
         assertEquals("NO_QUALIFIED_STAFF", result.fulfillment().get(0).generalGaps().get(0).reasonCode());
+    }
+
+    @Test
+    void authoritativeFulfillmentFlagsHistoricalDoubleNullRows() {
+        TestModuleConfig module = module("历史归类模块 Task7", "历史归类 Task7");
+        TestDemand demand = demand();
+        DemandManpowerDetail detail = detail(demand.getId(), "历史归类 Task7", "2.0");
+        DemandSpecialModule special = special(demand.getId(), module.getId(), "1.0");
+        TestStaff specialStaff = staff("历史归类特殊人员 Task7", "其他类型 Task7");
+        TestStaff generalStaff = staff("历史归类通用人员 Task7", "历史归类 Task7");
+        TestStaffModule relation = new TestStaffModule();
+        relation.setId(new TestStaffModuleId(specialStaff.getId(), module.getId()));
+        staffModuleRepository.save(relation);
+        Schedule historical = new Schedule();
+        historical.setDemandId(demand.getId());
+        historical.setDate(demand.getStartDate().toLocalDate());
+        historical.setPercentage(200);
+        historical.setPublished(true);
+        scheduleRepository.save(historical);
+
+        ScheduleRecommendationResponse result = service.recommend(request(demand.getId()));
+
+        assertEquals(2, result.generatedSchedules().size());
+        assertFalse(result.fulfillment().get(0).fullySatisfied());
+        assertTrue(result.fulfillment().get(0).requiresHistoricalClassification());
+        assertEquals(detail.getId(), result.generatedSchedules().get(0).getDemandManpowerDetailId());
+        assertEquals(special.getId(), result.generatedSchedules().get(0).getDemandSpecialModuleId());
+    }
+
+    @Test
+    void normalizesNullAndOutOfRangeDailyStatusPercentages() {
+        TestDemand nullDemand = demand();
+        detail(nullDemand.getId(), "状态空值 Task7", "1.0");
+        TestStaff nullStaff = staff("状态空值人员 Task7", "状态空值 Task7");
+        dailyStatus(nullStaff, null);
+
+        TestDemand negativeDemand = demand();
+        detail(negativeDemand.getId(), "状态负值 Task7", "1.0");
+        TestStaff negativeStaff = staff("状态负值人员 Task7", "状态负值 Task7");
+        dailyStatus(negativeStaff, -25.0);
+
+        TestDemand highDemand = demand();
+        detail(highDemand.getId(), "状态超值 Task7", "1.0");
+        TestStaff highStaff = staff("状态超值人员 Task7", "状态超值 Task7");
+        dailyStatus(highStaff, 125.0);
+
+        ScheduleRecommendationResponse result = service.recommend(request(
+                nullDemand.getId(), negativeDemand.getId()));
+        ScheduleRecommendationResponse highResult = service.recommend(request(highDemand.getId()));
+
+        assertEquals(100, result.generatedSchedules().stream()
+                .filter(schedule -> schedule.getStaffId().equals(nullStaff.getId()))
+                .findFirst().orElseThrow().getPercentage());
+        assertEquals(100, result.generatedSchedules().stream()
+                .filter(schedule -> schedule.getStaffId().equals(negativeStaff.getId()))
+                .findFirst().orElseThrow().getPercentage());
+        assertEquals(0, highResult.generatedSchedules().size());
+    }
+
+    private void dailyStatus(TestStaff staff, Double percentage) {
+        StaffDailyStatus status = new StaffDailyStatus();
+        status.setStaffId(staff.getId());
+        status.setDate(LocalDate.of(2026, 7, 22));
+        status.setStatus(StaffDailyStatus.DailyAvailabilityStatus.OTHER_TASKS);
+        status.setPercentage(percentage);
+        statusRepository.save(status);
     }
 
     private TestModuleConfig module(String name, String testType) {

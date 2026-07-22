@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.Optional;
+import java.util.Collection;
 
 @Repository
 public interface TestDemandRepository extends JpaRepository<TestDemand, Long> {
@@ -26,6 +27,10 @@ public interface TestDemandRepository extends JpaRepository<TestDemand, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select d from TestDemand d where d.id = :id")
     Optional<TestDemand> findByIdForUpdate(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select d from TestDemand d where d.id in :ids order by d.id")
+    List<TestDemand> findAllByIdInForUpdate(@Param("ids") Collection<Long> ids);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select d from TestDemand d where d.id = "

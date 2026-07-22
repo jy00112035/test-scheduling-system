@@ -24,4 +24,8 @@ public interface TestStaffRepository extends JpaRepository<TestStaff, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from TestStaff s where s.id = :id")
     Optional<TestStaff> findByIdForUpdate(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from TestStaff s where s.id in :ids order by s.id")
+    List<TestStaff> findAllByIdInForUpdate(@Param("ids") List<Long> ids);
 }

@@ -11,11 +11,17 @@ public record ScheduleRecommendationResponse(
     public record Fulfillment(
             Long demandId,
             boolean fullySatisfied,
+            boolean requiresHistoricalClassification,
             List<Gap> specialModuleGaps,
             List<Gap> generalGaps) {
+        public Fulfillment(Long demandId, boolean fullySatisfied,
+                List<Gap> specialModuleGaps, List<Gap> generalGaps) {
+            this(demandId, fullySatisfied, false, specialModuleGaps, generalGaps);
+        }
+
         public Fulfillment(Long demandId, List<Gap> specialModuleGaps, List<Gap> generalGaps) {
             this(demandId, specialModuleGaps.isEmpty() && generalGaps.isEmpty(),
-                    specialModuleGaps, generalGaps);
+                    false, specialModuleGaps, generalGaps);
         }
     }
 
