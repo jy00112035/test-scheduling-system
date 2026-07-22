@@ -2,10 +2,12 @@ package com.testscheduling.controller;
 
 import com.testscheduling.config.GlobalExceptionHandler;
 import com.testscheduling.dto.ScheduleDeleteScope;
+import com.testscheduling.dto.ScheduleRecommendationResponse;
 import com.testscheduling.entity.Schedule;
 import com.testscheduling.exception.BusinessException;
 import com.testscheduling.security.RequestRoleGuard;
 import com.testscheduling.service.ScheduleService;
+import com.testscheduling.service.ScheduleRecommendationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -32,13 +34,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ScheduleControllerTest {
 
     private ScheduleService service;
+    private ScheduleRecommendationService recommendationService;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         service = mock(ScheduleService.class);
+        recommendationService = mock(ScheduleRecommendationService.class);
         ScheduleController controller = new ScheduleController();
         ReflectionTestUtils.setField(controller, "scheduleService", service);
+        ReflectionTestUtils.setField(controller, "recommendationService", recommendationService);
         ReflectionTestUtils.setField(controller, "roleGuard", new RequestRoleGuard());
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new GlobalExceptionHandler())
@@ -247,6 +252,29 @@ class ScheduleControllerTest {
             .andExpect(jsonPath("$.data.length()").value(2));
 
         verify(service).createBatch(any());
+    }
+
+    @Test
+    void recommendationEndpointAllowsSchedulingRoles() throws Exception {
+        when(recommendationService.recommend(any())).thenReturn(
+                new ScheduleRecommendationResponse(List.of(), List.of()));
+
+        mockMvc.perform(authorized(post("/api/schedules/recommend/draft"), "projectManager")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"mode\":\"FULL_DEMAND\",\"demandIds\":[10]}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value(200));
+
+        verify(recommendationService).recommend(any());
+    }
+
+    @Test
+    void recommendationEndpointRejectsOrdinaryExecutor() throws Exception {
+        mockMvc.perform(authorized(post("/api/schedules/recommend/draft"), "testExecutor")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"mode\":\"FULL_DEMAND\",\"demandIds\":[10]}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.data.errorCode").value("FORBIDDEN"));
     }
 
     @Test

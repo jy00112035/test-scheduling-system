@@ -5,11 +5,14 @@ import com.testscheduling.dto.GanttViewItem;
 import com.testscheduling.dto.ScheduleClassificationRequest;
 import com.testscheduling.dto.ScheduleDeleteScope;
 import com.testscheduling.dto.ScheduleMoveRequest;
+import com.testscheduling.dto.ScheduleRecommendationRequest;
+import com.testscheduling.dto.ScheduleRecommendationResponse;
 import com.testscheduling.dto.ScheduleValidationRequest;
 import com.testscheduling.dto.ScheduleValidationResponse;
 import com.testscheduling.entity.Schedule;
 import com.testscheduling.security.RequestRoleGuard;
 import com.testscheduling.service.ScheduleService;
+import com.testscheduling.service.ScheduleRecommendationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
@@ -25,7 +28,17 @@ public class ScheduleController {
     private ScheduleService scheduleService;
 
     @Autowired
+    private ScheduleRecommendationService recommendationService;
+
+    @Autowired
     private RequestRoleGuard roleGuard;
+
+    @PostMapping("/recommend/draft")
+    public ApiResponse<ScheduleRecommendationResponse> recommendDraft(
+            @RequestBody ScheduleRecommendationRequest request) {
+        roleGuard.requireAny("resourceManager", "projectManager", "fieldAdmin");
+        return ApiResponse.success("推荐草稿已生成", recommendationService.recommend(request));
+    }
 
     @GetMapping
     public ApiResponse<List<Schedule>> getAllSchedules() {
