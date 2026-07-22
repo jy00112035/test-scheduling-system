@@ -97,4 +97,45 @@ describe('TestDemandSubmit special module requests', () => {
     expect(await screen.findByText('模块配置不可用')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /新增特殊模块需求/ })).toBeDisabled();
   });
+
+  it('marks and targets the overflow group and special row without submitting', async () => {
+    vi.spyOn(drafts, 'getDraft').mockReturnValue({
+      formData, manpowerInputs: { 功能测试: 1 }, manpowerRemarks: {}, timestamp: 1,
+      specialModuleDemands: [{ moduleId: 11, testType: '功能测试', manpowerDemand: 2 }],
+    });
+    vi.spyOn(Modal, 'confirm').mockImplementation((options: any) => { options.onOk(); return {} as any; });
+    const createDemand = vi.spyOn(api, 'createDemand').mockResolvedValue({});
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+    renderPage();
+    const user = userEvent.setup();
+    const total = await screen.findByRole('spinbutton', { name: '功能测试小组总人力' });
+    await user.click(screen.getByRole('button', { name: /提交需求/ }));
+    const row = screen.getByRole('combobox', { name: '特殊模块 1' });
+    expect(total).toHaveAttribute('aria-invalid', 'true');
+    expect(row).toHaveAttribute('aria-invalid', 'true');
+    expect(document.activeElement).toBe(total);
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(createDemand).not.toHaveBeenCalled();
+  });
+
+  it('marks and focuses the first missing special module without submitting', async () => {
+    vi.spyOn(drafts, 'getDraft').mockReturnValue({
+      formData, manpowerInputs: { 功能测试: 1 }, manpowerRemarks: {}, timestamp: 1,
+      specialModuleDemands: [{ testType: '功能测试', manpowerDemand: 1 }],
+    });
+    vi.spyOn(Modal, 'confirm').mockImplementation((options: any) => { options.onOk(); return {} as any; });
+    const createDemand = vi.spyOn(api, 'createDemand').mockResolvedValue({});
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+    renderPage();
+    const user = userEvent.setup();
+    const moduleControl = await screen.findByRole('combobox', { name: '特殊模块 1' });
+    const groupControl = screen.getByRole('combobox', { name: '小组 1' });
+    await user.click(screen.getByRole('button', { name: /提交需求/ }));
+    expect(moduleControl).toHaveAttribute('aria-invalid', 'true');
+    expect(document.activeElement).toBe(groupControl);
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(createDemand).not.toHaveBeenCalled();
+  });
 });

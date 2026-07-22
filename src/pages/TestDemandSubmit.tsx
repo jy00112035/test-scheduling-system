@@ -217,6 +217,8 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         : '请完善特殊模块人力需求');
       if (specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && specialValidation.testType) {
         document.getElementById(`demand-manpower-${specialValidation.testType}`)?.focus();
+      } else {
+        (specialModuleSectionRef.current?.querySelector('[aria-invalid="true"][role="combobox"], [aria-invalid="true"][role="spinbutton"]') as HTMLElement | null)?.focus();
       }
       specialModuleSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
