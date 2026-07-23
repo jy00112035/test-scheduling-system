@@ -7,6 +7,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Arrays;
+import java.util.ArrayList;
 
 @Service
 public class FieldConfigService {
@@ -26,6 +28,43 @@ public class FieldConfigService {
     public FieldConfig findByFieldName(String fieldName) {
         return fieldConfigRepository.findByFieldName(fieldName)
             .orElse(null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<String> findRegistrationTestTypes() {
+        FieldConfig config = findByFieldName("testType");
+        if (config == null || config.getOptions() == null || config.getOptions().isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(config.getOptions().split(","))
+            .map(String::trim)
+            .filter(option -> !option.isEmpty())
+            .distinct()
+            .toList();
+    }
+
+    @Transactional
+    public void appendStaffOptions(String groupName, String testType) {
+        appendOption("groupName", groupName);
+        appendOption("testType", testType);
+    }
+
+    private void appendOption(String fieldName, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        fieldConfigRepository.findByFieldName(fieldName).ifPresent(config -> {
+            List<String> options = config.getOptions() == null || config.getOptions().isBlank()
+                ? new ArrayList<>()
+                : new ArrayList<>(Arrays.stream(config.getOptions().split(","))
+                    .map(String::trim).filter(option -> !option.isEmpty()).toList());
+            String normalized = value.trim();
+            if (!options.contains(normalized)) {
+                options.add(normalized);
+                config.setOptions(String.join(",", options));
+                fieldConfigRepository.save(config);
+            }
+        });
     }
 
     @Transactional

@@ -98,11 +98,7 @@ public class TestStaffController {
     public ApiResponse<StaffCreateResponse> createStaff(@RequestBody StaffRequest request) {
         requireStaffMutationRole();
         enforceTestLeadScope(request.getTestType());
-        try {
-            return ApiResponse.success("创建成功", testStaffService.create(request));
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+        return ApiResponse.success("创建成功", testStaffService.create(request, currentUsername()));
     }
 
     @PutMapping("/{id}")
@@ -113,35 +109,23 @@ public class TestStaffController {
             enforceTestLeadScope(staff.getTestType());
             enforceTestLeadScope(request.getTestType());
         }
-        try {
-            return ApiResponse.success("更新成功", testStaffService.update(id, request));
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+        return ApiResponse.success("更新成功", testStaffService.update(id, request, currentUsername()));
     }
 
     @DeleteMapping("/batch")
     public ApiResponse<Void> deleteStaffsBatch(@RequestBody List<Long> ids) {
         requireStaffMutationRole();
         denyTestLeadDelete();
-        try {
-            testStaffService.deleteBatch(ids);
-            return ApiResponse.success("批量删除成功", null);
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+        testStaffService.deleteBatch(ids, currentUsername());
+        return ApiResponse.success("批量删除成功", null);
     }
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteStaff(@PathVariable Long id) {
         requireStaffMutationRole();
         denyTestLeadDelete();
-        try {
-            testStaffService.delete(id);
-            return ApiResponse.success("删除成功", null);
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+        testStaffService.delete(id, currentUsername());
+        return ApiResponse.success("删除成功", null);
     }
 
     private void requireStaffMutationRole() {
@@ -167,5 +151,9 @@ public class TestStaffController {
         if (isRestrictedTestLead()) {
             throw new BusinessException("TEST_LEAD_SCOPE_FORBIDDEN", "测试组长无权删除人员");
         }
+    }
+
+    private String currentUsername() {
+        return (String) request.getAttribute("username");
     }
 }

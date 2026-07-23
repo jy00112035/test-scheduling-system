@@ -62,7 +62,7 @@ class StaffDuplicateAccountTransactionIntegrationTest {
         long auditCount = auditLogRepository.count();
         StaffRequest request = request("DUP-CREATE", List.of(module.getId()));
 
-        assertThrows(RuntimeException.class, () -> testStaffService.create(request));
+        assertThrows(RuntimeException.class, () -> testStaffService.create(request, "admin"));
 
         assertEquals(staffCount, staffRepository.count());
         assertEquals(userCount, userRepository.count());
@@ -75,7 +75,7 @@ class StaffDuplicateAccountTransactionIntegrationTest {
     void duplicateUpdateLeavesStaffUsersRelationsAndAuditUnchanged() {
         TestModuleConfig module = moduleRepository.saveAndFlush(module("重复更新模块"));
         TestStaff source = testStaffService.create(
-            request("DUP-SOURCE", List.of(module.getId()))).getStaff();
+            request("DUP-SOURCE", List.of(module.getId())), "admin").getStaff();
         User target = userRepository.saveAndFlush(user("DUP-TARGET"));
         long staffCount = staffRepository.count();
         long userCount = userRepository.count();
@@ -83,7 +83,7 @@ class StaffDuplicateAccountTransactionIntegrationTest {
         long auditCount = auditLogRepository.count();
 
         assertThrows(RuntimeException.class, () -> testStaffService.update(
-            source.getId(), request("DUP-TARGET", List.of())));
+            source.getId(), request("DUP-TARGET", List.of()), "admin"));
 
         TestStaff unchanged = staffRepository.findById(source.getId()).orElseThrow();
         assertEquals("DUP-SOURCE", unchanged.getEmpNo());

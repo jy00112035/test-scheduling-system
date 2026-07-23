@@ -517,13 +517,7 @@ const StaffManagement: React.FC = () => {
         if (!ownsImportSave()) return;
       }
       if (committedRows.length > 0) {
-        try {
-          await syncFieldConfigs(committedRows, ownsImportSave);
-          if (!ownsImportSave()) return;
-          await fetchFieldConfigs();
-        } catch {
-          if (ownsImportSave()) message.warning('人员已导入，但项目/测试类型选项同步失败');
-        }
+        await fetchFieldConfigs();
         if (!ownsImportSave()) return;
         fetchStaffs();
       }
@@ -649,44 +643,6 @@ const StaffManagement: React.FC = () => {
     });
   };
 
-  const syncFieldConfigs = async (
-    rows: { groupName?: string; testType?: string }[],
-    shouldContinue: () => boolean = () => true,
-  ) => {
-    const configs = await api.getFieldConfigs();
-    if (!shouldContinue()) return false;
-    const newGroupNames = [...new Set(rows.map(r => r.groupName).filter(Boolean))];
-    const newTestTypes = [...new Set(rows.map(r => r.testType).filter(Boolean))];
-
-    for (const config of configs) {
-      const currentOptions = config.options ? config.options.split(',').filter((o: string) => o.trim()) : [];
-      let newOptions: string[] | null = null;
-
-      if (config.fieldName === 'groupName') {
-        const merged = [...currentOptions];
-        for (const name of newGroupNames) {
-          if (!merged.includes(name)) merged.push(name);
-        }
-        if (merged.length > currentOptions.length) newOptions = merged;
-      } else if (config.fieldName === 'testType') {
-        const merged = [...currentOptions];
-        for (const type of newTestTypes) {
-          if (!merged.includes(type)) merged.push(type);
-        }
-        if (merged.length > currentOptions.length) newOptions = merged;
-      }
-
-      if (newOptions) {
-        await api.updateFieldConfig(config.id, {
-          ...config,
-          options: newOptions.join(','),
-        });
-        if (!shouldContinue()) return false;
-      }
-    }
-    return true;
-  };
-
   const handleSubmit = async (values: any) => {
     if (staffSaveSessionRef.current !== null) return;
     const session = editSessionRef.current;
@@ -713,25 +669,13 @@ const StaffManagement: React.FC = () => {
       if (editingStaff) {
         await api.updateStaff(editingStaff.id, staffData);
         if (!ownsStaffSave()) return;
-        try {
-          await syncFieldConfigs([staffData], ownsStaffSave);
-          if (!ownsStaffSave()) return;
-          await fetchFieldConfigs();
-        } catch {
-          if (ownsStaffSave()) message.warning('人员已更新，但项目/测试类型选项同步失败');
-        }
+        await fetchFieldConfigs();
         if (!ownsStaffSave()) return;
         message.success('人员信息已更新');
       } else {
         await api.createStaff(staffData);
         if (!ownsStaffSave()) return;
-        try {
-          await syncFieldConfigs([staffData], ownsStaffSave);
-          if (!ownsStaffSave()) return;
-          await fetchFieldConfigs();
-        } catch {
-          if (ownsStaffSave()) message.warning('人员已添加，但项目/测试类型选项同步失败');
-        }
+        await fetchFieldConfigs();
         if (!ownsStaffSave()) return;
         message.success('人员已添加，初始登录密码为 12345678');
       }

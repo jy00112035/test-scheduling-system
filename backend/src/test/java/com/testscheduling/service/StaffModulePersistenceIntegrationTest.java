@@ -64,19 +64,19 @@ class StaffModulePersistenceIntegrationTest {
         StaffRequest create = request("能力-T1001", "自动化测试", List.of(payment.getId()));
         create.setFamiliarModules("支付模块-跨组");
 
-        var created = testStaffService.create(create).getStaff();
+        var created = testStaffService.create(create, "admin").getStaff();
 
         assertEquals(List.of(payment.getId()),
             created.getFamiliarModules().stream().map(TestModuleConfig::getId).toList());
 
         StaffRequest preserve = request("能力-T1001", "自动化测试", null);
-        TestStaff preserved = testStaffService.update(created.getId(), preserve);
+        TestStaff preserved = testStaffService.update(created.getId(), preserve, "admin");
         assertEquals(List.of(payment.getId()),
             preserved.getFamiliarModules().stream().map(TestModuleConfig::getId).toList());
         assertEquals("支付模块-跨组", preserved.getLegacyFamiliarModules());
 
         StaffRequest clear = request("能力-T1001", "自动化测试", List.of());
-        TestStaff cleared = testStaffService.update(created.getId(), clear);
+        TestStaff cleared = testStaffService.update(created.getId(), clear, "admin");
         assertTrue(cleared.getFamiliarModules().isEmpty());
         assertTrue(staffModuleRepository.findModuleIdsByStaffId(created.getId()).isEmpty());
     }
@@ -151,9 +151,9 @@ class StaffModulePersistenceIntegrationTest {
         TestModuleConfig module = moduleRepository.saveAndFlush(
             module("删除顺序模块", "功能测试", true));
         StaffRequest create = request("能力-T4001", "功能测试", List.of(module.getId()));
-        TestStaff staff = testStaffService.create(create).getStaff();
+        TestStaff staff = testStaffService.create(create, "admin").getStaff();
 
-        testStaffService.delete(staff.getId());
+        testStaffService.delete(staff.getId(), "admin");
         staffRepository.flush();
 
         assertFalse(staffRepository.existsById(staff.getId()));

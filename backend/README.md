@@ -21,18 +21,17 @@
 
 ```bash
 cd backend
+export JWT_SECRET="$(openssl rand -base64 48)"
 mvn spring-boot:run
 ```
+
+`JWT_SECRET` 必须由本机或部署环境生成并注入，仓库不提供默认签名密钥。生产环境应将密钥保存在仓库外的密钥管理或受限环境文件中。
 
 服务将在 http://localhost:8080 启动
 
 ### H2 控制台
 
-访问 http://localhost:8080/h2-console
-
-- JDBC URL: `jdbc:h2:mem:testdb`
-- Username: `sa`
-- Password: (空)
+H2 控制台默认关闭，且安全策略拒绝 `/h2-console/**`。
 
 ## 默认用户
 

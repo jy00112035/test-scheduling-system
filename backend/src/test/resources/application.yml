@@ -13,5 +13,5 @@ spring:
       ddl-auto: validate
 
 jwt:
-  secret: TestSchedulingSecretKey2024VeryLongSecretKeyForJWTTokenGeneration
+  secret: test-only-jwt-signing-secret-isolated-from-runtime-2026
   expiration: 86400000

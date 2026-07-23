@@ -89,7 +89,7 @@ class SpecialModuleSchedulingIntegrationTest {
     void removingFamiliarityAfterRecommendationBlocksStrictPublish() {
         Workflow workflow = recommendedWorkflow("能力移除");
         staffService.update(workflow.staff().getId(),
-            staffRequest(workflow.staff(), List.of()));
+            staffRequest(workflow.staff(), List.of()), "admin");
 
         BusinessException error = assertThrows(BusinessException.class,
             () -> publishService.publishOne(workflow.demand().getId()));
@@ -110,7 +110,7 @@ class SpecialModuleSchedulingIntegrationTest {
         Workflow invalid = recommendedWorkflow("批量失败");
         Workflow valid = recommendedWorkflow("批量成功");
         staffService.update(invalid.staff().getId(),
-            staffRequest(invalid.staff(), List.of()));
+            staffRequest(invalid.staff(), List.of()), "admin");
 
         BatchPublishResponse response = publishService.publishBatch(new BatchPublishRequest(
             List.of(invalid.demand().getId(), valid.demand().getId())));
@@ -161,7 +161,7 @@ class SpecialModuleSchedulingIntegrationTest {
         request.setRoles(List.of("testExecutor"));
         request.setFamiliarModuleIds(familiarModuleIds);
         request.setConfidentialClearance(false);
-        return staffService.create(request).getStaff();
+        return staffService.create(request, "admin").getStaff();
     }
 
     private StaffRequest staffRequest(TestStaff staff, List<Long> familiarModuleIds) {

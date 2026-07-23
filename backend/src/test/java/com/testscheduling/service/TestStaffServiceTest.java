@@ -7,6 +7,8 @@ import com.testscheduling.dto.StaffRequest;
 import com.testscheduling.entity.TestModuleConfig;
 import com.testscheduling.entity.TestStaff;
 import com.testscheduling.entity.User;
+import com.testscheduling.exception.BusinessException;
+import com.testscheduling.security.StaffRoleAssignmentPolicy;
 import com.testscheduling.repository.TestStaffRepository;
 import com.testscheduling.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.data.domain.PageRequest;
@@ -49,6 +52,12 @@ class TestStaffServiceTest {
     @Mock
     private StaffModuleService staffModuleService;
 
+    @Mock
+    private FieldConfigService fieldConfigService;
+
+    @Spy
+    private StaffRoleAssignmentPolicy roleAssignmentPolicy = new StaffRoleAssignmentPolicy();
+
     @InjectMocks
     private TestStaffService service;
 
@@ -62,6 +71,8 @@ class TestStaffServiceTest {
         request.setFamiliarModules("支付模块");
         lenient().when(testStaffRepository.findByIdForUpdate(any()))
             .thenAnswer(invocation -> testStaffRepository.findById(invocation.getArgument(0)));
+        lenient().when(userRepository.findByUsername("actor-admin"))
+            .thenReturn(Optional.of(actor("actor-admin", List.of("admin"), null)));
     }
 
     @Test
@@ -77,9 +88,10 @@ class TestStaffServiceTest {
         when(staffModuleService.findModulesByStaffId(101L)).thenReturn(List.of());
         when(userRepository.findByUsername("T1001")).thenReturn(Optional.of(user("T1001", "支付模块")));
 
-        StaffCreateResponse response = service.create(request);
+        StaffCreateResponse response = service.create(request, "actor-admin");
 
         verify(staffModuleService, never()).replaceModules(any(), any());
+        verify(fieldConfigService).appendStaffOptions(null, null);
         assertEquals("支付模块", response.getStaff().getLegacyFamiliarModules());
         assertEquals(List.of(), response.getStaff().getFamiliarModules());
     }
@@ -88,7 +100,7 @@ class TestStaffServiceTest {
     void duplicateCreateChecksAccountBeforeSavingStaff() {
         when(userRepository.existsByUsername("T1001")).thenReturn(true);
 
-        assertThrows(RuntimeException.class, () -> service.create(request));
+        assertThrows(RuntimeException.class, () -> service.create(request, "actor-admin"));
 
         verify(testStaffRepository, never()).save(any());
         verify(userRepository, never()).save(any());
@@ -106,7 +118,7 @@ class TestStaffServiceTest {
         when(staffModuleService.replaceModules(existing, List.of())).thenReturn(List.of());
         when(staffModuleService.findModulesByStaffId(101L)).thenReturn(List.of());
 
-        TestStaff response = service.update(101L, request);
+        TestStaff response = service.update(101L, request, "actor-admin");
 
         verify(staffModuleService).replaceModules(existing, List.of());
         assertEquals(List.of(), response.getFamiliarModules());
@@ -125,7 +137,7 @@ class TestStaffServiceTest {
         when(staffModuleService.replaceModules(existing, List.of(11L))).thenReturn(List.of(payment));
         when(staffModuleService.findModulesByStaffId(101L)).thenReturn(List.of(payment));
 
-        TestStaff response = service.update(101L, request);
+        TestStaff response = service.update(101L, request, "actor-admin");
 
         assertEquals(List.of(payment), response.getFamiliarModules());
         verify(staffModuleService).findModulesByStaffId(101L);
@@ -143,7 +155,7 @@ class TestStaffServiceTest {
         when(userRepository.findByUsername("T1001")).thenReturn(Optional.of(current));
         when(userRepository.findByUsername("T2002")).thenReturn(Optional.of(target));
 
-        assertThrows(RuntimeException.class, () -> service.update(101L, request));
+        assertThrows(RuntimeException.class, () -> service.update(101L, request, "actor-admin"));
 
         assertEquals("T1001", existing.getEmpNo());
         verify(testStaffRepository, never()).save(any());
@@ -241,6 +253,37 @@ class TestStaffServiceTest {
         verify(userRepository, never()).findByUsername(anyString());
     }
 
+    @Test
+    void serviceRejectsAdminAndActorSpecificRoleEscalationBeforePersistence() {
+        request.setRoles(List.of("admin"));
+        BusinessException adminError = assertThrows(BusinessException.class,
+            () -> service.create(request, "actor-admin"));
+        assertEquals("STAFF_ADMIN_ROLE_FORBIDDEN", adminError.getErrorCode());
+
+        User resource = actor("actor-resource", List.of("resourceManager"), null);
+        when(userRepository.findByUsername("actor-resource")).thenReturn(Optional.of(resource));
+        request.setRoles(List.of("resourceManager"));
+        BusinessException escalation = assertThrows(BusinessException.class,
+            () -> service.create(request, "actor-resource"));
+        assertEquals("STAFF_ROLE_ASSIGNMENT_FORBIDDEN", escalation.getErrorCode());
+
+        verify(testStaffRepository, never()).save(any());
+    }
+
+    @Test
+    void serviceDeniesTestLeadCreationEvenForMatchingTestType() {
+        when(userRepository.findByUsername("actor-lead")).thenReturn(Optional.of(
+            actor("actor-lead", List.of("testLead"), "功能测试")));
+        request.setTestType("功能测试");
+        request.setRoles(List.of("testExecutor"));
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service.create(request, "actor-lead"));
+
+        assertEquals("TEST_LEAD_CREATE_FORBIDDEN", error.getErrorCode());
+        verify(testStaffRepository, never()).save(any());
+    }
+
     private TestStaff staff(Long id, String empNo) {
         TestStaff staff = new TestStaff();
         staff.setId(id);
@@ -254,6 +297,15 @@ class TestStaffServiceTest {
         user.setUsername(username);
         user.setFamiliarModules(familiarModules);
         user.setConfidentialClearance(false);
+        return user;
+    }
+
+    private User actor(String username, List<String> roles, String testType) {
+        User user = new User();
+        user.setUsername(username);
+        user.setRoles(roles);
+        user.setTestType(testType);
+        user.setEnabled(true);
         return user;
     }
 

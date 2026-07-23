@@ -9,6 +9,8 @@ import com.testscheduling.entity.TestStaff;
 import com.testscheduling.entity.User;
 import com.testscheduling.repository.TestStaffRepository;
 import com.testscheduling.repository.UserRepository;
+import com.testscheduling.security.StaffRoleAssignmentPolicy;
+import com.testscheduling.exception.BusinessException;
 import com.testscheduling.util.PasswordGenerator;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -41,6 +43,12 @@ public class TestStaffService {
 
     @Autowired
     private StaffModuleService staffModuleService;
+
+    @Autowired
+    private StaffRoleAssignmentPolicy roleAssignmentPolicy;
+
+    @Autowired
+    private FieldConfigService fieldConfigService;
 
     public List<TestStaff> findAll() {
         List<TestStaff> staffs = testStaffRepository.findAll();
@@ -101,7 +109,9 @@ public class TestStaffService {
     }
 
     @Transactional
-    public StaffCreateResponse create(StaffRequest request) {
+    public StaffCreateResponse create(StaffRequest request, String actorUsername) {
+        User actor = requireActor(actorUsername);
+        List<String> assignedRoles = roleAssignmentPolicy.authorizeCreate(actor, request);
         if (userRepository.existsByUsername(request.getEmpNo())) {
             throw duplicateAccount();
         }
@@ -124,16 +134,13 @@ public class TestStaffService {
         User user = new User();
         user.setUsername(request.getEmpNo());
         user.setPassword(passwordEncoder.encode(plainPassword));
-        if (request.getRoles() != null && !request.getRoles().isEmpty()) {
-            user.setRoles(request.getRoles());
-        } else {
-            user.setRole(request.getRole() != null ? request.getRole() : "testExecutor");
-        }
+        user.setRoles(assignedRoles);
         user.setDisplayName(request.getName());
         user.setFamiliarModules(request.getFamiliarModules());
         user.setConfidentialClearance(request.getConfidentialClearance() != null ? request.getConfidentialClearance() : false);
         user.setEnabled(true);
         userRepository.save(user);
+        fieldConfigService.appendStaffOptions(request.getGroupName(), request.getTestType());
 
         if (request.getFamiliarModuleIds() != null) {
             staffModuleService.replaceModules(savedStaff, request.getFamiliarModuleIds());
@@ -144,11 +151,14 @@ public class TestStaffService {
     }
 
     @Transactional
-    public TestStaff update(Long id, StaffRequest request) {
+    public TestStaff update(Long id, StaffRequest request, String actorUsername) {
         TestStaff existing = testStaffRepository.findById(id)
             .orElseThrow(() -> new RuntimeException("人员不存在"));
         String oldEmpNo = existing.getEmpNo();
         User user = userRepository.findByUsername(oldEmpNo).orElse(null);
+        User actor = requireActor(actorUsername);
+        List<String> assignedRoles = roleAssignmentPolicy.authorizeUpdate(
+            actor, user, existing, request);
         if (!Objects.equals(oldEmpNo, request.getEmpNo())) {
             User targetUser = userRepository.findByUsername(request.getEmpNo()).orElse(null);
             if (targetUser != null
@@ -185,18 +195,13 @@ public class TestStaffService {
             user.setUsername(request.getEmpNo());
         }
 
-        if (request.getRoles() != null && !request.getRoles().isEmpty()) {
-            user.setRoles(request.getRoles());
-        } else if (request.getRole() != null) {
-            user.setRole(request.getRole());
-        } else if (user.getRole() == null) {
-            user.setRole("testExecutor");
-        }
+        user.setRoles(assignedRoles);
         if (request.getFamiliarModules() != null) {
             user.setFamiliarModules(request.getFamiliarModules());
         }
         user.setConfidentialClearance(request.getConfidentialClearance() != null ? request.getConfidentialClearance() : false);
         userRepository.save(user);
+        fieldConfigService.appendStaffOptions(request.getGroupName(), request.getTestType());
 
         enrichWithRole(saved);
 
@@ -208,20 +213,26 @@ public class TestStaffService {
     }
 
     @Transactional
-    public void delete(Long id) {
+    public void delete(Long id, String actorUsername) {
         TestStaff staff = testStaffRepository.findByIdForUpdate(id)
             .orElseThrow(() -> new RuntimeException("人员不存在"));
+        roleAssignmentPolicy.authorizeDelete(requireActor(actorUsername),
+            userRepository.findByUsername(staff.getEmpNo()).orElse(null), staff);
         staffModuleService.deleteForStaff(id);
         userRepository.findByUsername(staff.getEmpNo()).ifPresent(user -> userRepository.delete(user));
         testStaffRepository.deleteById(id);
     }
 
     @Transactional
-    public void deleteBatch(List<Long> ids) {
-        ids.stream().filter(Objects::nonNull).distinct().sorted()
-            .forEach(id -> testStaffRepository.findByIdForUpdate(id)
-                .orElseThrow(() -> new RuntimeException("人员不存在")));
-        List<String> empNos = testStaffRepository.findAllById(ids).stream()
+    public void deleteBatch(List<Long> ids, String actorUsername) {
+        User actor = requireActor(actorUsername);
+        List<TestStaff> staffs = ids.stream().filter(Objects::nonNull).distinct().sorted()
+            .map(id -> testStaffRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new RuntimeException("人员不存在")))
+            .toList();
+        staffs.forEach(staff -> roleAssignmentPolicy.authorizeDelete(actor,
+            userRepository.findByUsername(staff.getEmpNo()).orElse(null), staff));
+        List<String> empNos = staffs.stream()
             .map(TestStaff::getEmpNo)
             .collect(Collectors.toList());
         if (!empNos.isEmpty()) {
@@ -229,6 +240,15 @@ public class TestStaffService {
             userRepository.deleteByUsernameIn(empNos);
         }
         testStaffRepository.deleteAllById(ids);
+    }
+
+    private User requireActor(String actorUsername) {
+        User actor = actorUsername == null ? null
+            : userRepository.findByUsername(actorUsername).orElse(null);
+        if (actor == null || !Boolean.TRUE.equals(actor.getEnabled())) {
+            throw new BusinessException("FORBIDDEN", "无权限执行此操作");
+        }
+        return actor;
     }
 
     public LegacyModuleMigrationReport migrateLegacyModules() {

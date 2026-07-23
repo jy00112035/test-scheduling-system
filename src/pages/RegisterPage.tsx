@@ -19,11 +19,7 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateLogin }) => {
   useEffect(() => {
     const fetchTestTypeConfig = async () => {
       try {
-        const configs = await api.getFieldConfigs();
-        const testTypeConfig = configs.find((c: any) => c.fieldName === 'testType');
-        if (testTypeConfig && testTypeConfig.options) {
-          setTestTypeOptions(testTypeConfig.options.split(',').map((s: string) => s.trim()));
-        }
+        setTestTypeOptions(await api.getRegistrationTestTypes());
       } catch (error) {
         console.error('获取测试类型配置失败:', error);
       }

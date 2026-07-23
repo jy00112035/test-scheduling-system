@@ -69,7 +69,7 @@ class StaffModuleTransactionIntegrationTest {
         request.setEmpNo("能力-ROLLBACK");
         request.setFamiliarModuleIds(List.of(module.getId()));
 
-        assertThrows(IllegalStateException.class, () -> testStaffService.create(request));
+        assertThrows(IllegalStateException.class, () -> testStaffService.create(request, "admin"));
 
         assertFalse(staffRepository.findByEmpNo("能力-ROLLBACK").isPresent());
         assertFalse(userRepository.findByUsername("能力-ROLLBACK").isPresent());

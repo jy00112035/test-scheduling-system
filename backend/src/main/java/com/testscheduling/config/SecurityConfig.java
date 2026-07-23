@@ -3,6 +3,8 @@ package com.testscheduling.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.testscheduling.dto.ApiResponse;
 import com.testscheduling.dto.ErrorData;
+import com.testscheduling.entity.User;
+import com.testscheduling.repository.UserRepository;
 import com.testscheduling.util.JwtUtil;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -54,6 +56,7 @@ public class SecurityConfig {
             }))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/auth/registration-options/test-types").permitAll()
                 .requestMatchers("/h2-console/**").denyAll()
                 .anyRequest().authenticated()
             )
@@ -70,6 +73,9 @@ public class SecurityConfig {
         @Autowired
         private JwtUtil jwtUtil;
 
+        @Autowired
+        private UserRepository userRepository;
+
         @Override
         protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
                 throws ServletException, IOException {
@@ -79,7 +85,13 @@ public class SecurityConfig {
                 String token = authHeader.substring(7);
                 try {
                     String username = jwtUtil.getUsernameFromToken(token);
-                    List<String> roles = jwtUtil.getRolesFromToken(token);
+                    User user = userRepository.findByUsername(username)
+                        .filter(candidate -> Boolean.TRUE.equals(candidate.getEnabled()))
+                        .orElseThrow(() -> new IllegalArgumentException("Unknown or disabled JWT subject"));
+                    List<String> roles = user.getRoles() == null ? List.of() : user.getRoles();
+                    if (roles.isEmpty()) {
+                        throw new IllegalArgumentException("JWT subject has no roles");
+                    }
                     request.setAttribute("username", username);
                     request.setAttribute("roles", roles);
                     request.setAttribute("role", roles.isEmpty() ? null : roles.get(0));

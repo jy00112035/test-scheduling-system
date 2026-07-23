@@ -1,7 +1,9 @@
 package com.testscheduling.controller;
 
 import com.testscheduling.entity.TestModuleConfig;
+import com.testscheduling.entity.User;
 import com.testscheduling.repository.TestModuleConfigRepository;
+import com.testscheduling.repository.UserRepository;
 import com.testscheduling.util.JwtUtil;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +42,9 @@ class TestStaffModuleHttpIntegrationTest {
 
     @Autowired
     private TestModuleConfigRepository moduleRepository;
+
+    @Autowired
+    private UserRepository userRepository;
 
     @Test
     void staffResponseUsesStructuredModulesAndSeparateLegacyProperty() throws Exception {
@@ -96,6 +101,12 @@ class TestStaffModuleHttpIntegrationTest {
     }
 
     private String bearer(String username, String role) {
+        User user = userRepository.findByUsername(username).orElseGet(User::new);
+        user.setUsername(username);
+        if (user.getPassword() == null) user.setPassword("unused-test-password");
+        user.setRoles(List.of(role));
+        user.setEnabled(true);
+        userRepository.saveAndFlush(user);
         return "Bearer " + jwtUtil.generateToken(username, List.of(role));
     }
 }

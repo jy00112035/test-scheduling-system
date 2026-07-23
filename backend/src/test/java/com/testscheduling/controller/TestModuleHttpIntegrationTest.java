@@ -2,6 +2,8 @@ package com.testscheduling.controller;
 
 import com.testscheduling.dto.TestModuleRequest;
 import com.testscheduling.entity.TestModuleConfig;
+import com.testscheduling.entity.User;
+import com.testscheduling.repository.UserRepository;
 import com.testscheduling.service.TestModuleService;
 import com.testscheduling.util.JwtUtil;
 import org.junit.jupiter.api.Test;
@@ -43,6 +45,9 @@ class TestModuleHttpIntegrationTest {
 
     @Autowired
     private TestModuleService moduleService;
+
+    @Autowired
+    private UserRepository userRepository;
 
     @Test
     void returnsHttp400WithStableErrorDataForBusinessValidation() throws Exception {
@@ -92,6 +97,12 @@ class TestModuleHttpIntegrationTest {
     }
 
     private String bearer(String username, String role) {
+        User user = userRepository.findByUsername(username).orElseGet(User::new);
+        user.setUsername(username);
+        if (user.getPassword() == null) user.setPassword("unused-test-password");
+        user.setRoles(List.of(role));
+        user.setEnabled(true);
+        userRepository.saveAndFlush(user);
         return "Bearer " + jwtUtil.generateToken(username, List.of(role));
     }
 }

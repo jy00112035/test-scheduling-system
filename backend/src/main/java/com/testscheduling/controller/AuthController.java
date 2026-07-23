@@ -8,6 +8,7 @@ import com.testscheduling.dto.RegisterRequest;
 import com.testscheduling.entity.User;
 import com.testscheduling.security.RequestRoleGuard;
 import com.testscheduling.service.AuthService;
+import com.testscheduling.service.FieldConfigService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +25,9 @@ public class AuthController {
 
     @Autowired
     private RequestRoleGuard roleGuard;
+
+    @Autowired
+    private FieldConfigService fieldConfigService;
 
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
@@ -62,6 +66,11 @@ public class AuthController {
         } catch (Exception e) {
             return ApiResponse.error(e.getMessage());
         }
+    }
+
+    @GetMapping("/registration-options/test-types")
+    public ApiResponse<List<String>> getRegistrationTestTypes() {
+        return ApiResponse.success(fieldConfigService.findRegistrationTestTypes());
     }
 
     @SuppressWarnings("unchecked")

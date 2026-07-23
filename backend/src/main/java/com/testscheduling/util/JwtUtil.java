@@ -17,11 +17,21 @@ import java.util.stream.Collectors;
 @Component
 public class JwtUtil {
 
-    @Value("${jwt.secret}")
-    private String secret;
+    private static final String SECRET_CONFIGURATION_ERROR =
+        "JWT signing secret must be supplied through JWT_SECRET and contain at least 32 characters";
 
-    @Value("${jwt.expiration}")
-    private Long expiration;
+    private final String secret;
+    private final Long expiration;
+
+    public JwtUtil(
+            @Value("${jwt.secret}") String secret,
+            @Value("${jwt.expiration}") Long expiration) {
+        if (secret == null || secret.isBlank() || secret.length() < 32) {
+            throw new IllegalStateException(SECRET_CONFIGURATION_ERROR);
+        }
+        this.secret = secret;
+        this.expiration = expiration;
+    }
 
     private SecretKey getSigningKey() {
         byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);

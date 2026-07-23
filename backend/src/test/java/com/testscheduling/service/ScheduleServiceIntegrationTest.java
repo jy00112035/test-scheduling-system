@@ -308,7 +308,7 @@ class ScheduleServiceIntegrationTest {
                 operationStarted.countDown();
                 staffDailyStatusService.setStatus(staff.getId(), DATE,
                     com.testscheduling.entity.StaffDailyStatus.DailyAvailabilityStatus.OTHER_TASKS,
-                    100.0);
+                    100.0, "admin");
                 return Boolean.TRUE;
             });
             assertTrue(operationStarted.await(5, TimeUnit.SECONDS));

@@ -121,6 +121,10 @@ class ApiService {
     });
   }
 
+  async getRegistrationTestTypes() {
+    return this.request<string[]>('/auth/registration-options/test-types');
+  }
+
   async getPendingApprovals() {
     return this.request<any[]>('/auth/pending-approvals');
   }
