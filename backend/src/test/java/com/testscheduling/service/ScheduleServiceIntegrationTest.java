@@ -173,11 +173,15 @@ class ScheduleServiceIntegrationTest {
         published.setDate(DATE.plusDays(1));
         published.setPublished(true);
         published = scheduleRepository.saveAndFlush(published);
+        demand.setStatus(TestDemand.DemandStatus.scheduled);
+        demandRepository.saveAndFlush(demand);
 
         scheduleService.deleteByDemandId(demand.getId(), ScheduleDeleteScope.DRAFT_ONLY);
 
         assertTrue(scheduleRepository.findById(draft.getId()).isEmpty());
         assertTrue(scheduleRepository.findById(published.getId()).isPresent());
+        assertEquals(TestDemand.DemandStatus.scheduled,
+            demandRepository.findById(demand.getId()).orElseThrow().getStatus());
         Schedule finalPublished = published;
         BusinessException protectedError = assertThrows(BusinessException.class,
             () -> scheduleService.delete(finalPublished.getId()));
@@ -185,6 +189,8 @@ class ScheduleServiceIntegrationTest {
 
         scheduleService.deleteByDemandId(demand.getId(), ScheduleDeleteScope.ALL);
         assertTrue(scheduleRepository.findByDemandId(demand.getId()).isEmpty());
+        assertEquals(TestDemand.DemandStatus.pending,
+            demandRepository.findById(demand.getId()).orElseThrow().getStatus());
     }
 
     @Test

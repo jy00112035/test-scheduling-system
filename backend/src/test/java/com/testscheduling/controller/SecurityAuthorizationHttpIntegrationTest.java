@@ -2,9 +2,11 @@ package com.testscheduling.controller;
 
 import com.testscheduling.util.JwtUtil;
 import com.testscheduling.entity.FieldConfig;
+import com.testscheduling.entity.TestDemand;
 import com.testscheduling.entity.TestStaff;
 import com.testscheduling.entity.User;
 import com.testscheduling.repository.FieldConfigRepository;
+import com.testscheduling.repository.TestDemandRepository;
 import com.testscheduling.repository.TestStaffRepository;
 import com.testscheduling.repository.UserRepository;
 import org.junit.jupiter.api.Test;
@@ -43,6 +45,7 @@ class SecurityAuthorizationHttpIntegrationTest {
     @Autowired UserRepository userRepository;
     @Autowired TestStaffRepository staffRepository;
     @Autowired FieldConfigRepository fieldConfigRepository;
+    @Autowired TestDemandRepository demandRepository;
 
     @Test
     void registrationRemainsPublicButResourceWritesRequireAuthentication() throws Exception {
@@ -132,6 +135,101 @@ class SecurityAuthorizationHttpIntegrationTest {
                     """))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value(200));
+    }
+
+    @Test
+    void demandWritesIgnoreForgedLifecycleFieldsAndUseExplicitTransitions() throws Exception {
+        String editorUsername = "demand-lifecycle-editor";
+        String editor = bearer(editorUsername, "testManager");
+        String approver = bearer("demand-lifecycle-approver", "projectManager");
+        for (String forgedStatus : List.of("pending", "scheduled", "completed")) {
+            String forgedProduct = "Forged Demand " + forgedStatus + "-" + UUID.randomUUID();
+            mockMvc.perform(post("/api/demands")
+                    .header("Authorization", editor)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""
+                        {
+                          "product":"%s",
+                          "versionType":"release",
+                          "status":"%s",
+                          "submittedBy":"forged-submitter",
+                          "manpowerDetails":[
+                            {"testType":"功能测试","manpowerDemand":1.0}
+                          ],
+                          "specialModuleDemands":[]
+                        }
+                        """.formatted(forgedProduct, forgedStatus)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("submitted"))
+                .andExpect(jsonPath("$.data.submittedBy").value(editorUsername));
+        }
+
+        String product = "Lifecycle Trust Boundary-" + UUID.randomUUID();
+        String request = """
+            {
+              "product":"%s",
+              "versionType":"release",
+              "status":"completed",
+              "submittedBy":"forged-submitter",
+              "manpowerDetails":[
+                {"testType":"功能测试","manpowerDemand":1.0}
+              ],
+              "specialModuleDemands":[]
+            }
+            """.formatted(product);
+
+        mockMvc.perform(post("/api/demands")
+                .header("Authorization", editor)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.status").value("submitted"))
+            .andExpect(jsonPath("$.data.submittedBy").value(editorUsername));
+
+        TestDemand created = demandRepository.findByProduct(product).getFirst();
+        mockMvc.perform(put("/api/demands/{id}", created.getId())
+                .header("Authorization", editor)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request.replace("\"completed\"", "\"scheduled\"")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.status").value("submitted"))
+            .andExpect(jsonPath("$.data.submittedBy").value(editorUsername));
+
+        mockMvc.perform(put("/api/demands/{id}/approve", created.getId())
+                .header("Authorization", approver))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.status").value("pending"));
+
+        mockMvc.perform(put("/api/demands/{id}", created.getId())
+                .header("Authorization", editor)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.status").value("pending"))
+            .andExpect(jsonPath("$.data.submittedBy").value(editorUsername));
+
+        mockMvc.perform(post("/api/demands/{id}/close", created.getId())
+                .header("Authorization", editor))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.data.errorCode")
+                .value("DEMAND_STATUS_TRANSITION_INVALID"));
+
+        String rejectedProduct = "Lifecycle Resubmit-" + UUID.randomUUID();
+        mockMvc.perform(post("/api/demands")
+                .header("Authorization", editor)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request.replace(product, rejectedProduct)))
+            .andExpect(status().isOk());
+        TestDemand rejected = demandRepository.findByProduct(rejectedProduct).getFirst();
+
+        mockMvc.perform(put("/api/demands/{id}/reject", rejected.getId())
+                .header("Authorization", approver))
+            .andExpect(status().isOk());
+        mockMvc.perform(put("/api/demands/{id}/resubmit", rejected.getId())
+                .header("Authorization", editor))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.status").value("submitted"))
+            .andExpect(jsonPath("$.data.submittedBy").value(editorUsername));
     }
 
     @Test

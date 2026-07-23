@@ -80,6 +80,8 @@ class SchedulePublishIntegrationTest {
         assertEquals(1, publishService.publishOne(demand.getId()));
 
         assertTrue(scheduleRepository.findById(row.getId()).orElseThrow().getPublished());
+        assertEquals(TestDemand.DemandStatus.scheduled,
+            demandRepository.findById(demand.getId()).orElseThrow().getStatus());
         assertTrue(audits(demand).stream().anyMatch(a -> "SCHEDULE_PUBLISHED".equals(a.getActionType())));
     }
 
@@ -133,6 +135,8 @@ class SchedulePublishIntegrationTest {
 
         assertEquals("STAFF_MODULE_NOT_FAMILIAR", error.getErrorCode());
         assertFalse(scheduleRepository.findById(specialRow.getId()).orElseThrow().getPublished());
+        assertEquals(TestDemand.DemandStatus.pending,
+            demandRepository.findById(demand.getId()).orElseThrow().getStatus());
         var failure = audits(demand).stream().filter(a ->
             "SCHEDULE_PUBLISH_FAILED".equals(a.getActionType())).findFirst().orElseThrow();
         assertTrue(failure.getAfterValue().contains("\"scheduleId\":" + specialRow.getId()));
@@ -218,6 +222,10 @@ class SchedulePublishIntegrationTest {
         assertEquals("GENERAL_MANPOWER_UNFULFILLED", response.failed().get(0).reasonCode());
         assertTrue(scheduleRepository.findByDemandId(valid.getId()).get(0).getPublished());
         assertFalse(scheduleRepository.findByDemandId(invalid.getId()).get(0).getPublished());
+        assertEquals(TestDemand.DemandStatus.scheduled,
+            demandRepository.findById(valid.getId()).orElseThrow().getStatus());
+        assertEquals(TestDemand.DemandStatus.pending,
+            demandRepository.findById(invalid.getId()).orElseThrow().getStatus());
         assertTrue(audits(invalid).stream().anyMatch(a ->
             "SCHEDULE_PUBLISH_FAILED".equals(a.getActionType())
                 && a.getAfterValue().contains("GENERAL_MANPOWER_UNFULFILLED")

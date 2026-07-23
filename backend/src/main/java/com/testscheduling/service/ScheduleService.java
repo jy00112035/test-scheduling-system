@@ -184,10 +184,15 @@ public class ScheduleService {
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public void deleteByDemandId(Long demandId, ScheduleDeleteScope scope) {
-        lockDemandIds(List.of(demandId));
+        TestDemand demand = demandRepository.findByIdForUpdate(demandId)
+            .orElseThrow(() -> error("DEMAND_NOT_FOUND", "测试需求不存在"));
         scheduleRepository.findByDemandIdForUpdate(demandId);
         if (scope == ScheduleDeleteScope.ALL) {
             scheduleRepository.deleteByDemandId(demandId);
+            if (demand.getStatus() == TestDemand.DemandStatus.scheduled) {
+                demand.setStatus(TestDemand.DemandStatus.pending);
+                demandRepository.save(demand);
+            }
         } else {
             scheduleRepository.deleteByDemandIdAndPublishedFalse(demandId);
         }

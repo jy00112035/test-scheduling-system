@@ -16,6 +16,10 @@ public interface FieldConfigRepository extends JpaRepository<FieldConfig, Long> 
     Optional<FieldConfig> findByFieldName(String fieldName);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT f FROM FieldConfig f WHERE f.id = :id")
+    Optional<FieldConfig> findByIdForUpdate(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT f FROM FieldConfig f WHERE f.fieldName = :fieldName")
     Optional<FieldConfig> findByFieldNameForUpdate(@Param("fieldName") String fieldName);
 

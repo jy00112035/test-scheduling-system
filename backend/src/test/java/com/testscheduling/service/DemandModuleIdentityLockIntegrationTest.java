@@ -70,7 +70,8 @@ class DemandModuleIdentityLockIntegrationTest {
         }).when(specialRepository).saveAll(any());
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
-        Future<TestDemand> creation = executor.submit(() -> demandService.create(demand(module.getId())));
+        Future<TestDemand> creation = executor.submit(() ->
+            demandService.create(demand(module.getId()), "integration-test"));
         Future<?> update = null;
         try {
             assertTrue(beforeSpecialSave.await(5, TimeUnit.SECONDS));

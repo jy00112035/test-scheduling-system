@@ -84,6 +84,11 @@ public class StaffModuleService {
         return requestedIds.stream().map(modulesById::get).toList();
     }
 
+    @Transactional
+    public void lockModulesForStaffUpdate(List<Long> requestedModuleIds) {
+        lockModuleIds(distinctIds(requestedModuleIds));
+    }
+
     @Transactional(readOnly = true)
     public Map<Long, List<TestModuleConfig>> findModulesByStaffIds(List<Long> staffIds) {
         if (staffIds == null || staffIds.isEmpty()) {

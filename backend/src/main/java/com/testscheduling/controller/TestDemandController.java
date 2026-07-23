@@ -4,6 +4,7 @@ import com.testscheduling.dto.ApiResponse;
 import com.testscheduling.entity.TestDemand;
 import com.testscheduling.security.RequestRoleGuard;
 import com.testscheduling.service.TestDemandService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -40,9 +41,11 @@ public class TestDemandController {
     }
 
     @PostMapping
-    public ApiResponse<TestDemand> createDemand(@RequestBody TestDemand demand) {
+    public ApiResponse<TestDemand> createDemand(
+            @RequestBody TestDemand demand, HttpServletRequest request) {
         requireDemandEditor();
-        return ApiResponse.success("创建成功", testDemandService.create(demand));
+        return ApiResponse.success("创建成功",
+            testDemandService.create(demand, username(request)));
     }
 
     @PutMapping("/{id}")
@@ -61,11 +64,7 @@ public class TestDemandController {
     @PostMapping("/{id}/close")
     public ApiResponse<TestDemand> closeDemand(@PathVariable Long id) {
         requireDemandEditor();
-        try {
-            return ApiResponse.success("关闭成功", testDemandService.close(id));
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+        return ApiResponse.success("关闭成功", testDemandService.close(id));
     }
 
     @GetMapping("/pending-approval")
@@ -76,22 +75,22 @@ public class TestDemandController {
     @PutMapping("/{id}/approve")
     public ApiResponse<TestDemand> approveDemand(@PathVariable Long id) {
         requireDemandApprover();
-        try {
-            return ApiResponse.success("已批准", testDemandService.approveDemand(id));
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+        return ApiResponse.success("已批准", testDemandService.approveDemand(id));
     }
 
     @PutMapping("/{id}/reject")
     public ApiResponse<Void> rejectDemand(@PathVariable Long id) {
         requireDemandApprover();
-        try {
-            testDemandService.rejectDemand(id);
-            return ApiResponse.success("已退回", null);
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+        testDemandService.rejectDemand(id);
+        return ApiResponse.success("已退回", null);
+    }
+
+    @PutMapping("/{id}/resubmit")
+    public ApiResponse<TestDemand> resubmitDemand(
+            @PathVariable Long id, HttpServletRequest request) {
+        requireDemandEditor();
+        return ApiResponse.success("已重新提交",
+            testDemandService.resubmitDemand(id, username(request)));
     }
 
     @PutMapping("/{id}/approve-with-changes")
@@ -114,23 +113,15 @@ public class TestDemandController {
     @PutMapping("/batch-approve")
     public ApiResponse<Void> batchApproveDemands(@RequestBody List<Long> ids) {
         requireDemandApprover();
-        try {
-            testDemandService.batchApproveDemands(ids);
-            return ApiResponse.success("批量批准成功", null);
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+        testDemandService.batchApproveDemands(ids);
+        return ApiResponse.success("批量批准成功", null);
     }
 
     @PutMapping("/batch-reject")
     public ApiResponse<Void> batchRejectDemands(@RequestBody List<Long> ids) {
         requireDemandApprover();
-        try {
-            testDemandService.batchRejectDemands(ids);
-            return ApiResponse.success("批量退回成功", null);
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+        testDemandService.batchRejectDemands(ids);
+        return ApiResponse.success("批量退回成功", null);
     }
 
     private void requireDemandEditor() {
@@ -140,5 +131,9 @@ public class TestDemandController {
 
     private void requireDemandApprover() {
         roleGuard.requireAny("projectManager", "fieldAdmin");
+    }
+
+    private String username(HttpServletRequest request) {
+        return (String) request.getAttribute("username");
     }
 }

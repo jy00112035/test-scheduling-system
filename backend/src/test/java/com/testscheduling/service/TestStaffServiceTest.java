@@ -71,6 +71,8 @@ class TestStaffServiceTest {
         request.setFamiliarModules("支付模块");
         lenient().when(testStaffRepository.findByIdForUpdate(any()))
             .thenAnswer(invocation -> testStaffRepository.findById(invocation.getArgument(0)));
+        lenient().when(userRepository.findByUsernameForUpdate(anyString()))
+            .thenAnswer(invocation -> userRepository.findByUsername(invocation.getArgument(0)));
         lenient().when(userRepository.findByUsername("actor-admin"))
             .thenReturn(Optional.of(actor("actor-admin", List.of("admin"), null)));
     }

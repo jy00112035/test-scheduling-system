@@ -152,10 +152,13 @@ public class TestStaffService {
 
     @Transactional
     public TestStaff update(Long id, StaffRequest request, String actorUsername) {
-        TestStaff existing = testStaffRepository.findById(id)
+        if (request.getFamiliarModuleIds() != null) {
+            staffModuleService.lockModulesForStaffUpdate(request.getFamiliarModuleIds());
+        }
+        TestStaff existing = testStaffRepository.findByIdForUpdate(id)
             .orElseThrow(() -> new RuntimeException("人员不存在"));
         String oldEmpNo = existing.getEmpNo();
-        User user = userRepository.findByUsername(oldEmpNo).orElse(null);
+        User user = userRepository.findByUsernameForUpdate(oldEmpNo).orElse(null);
         User actor = requireActor(actorUsername);
         List<String> assignedRoles = roleAssignmentPolicy.authorizeUpdate(
             actor, user, existing, request);
@@ -170,8 +173,6 @@ public class TestStaffService {
         if (request.getFamiliarModuleIds() != null) {
             staffModuleService.replaceModules(existing, request.getFamiliarModuleIds());
         }
-        existing = testStaffRepository.findByIdForUpdate(id)
-            .orElseThrow(() -> new RuntimeException("人员不存在"));
 
         existing.setName(request.getName());
         existing.setEmpNo(request.getEmpNo());

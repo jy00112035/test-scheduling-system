@@ -74,14 +74,37 @@ public class FieldConfigService {
 
     @Transactional
     public FieldConfig update(Long id, FieldConfig config) {
-        FieldConfig existing = findById(id);
+        FieldConfig existing = fieldConfigRepository.findByIdForUpdate(id)
+            .orElseThrow(() -> new RuntimeException("字段配置不存在"));
+        boolean staffOptionField = isStaffOptionField(existing.getFieldName())
+            || isStaffOptionField(config.getFieldName());
         existing.setFieldName(config.getFieldName());
         existing.setFieldType(config.getFieldType());
-        existing.setOptions(config.getOptions());
+        existing.setOptions(staffOptionField
+            ? mergeOptions(existing.getOptions(), config.getOptions())
+            : config.getOptions());
         existing.setDescription(config.getDescription());
         existing.setRequired(config.getRequired());
         existing.setSortOrder(config.getSortOrder());
         return fieldConfigRepository.save(existing);
+    }
+
+    private boolean isStaffOptionField(String fieldName) {
+        return "groupName".equals(fieldName) || "testType".equals(fieldName);
+    }
+
+    private String mergeOptions(String existingOptions, String requestedOptions) {
+        List<String> merged = new ArrayList<>();
+        for (String options : List.of(
+                existingOptions == null ? "" : existingOptions,
+                requestedOptions == null ? "" : requestedOptions)) {
+            Arrays.stream(options.split(","))
+                .map(String::trim)
+                .filter(option -> !option.isEmpty())
+                .filter(option -> !merged.contains(option))
+                .forEach(merged::add);
+        }
+        return String.join(",", merged);
     }
 
     @Transactional

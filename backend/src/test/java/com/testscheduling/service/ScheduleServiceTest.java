@@ -378,11 +378,15 @@ class ScheduleServiceTest {
 
     @Test
     void demandClearDefaultsToDraftsAndAllScopeCanDeletePublished() {
-        when(demandRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(demand(10L)));
+        TestDemand demand = demand(10L);
+        demand.setStatus(TestDemand.DemandStatus.scheduled);
+        when(demandRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(demand));
 
         scheduleService.deleteByDemandId(10L, ScheduleDeleteScope.DRAFT_ONLY);
+        assertEquals(TestDemand.DemandStatus.scheduled, demand.getStatus());
         scheduleService.deleteByDemandId(10L, ScheduleDeleteScope.ALL);
 
+        assertEquals(TestDemand.DemandStatus.pending, demand.getStatus());
         verify(scheduleRepository).deleteByDemandIdAndPublishedFalse(10L);
         verify(scheduleRepository).deleteByDemandId(10L);
     }

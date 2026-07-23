@@ -71,11 +71,13 @@ public class TestDemandService {
     }
 
     @Transactional
-    public TestDemand create(TestDemand demand) {
+    public TestDemand create(TestDemand demand, String submittedBy) {
         List<DemandManpowerDetail> requestedDetails = detailList(demand.getManpowerDetails());
         List<DemandSpecialModule> requestedSpecials = specialList(demand.getSpecialModuleDemands());
         specialModuleService.validateNew(requestedDetails, requestedSpecials);
         demand.setManpowerDemand(computeTotalManpower(requestedDetails));
+        demand.setStatus(TestDemand.DemandStatus.submitted);
+        demand.setSubmittedBy(requireSubmitter(submittedBy));
 
         TestDemand saved = testDemandRepository.save(demand);
         replaceDetails(saved.getId(), requestedDetails);
@@ -140,6 +142,10 @@ public class TestDemandService {
     @Transactional
     public TestDemand close(Long id) {
         TestDemand demand = lockedDemand(id);
+        if (demand.getStatus() == TestDemand.DemandStatus.completed) {
+            return demand;
+        }
+        requireStatus(demand, TestDemand.DemandStatus.scheduled);
         demand.setStatus(TestDemand.DemandStatus.completed);
         return testDemandRepository.save(demand);
     }
@@ -153,9 +159,7 @@ public class TestDemandService {
     @Transactional
     public TestDemand approveDemand(Long id) {
         TestDemand demand = lockedDemand(id);
-        if (demand.getStatus() != TestDemand.DemandStatus.submitted) {
-            throw new RuntimeException("只能批准状态为'已提交待审批'的需求");
-        }
+        requireStatus(demand, TestDemand.DemandStatus.submitted);
         demand.setStatus(TestDemand.DemandStatus.pending);
         return testDemandRepository.save(demand);
     }
@@ -163,11 +167,18 @@ public class TestDemandService {
     @Transactional
     public void rejectDemand(Long id) {
         TestDemand demand = lockedDemand(id);
-        if (demand.getStatus() != TestDemand.DemandStatus.submitted) {
-            throw new RuntimeException("只能退回状态为'已提交待审批'的需求");
-        }
+        requireStatus(demand, TestDemand.DemandStatus.submitted);
         demand.setStatus(TestDemand.DemandStatus.rejected);
         testDemandRepository.save(demand);
+    }
+
+    @Transactional
+    public TestDemand resubmitDemand(Long id, String submittedBy) {
+        TestDemand demand = lockedDemand(id);
+        requireStatus(demand, TestDemand.DemandStatus.rejected);
+        demand.setStatus(TestDemand.DemandStatus.submitted);
+        demand.setSubmittedBy(requireSubmitter(submittedBy));
+        return testDemandRepository.save(demand);
     }
 
     @Transactional
@@ -180,9 +191,7 @@ public class TestDemandService {
     @Transactional
     public TestDemand approveWithChanges(Long id, TestDemand modifiedDemand) {
         TestDemand demand = lockedDemand(id);
-        if (demand.getStatus() != TestDemand.DemandStatus.submitted) {
-            throw new RuntimeException("只能修改并批准状态为'已提交待审批'的需求");
-        }
+        requireStatus(demand, TestDemand.DemandStatus.submitted);
 
         List<DemandManpowerDetail> beforeDetails = demand.getManpowerDetails();
         List<DemandSpecialModule> beforeSpecials = demand.getSpecialModuleDemands();
@@ -253,7 +262,20 @@ public class TestDemandService {
         target.setConfidential(source.getConfidential());
         target.setPriority(source.getPriority());
         target.setTestDeviceCount(source.getTestDeviceCount());
-        target.setStatus(source.getStatus());
+    }
+
+    private String requireSubmitter(String submittedBy) {
+        if (submittedBy == null || submittedBy.isBlank()) {
+            throw new BusinessException("UNAUTHENTICATED", "未登录或登录已过期");
+        }
+        return submittedBy;
+    }
+
+    private void requireStatus(TestDemand demand, TestDemand.DemandStatus required) {
+        if (demand.getStatus() != required) {
+            throw new BusinessException("DEMAND_STATUS_TRANSITION_INVALID",
+                "当前需求状态不允许执行该操作");
+        }
     }
 
     private TestDemand lockedDemand(Long id) {

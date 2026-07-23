@@ -144,14 +144,16 @@ public class AuthService {
 
     @Transactional
     public void approveUser(Long id, List<String> approverRoles, String approverUsername) {
-        User user = requireApprovalTarget(id, approverRoles, approverUsername);
+        User user = requireApprovalTarget(lockedApprovalTarget(id),
+            approverRoles, approverUsername);
         user.setEnabled(true);
         userRepository.save(user);
     }
 
     @Transactional
     public void rejectUser(Long id, List<String> approverRoles, String approverUsername) {
-        User user = requireApprovalTarget(id, approverRoles, approverUsername);
+        User user = requireApprovalTarget(lockedApprovalTarget(id),
+            approverRoles, approverUsername);
         userRepository.delete(user);
     }
 
@@ -176,22 +178,29 @@ public class AuthService {
         if (ids == null || ids.isEmpty() || ids.stream().anyMatch(java.util.Objects::isNull)) {
             throw approvalForbidden();
         }
-        List<User> users = ids.stream().distinct().sorted()
-            .map(id -> requireApprovalTarget(id, approverRoles, approverUsername))
-            .toList();
-        if (users.size() != new HashSet<>(ids).size()) {
+        List<Long> orderedIds = ids.stream().distinct().sorted().toList();
+        List<User> users = userRepository.findAllByIdInForUpdate(orderedIds);
+        if (users.size() != orderedIds.size()) {
             throw approvalForbidden();
         }
-        return users;
+        return users.stream()
+            .map(user -> requireApprovalTarget(user, approverRoles, approverUsername))
+            .toList();
+    }
+
+    private User lockedApprovalTarget(Long id) {
+        if (id == null) {
+            throw approvalForbidden();
+        }
+        return userRepository.findByIdForUpdate(id)
+            .orElseThrow(this::approvalForbidden);
     }
 
     private User requireApprovalTarget(
-            Long id, List<String> approverRoles, String approverUsername) {
+            User target, List<String> approverRoles, String approverUsername) {
         if (approverRoles == null || approverRoles.isEmpty()) {
             throw approvalForbidden();
         }
-        User target = userRepository.findById(id)
-            .orElseThrow(this::approvalForbidden);
         if (Boolean.TRUE.equals(target.getEnabled())) {
             throw approvalForbidden();
         }

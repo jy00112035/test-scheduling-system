@@ -15,9 +15,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -78,6 +80,57 @@ class FieldConfigOptionConcurrencyIntegrationTest {
 
         FieldConfig saved = repository.findByFieldName("groupName").orElseThrow();
         assertEquals(Set.of("已有项目", "并发项目甲", "并发项目乙"),
+            Set.copyOf(Arrays.asList(saved.getOptions().split(","))));
+    }
+
+    @Test
+    void manualUpdateWaitsForAppendAndMergesFreshStaffOption() throws Exception {
+        repository.deleteAll();
+        FieldConfig config = new FieldConfig();
+        config.setFieldName("groupName");
+        config.setFieldType("select");
+        config.setOptions("已有项目");
+        config = repository.saveAndFlush(config);
+
+        CountDownLatch appendAtSave = new CountDownLatch(1);
+        CountDownLatch releaseAppend = new CountDownLatch(1);
+        AtomicBoolean pauseOnce = new AtomicBoolean();
+        doAnswer(invocation -> {
+            FieldConfig saving = invocation.getArgument(0);
+            if (saving.getOptions().contains("自动追加项目")
+                    && pauseOnce.compareAndSet(false, true)) {
+                appendAtSave.countDown();
+                if (!releaseAppend.await(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("timed out waiting to release staff option append");
+                }
+            }
+            return saving;
+        }).when(repository).save(any(FieldConfig.class));
+
+        Future<?> append = executor.submit(
+            () -> service.appendStaffOptions("自动追加项目", null));
+        assertTrue(appendAtSave.await(5, TimeUnit.SECONDS));
+
+        FieldConfig manualChanges = new FieldConfig();
+        manualChanges.setFieldName("groupName");
+        manualChanges.setFieldType("select");
+        manualChanges.setOptions("管理员项目");
+        manualChanges.setRequired(false);
+        manualChanges.setSortOrder(10);
+        Long configId = config.getId();
+        Future<?> manual = executor.submit(() -> service.update(configId, manualChanges));
+
+        try {
+            assertThrows(TimeoutException.class,
+                () -> manual.get(300, TimeUnit.MILLISECONDS));
+        } finally {
+            releaseAppend.countDown();
+        }
+
+        append.get(5, TimeUnit.SECONDS);
+        manual.get(5, TimeUnit.SECONDS);
+        FieldConfig saved = repository.findById(configId).orElseThrow();
+        assertEquals(Set.of("已有项目", "自动追加项目", "管理员项目"),
             Set.copyOf(Arrays.asList(saved.getOptions().split(","))));
     }
 }

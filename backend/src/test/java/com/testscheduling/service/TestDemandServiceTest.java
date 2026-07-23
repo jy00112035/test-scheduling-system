@@ -64,6 +64,52 @@ class TestDemandServiceTest {
     private AuditLogRepository auditLogRepository;
 
     @Test
+    void createAndGenericUpdatePreserveServerOwnedLifecycleFields() {
+        TestDemand forged = demand("生命周期信任边界", "1.0");
+        forged.setStatus(TestDemand.DemandStatus.completed);
+        forged.setSubmittedBy("forged-submitter");
+
+        TestDemand created = service.create(forged, "authenticated-manager");
+
+        assertEquals(TestDemand.DemandStatus.submitted, created.getStatus());
+        assertEquals("authenticated-manager", created.getSubmittedBy());
+
+        TestDemand changes = demand("生命周期普通编辑", "1.0");
+        changes.setStatus(TestDemand.DemandStatus.scheduled);
+        changes.setSubmittedBy("second-forged-submitter");
+        TestDemand updated = service.update(created.getId(), changes);
+
+        assertEquals(TestDemand.DemandStatus.submitted, updated.getStatus());
+        assertEquals("authenticated-manager", updated.getSubmittedBy());
+    }
+
+    @Test
+    void explicitTransitionsEnforceLifecycleWithStableCode() {
+        TestDemand created = create(demand("显式生命周期", "1.0"));
+
+        BusinessException closeError = assertThrows(BusinessException.class,
+            () -> service.close(created.getId()));
+        assertEquals("DEMAND_STATUS_TRANSITION_INVALID", closeError.getErrorCode());
+
+        service.rejectDemand(created.getId());
+        TestDemand resubmitted = service.resubmitDemand(created.getId(), "resubmitter");
+        assertEquals(TestDemand.DemandStatus.submitted, resubmitted.getStatus());
+        assertEquals("resubmitter", resubmitted.getSubmittedBy());
+
+        TestDemand approved = service.approveDemand(created.getId());
+        assertEquals(TestDemand.DemandStatus.pending, approved.getStatus());
+        BusinessException rejectError = assertThrows(BusinessException.class,
+            () -> service.rejectDemand(created.getId()));
+        assertEquals("DEMAND_STATUS_TRANSITION_INVALID", rejectError.getErrorCode());
+
+        TestDemand persisted = demandRepository.findById(created.getId()).orElseThrow();
+        persisted.setStatus(TestDemand.DemandStatus.scheduled);
+        demandRepository.saveAndFlush(persisted);
+        assertEquals(TestDemand.DemandStatus.completed, service.close(created.getId()).getStatus());
+        assertEquals(TestDemand.DemandStatus.completed, service.close(created.getId()).getStatus());
+    }
+
+    @Test
     void createPersistsChildrenReturnsStructuralSummaryAndAuditsChange() {
         TestModuleConfig payment = saveModule("支付模块", true);
         TestModuleConfig message = saveModule("消息模块", true);
@@ -72,7 +118,7 @@ class TestDemandServiceTest {
             special(payment.getId(), "2.0"), special(message.getId(), "1.5")));
         long auditCountBefore = auditLogRepository.count();
 
-        TestDemand result = service.create(request);
+        TestDemand result = create(request);
 
         assertEquals(new BigDecimal("8.0"), result.getManpowerDemand());
         assertEquals(1, result.getManpowerDetails().size());
@@ -109,7 +155,7 @@ class TestDemandServiceTest {
         long auditsBefore = auditLogRepository.count();
 
         BusinessException error = assertThrows(BusinessException.class,
-            () -> service.create(request));
+            () -> create(request));
 
         assertEquals("SPECIAL_MODULE_EXCEEDS_GROUP", error.getErrorCode());
         assertEquals(demandsBefore, demandRepository.count());
@@ -123,7 +169,7 @@ class TestDemandServiceTest {
         TestDemand request = demand("仅父级人力", "3.5");
         request.getManpowerDetails().getFirst().setTestType(" 功能测试 ");
 
-        TestDemand created = service.create(request);
+        TestDemand created = create(request);
 
         assertEquals(new BigDecimal("3.5"), created.getManpowerDemand());
         assertEquals("功能测试", created.getManpowerDetails().getFirst().getTestType());
@@ -132,7 +178,7 @@ class TestDemandServiceTest {
 
     @Test
     void enrichmentExposesFulfillmentSummaryAndStatus() {
-        TestDemand created = service.create(demand("满足度回填", "2.0"));
+        TestDemand created = create(demand("满足度回填", "2.0"));
         Schedule schedule = new Schedule();
         schedule.setDemandId(created.getId());
         schedule.setDemandManpowerDetailId(created.getManpowerDetails().getFirst().getId());
@@ -151,7 +197,7 @@ class TestDemandServiceTest {
         TestModuleConfig module = saveModule("历史归类响应模块", true);
         TestDemand request = demand("历史归类响应", "2.0");
         request.setSpecialModuleDemands(List.of(special(module.getId(), "1.0")));
-        TestDemand created = service.create(request);
+        TestDemand created = create(request);
         DemandManpowerDetail detail = created.getManpowerDetails().getFirst();
         DemandSpecialModule special = created.getSpecialModuleDemands().getFirst();
         Schedule historical = new Schedule();
@@ -189,11 +235,13 @@ class TestDemandServiceTest {
         TestDemand withSpecial = demand("列表特殊需求", "2.0");
         withSpecial.setStatus(TestDemand.DemandStatus.pending);
         withSpecial.setSpecialModuleDemands(List.of(special(module.getId(), "1.0")));
-        TestDemand savedWithSpecial = service.create(withSpecial);
+        TestDemand savedWithSpecial = create(withSpecial);
+        service.approveDemand(savedWithSpecial.getId());
 
         TestDemand generalOnly = demand("列表通用需求", "2.0");
         generalOnly.setStatus(TestDemand.DemandStatus.pending);
-        TestDemand savedGeneralOnly = service.create(generalOnly);
+        TestDemand savedGeneralOnly = create(generalOnly);
+        service.approveDemand(savedGeneralOnly.getId());
 
         List<TestDemand> results = service.findPendingAndScheduled().stream()
             .filter(item -> item.getId().equals(savedWithSpecial.getId())
@@ -259,7 +307,7 @@ class TestDemandServiceTest {
         TestDemand original = demand("锁定需求", "8.0");
         original.setStatus(TestDemand.DemandStatus.pending);
         original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
-        TestDemand created = service.create(original);
+        TestDemand created = create(original);
         Schedule schedule = new Schedule();
         schedule.setDemandId(created.getId());
         schedule.setDate(LocalDate.now());
@@ -283,7 +331,8 @@ class TestDemandServiceTest {
         TestDemand original = demand("降级锁定需求", "8.0");
         original.setStatus(TestDemand.DemandStatus.pending);
         original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
-        TestDemand created = service.create(original);
+        TestDemand created = create(original);
+        service.approveDemand(created.getId());
         Schedule schedule = new Schedule();
         schedule.setDemandId(created.getId());
         scheduleRepository.saveAndFlush(schedule);
@@ -292,10 +341,10 @@ class TestDemandServiceTest {
         downgrade.setStatus(TestDemand.DemandStatus.submitted);
         downgrade.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
         TestDemand downgraded = service.update(created.getId(), downgrade);
-        assertEquals(TestDemand.DemandStatus.submitted, downgraded.getStatus());
+        assertEquals(TestDemand.DemandStatus.pending, downgraded.getStatus());
 
         TestDemand changed = demand("试图绕过锁定", "9.0");
-        changed.setStatus(TestDemand.DemandStatus.submitted);
+        changed.setStatus(TestDemand.DemandStatus.completed);
         changed.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
 
         BusinessException error = assertThrows(BusinessException.class,
@@ -311,7 +360,7 @@ class TestDemandServiceTest {
         TestDemand original = demand("元数据原需求", "8.0");
         original.setStatus(TestDemand.DemandStatus.pending);
         original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
-        TestDemand created = service.create(original);
+        TestDemand created = create(original);
         Long detailId = created.getManpowerDetails().getFirst().getId();
         Long specialId = created.getSpecialModuleDemands().getFirst().getId();
         Schedule schedule = new Schedule();
@@ -336,7 +385,7 @@ class TestDemandServiceTest {
         TestModuleConfig payment = saveModule("更新保留支付模块", true);
         TestDemand original = demand("更新保留需求", "8.0");
         original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
-        TestDemand created = service.create(original);
+        TestDemand created = create(original);
         Long detailId = created.getManpowerDetails().getFirst().getId();
         Long specialId = created.getSpecialModuleDemands().getFirst().getId();
         TestDemand metadata = demand("更新后的普通信息", "99.0");
@@ -353,7 +402,7 @@ class TestDemandServiceTest {
 
     @Test
     void metadataOnlyUpdatePreservesParentWhenDemandHasNoSpecialModules() {
-        TestDemand created = service.create(demand("无模块更新需求", "3.0"));
+        TestDemand created = create(demand("无模块更新需求", "3.0"));
         Long detailId = created.getManpowerDetails().getFirst().getId();
         TestDemand metadata = demand("无模块更新后", "99.0");
         metadata.setManpowerDetails(null);
@@ -371,7 +420,7 @@ class TestDemandServiceTest {
         TestModuleConfig payment = saveModule("父级单独更新支付模块", true);
         TestDemand original = demand("父级单独更新需求", "8.0");
         original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
-        TestDemand created = service.create(original);
+        TestDemand created = create(original);
         Long detailId = created.getManpowerDetails().getFirst().getId();
         Long specialId = created.getSpecialModuleDemands().getFirst().getId();
         TestDemand changes = demand("父级单独更新后", "10.0");
@@ -391,7 +440,7 @@ class TestDemandServiceTest {
         TestModuleConfig payment = saveModule("审批保留支付模块", true);
         TestDemand original = demand("审批保留需求", "8.0");
         original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
-        TestDemand created = service.create(original);
+        TestDemand created = create(original);
         Long detailId = created.getManpowerDetails().getFirst().getId();
         Long specialId = created.getSpecialModuleDemands().getFirst().getId();
         TestDemand metadata = new TestDemand();
@@ -406,7 +455,7 @@ class TestDemandServiceTest {
 
     @Test
     void metadataOnlyApprovalPreservesParentWhenDemandHasNoSpecialModules() {
-        TestDemand created = service.create(demand("无模块审批需求", "3.0"));
+        TestDemand created = create(demand("无模块审批需求", "3.0"));
         Long detailId = created.getManpowerDetails().getFirst().getId();
         TestDemand metadata = new TestDemand();
         metadata.setPriority("高");
@@ -420,7 +469,7 @@ class TestDemandServiceTest {
 
     @Test
     void updateRejectsExplicitlyEmptyParentStructure() {
-        TestDemand created = service.create(demand("拒绝清空更新", "3.0"));
+        TestDemand created = create(demand("拒绝清空更新", "3.0"));
         TestDemand changes = demand("拒绝清空更新后", "3.0");
         changes.setManpowerDetails(List.of());
         changes.setSpecialModuleDemands(null);
@@ -434,7 +483,7 @@ class TestDemandServiceTest {
 
     @Test
     void approveWithChangesRejectsExplicitlyEmptyParentStructure() {
-        TestDemand created = service.create(demand("拒绝清空审批", "3.0"));
+        TestDemand created = create(demand("拒绝清空审批", "3.0"));
         TestDemand changes = new TestDemand();
         changes.setManpowerDetails(List.of());
 
@@ -450,7 +499,7 @@ class TestDemandServiceTest {
         TestModuleConfig payment = saveModule("审批支付模块", true);
         TestDemand original = demand("待审批需求", "8.0");
         original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
-        TestDemand created = service.create(original);
+        TestDemand created = create(original);
         long auditCountBefore = auditLogRepository.count();
         TestDemand changes = new TestDemand();
         changes.setSpecialModuleDemands(List.of());
@@ -474,7 +523,7 @@ class TestDemandServiceTest {
         TestModuleConfig payment = saveModule("审批锁定支付模块", true);
         TestDemand original = demand("审批锁定需求", "8.0");
         original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
-        TestDemand created = service.create(original);
+        TestDemand created = create(original);
         Long detailId = created.getManpowerDetails().getFirst().getId();
         Long specialId = created.getSpecialModuleDemands().getFirst().getId();
         Schedule schedule = new Schedule();
@@ -502,7 +551,7 @@ class TestDemandServiceTest {
         TestModuleConfig payment = saveModule("审批元数据支付模块", true);
         TestDemand original = demand("审批元数据需求", "8.0");
         original.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
-        TestDemand created = service.create(original);
+        TestDemand created = create(original);
         Long detailId = created.getManpowerDetails().getFirst().getId();
         Long specialId = created.getSpecialModuleDemands().getFirst().getId();
         Schedule schedule = new Schedule();
@@ -526,7 +575,7 @@ class TestDemandServiceTest {
         TestModuleConfig payment = saveModule("删除支付模块", true);
         TestDemand deletable = demand("可删除需求", "8.0");
         deletable.setSpecialModuleDemands(List.of(special(payment.getId(), "2.0")));
-        TestDemand created = service.create(deletable);
+        TestDemand created = create(deletable);
 
         service.delete(created.getId());
 
@@ -536,7 +585,7 @@ class TestDemandServiceTest {
 
         TestDemand scheduled = demand("不可删除需求", "8.0");
         scheduled.setSpecialModuleDemands(List.of(special(payment.getId(), "1.0")));
-        TestDemand scheduledDemand = service.create(scheduled);
+        TestDemand scheduledDemand = create(scheduled);
         Schedule schedule = new Schedule();
         schedule.setDemandId(scheduledDemand.getId());
         scheduleRepository.saveAndFlush(schedule);
@@ -568,6 +617,10 @@ class TestDemandServiceTest {
         return demand;
     }
 
+    private TestDemand create(TestDemand demand) {
+        return service.create(demand, "test-submitter");
+    }
+
     private DemandSpecialModule special(Long moduleId, String manpower) {
         DemandSpecialModule special = new DemandSpecialModule();
         special.setModuleId(moduleId);
@@ -579,7 +632,7 @@ class TestDemandServiceTest {
         TestModuleConfig module = saveModule("历史支付模块-" + suffix, true);
         TestDemand original = demand("历史需求-" + suffix, "8.0");
         original.setSpecialModuleDemands(List.of(special(module.getId(), "2.0")));
-        TestDemand created = service.create(original);
+        TestDemand created = create(original);
         module.setEnabled(false);
         moduleRepository.saveAndFlush(module);
         return new DisabledDemand(module, created);

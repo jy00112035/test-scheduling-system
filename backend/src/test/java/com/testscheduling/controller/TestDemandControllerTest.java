@@ -17,6 +17,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -68,6 +69,25 @@ class TestDemandControllerTest {
             .andExpect(jsonPath("$.code").value(400))
             .andExpect(jsonPath("$.data.errorCode")
                 .value("MODULE_DISABLED_FOR_NEW_DEMAND"));
+    }
+
+    @Test
+    void batchTransitionsReturnStableLifecycleBusinessError() throws Exception {
+        doThrow(new BusinessException(
+            "DEMAND_STATUS_TRANSITION_INVALID", "当前需求状态不允许执行该操作"))
+            .when(service).batchApproveDemands(any());
+        doThrow(new BusinessException(
+            "DEMAND_STATUS_TRANSITION_INVALID", "当前需求状态不允许执行该操作"))
+            .when(service).batchRejectDemands(any());
+
+        for (String endpoint : List.of("batch-approve", "batch-reject")) {
+            mockMvc.perform(put("/api/demands/{endpoint}", endpoint)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("[7]"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.data.errorCode")
+                    .value("DEMAND_STATUS_TRANSITION_INVALID"));
+        }
     }
 
     @Test

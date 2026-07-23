@@ -65,6 +65,7 @@ class SchedulePublishTransactionServiceTest {
         int count = service().publishInNewTransaction(10L);
 
         assertEquals(2, count);
+        assertEquals(TestDemand.DemandStatus.scheduled, demand.getStatus());
         assertFalse(rows.stream().anyMatch(row -> !Boolean.TRUE.equals(row.getPublished())));
         InOrder order = inOrder(demandRepository, specialRepository, moduleRepository,
             staffRepository, scheduleRepository);
@@ -123,6 +124,7 @@ class SchedulePublishTransactionServiceTest {
 
         assertFalse(Boolean.TRUE.equals(first.getPublished()));
         assertFalse(Boolean.TRUE.equals(second.getPublished()));
+        assertEquals(TestDemand.DemandStatus.pending, demand.getStatus());
         verify(scheduleRepository, never()).saveAllAndFlush(any());
     }
 
@@ -159,6 +161,7 @@ class SchedulePublishTransactionServiceTest {
 
         assertEquals(1, service().publishInNewTransaction(10L));
 
+        assertEquals(TestDemand.DemandStatus.scheduled, demand.getStatus());
         verify(scheduleRepository, never()).saveAllAndFlush(any());
         verify(auditLogService, never()).record(any(), any(), any(), any(), any());
     }

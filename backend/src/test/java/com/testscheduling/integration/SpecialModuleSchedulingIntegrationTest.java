@@ -203,7 +203,7 @@ class SpecialModuleSchedulingIntegrationTest {
         request.setManpowerDetails(List.of(detail));
         request.setSpecialModuleDemands(List.of(special));
 
-        TestDemand created = demandService.create(request);
+        TestDemand created = demandService.create(request, "integration-test");
         demandService.approveDemand(created.getId());
         return demandService.findById(created.getId());
     }

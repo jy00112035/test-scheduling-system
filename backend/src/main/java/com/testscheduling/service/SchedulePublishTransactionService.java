@@ -99,13 +99,14 @@ public class SchedulePublishTransactionService {
         }
         List<Schedule> drafts = schedules.stream()
             .filter(schedule -> !Boolean.TRUE.equals(schedule.getPublished())).toList();
-        if (drafts.isEmpty()) {
-            return schedules.size();
+        if (!drafts.isEmpty()) {
+            drafts.forEach(schedule -> schedule.setPublished(true));
+            scheduleRepository.saveAllAndFlush(drafts);
+            auditLogService.record("SCHEDULE_PUBLISHED", "SCHEDULE", demandId, null,
+                java.util.Map.of("demandId", demandId, "scheduleCount", drafts.size()));
         }
-        drafts.forEach(schedule -> schedule.setPublished(true));
-        scheduleRepository.saveAllAndFlush(drafts);
-        auditLogService.record("SCHEDULE_PUBLISHED", "SCHEDULE", demandId, null,
-            java.util.Map.of("demandId", demandId, "scheduleCount", drafts.size()));
+        demand.setStatus(TestDemand.DemandStatus.scheduled);
+        demandRepository.save(demand);
         return schedules.size();
     }
 
