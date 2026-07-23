@@ -20,10 +20,12 @@ import {
   CheckCircleOutlined,
   DownloadOutlined,
   ExclamationCircleOutlined,
+  FormOutlined,
 } from '@ant-design/icons';
 import dayjs, { Dayjs } from 'dayjs';
 import { TestDemand } from '../types';
 import TestDemandSubmit from './TestDemandSubmit';
+import DemandRevisionForm from './DemandRevisionForm';
 import { api } from '../services/api';
 import * as XLSX from 'xlsx';
 
@@ -45,6 +47,8 @@ const TestDemandList: React.FC = () => {
   const [exportLoading, setExportLoading] = useState(false);
   const [formDirty, setFormDirty] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [showRevisionModal, setShowRevisionModal] = useState(false);
+  const [revisingDemand, setRevisingDemand] = useState<TestDemand | null>(null);
 
   useEffect(() => {
     fetchDemands();
@@ -74,6 +78,8 @@ const TestDemandList: React.FC = () => {
         return 'green';
       case 'rejected':
         return 'red';
+      case 'revision_pending':
+        return 'cyan';
       default:
         return 'default';
     }
@@ -91,6 +97,8 @@ const TestDemandList: React.FC = () => {
         return '已完成';
       case 'rejected':
         return '已退回';
+      case 'revision_pending':
+        return '变更待审批';
       default:
         return status;
     }
@@ -147,6 +155,18 @@ const TestDemandList: React.FC = () => {
     setFormDirty(false);
     fetchDemands();
     message.success('操作成功！');
+  };
+
+  const handleRevision = (demand: TestDemand) => {
+    setRevisingDemand(demand);
+    setShowRevisionModal(true);
+  };
+
+  const handleRevisionSuccess = () => {
+    setShowRevisionModal(false);
+    setRevisingDemand(null);
+    fetchDemands();
+    message.success('需求变更已提交审批');
   };
 
   const handleModalClose = useCallback(() => {
@@ -335,15 +355,21 @@ const TestDemandList: React.FC = () => {
       fixed: 'right' as const,
       render: (_: any, record: TestDemand) => {
         const isSubmitted = record.status === 'submitted';
-        const isReadonly = record.status === 'pending' || record.status === 'scheduled';
-        const isCompleted = record.status === 'completed';
+        const isPending = record.status === 'pending';
         const isScheduled = record.status === 'scheduled';
+        const isCompleted = record.status === 'completed';
+        const isRejected = record.status === 'rejected';
+        const isRevisionPending = record.status === 'revision_pending';
+        const canEdit = isRejected;
+        const canRevise = isPending || isScheduled;
+        const canClose = isScheduled;
+        const canDelete = isSubmitted || isRejected;
 
-        if (isCompleted || isSubmitted) return null;
+        if (isCompleted) return null;
 
         return (
           <Space size="small">
-            {!isReadonly && (
+            {canEdit && (
               <Button
                 type="link"
                 size="small"
@@ -353,7 +379,17 @@ const TestDemandList: React.FC = () => {
                 编辑
               </Button>
             )}
-            {isScheduled && (
+            {canRevise && (
+              <Button
+                type="link"
+                size="small"
+                icon={<FormOutlined />}
+                onClick={() => handleRevision(record)}
+              >
+                变更
+              </Button>
+            )}
+            {canClose && (
               <Popconfirm
                 title="确定关闭此需求？"
                 onConfirm={() => handleClose(record.id)}
@@ -369,7 +405,7 @@ const TestDemandList: React.FC = () => {
                 </Button>
               </Popconfirm>
             )}
-            {!isReadonly && (
+            {canDelete && (
               <Popconfirm
                 title="确定删除此需求？"
                 onConfirm={() => handleDelete(record.id)}
@@ -385,6 +421,9 @@ const TestDemandList: React.FC = () => {
                   删除
                 </Button>
               </Popconfirm>
+            )}
+            {isRevisionPending && (
+              <Tag color="cyan">变更审批中</Tag>
             )}
           </Space>
         );
@@ -416,6 +455,7 @@ const TestDemandList: React.FC = () => {
               <Option value="scheduled">已排期</Option>
               <Option value="completed">已完成</Option>
               <Option value="rejected">已退回</Option>
+              <Option value="revision_pending">变更待审批</Option>
             </Select>
             <Select
               placeholder="筛选产品"
@@ -540,6 +580,23 @@ const TestDemandList: React.FC = () => {
             导出
           </Button>
         </div>
+      </Modal>
+
+      <Modal
+        title="需求变更"
+        open={showRevisionModal}
+        onCancel={() => setShowRevisionModal(false)}
+        footer={null}
+        width={800}
+        destroyOnClose
+      >
+        {revisingDemand && (
+          <DemandRevisionForm
+            demand={revisingDemand}
+            onSuccess={handleRevisionSuccess}
+            onCancel={() => setShowRevisionModal(false)}
+          />
+        )}
       </Modal>
     </div>
   );

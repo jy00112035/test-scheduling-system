@@ -1,20 +1,23 @@
 import React from 'react';
 import { Tabs, Badge } from 'antd';
-import { AuditOutlined, FileTextOutlined } from '@ant-design/icons';
+import { AuditOutlined, FileTextOutlined, EditOutlined } from '@ant-design/icons';
 import { useUserRole } from '../context/UserRoleContext';
 import RegistrationApproval from './RegistrationApproval';
 import DemandApproval from './DemandApproval';
+import RevisionApproval from './RevisionApproval';
 
 interface Props {
   pendingRegCount?: number;
   pendingDemandCount?: number;
+  pendingRevisionCount?: number;
 }
 
-const ApprovalCenter: React.FC<Props> = ({ pendingRegCount = 0, pendingDemandCount = 0 }) => {
+const ApprovalCenter: React.FC<Props> = ({ pendingRegCount = 0, pendingDemandCount = 0, pendingRevisionCount = 0 }) => {
   const { hasPermission } = useUserRole();
 
   const showRegistration = hasPermission('approveRegistration');
   const showDemand = hasPermission('approveTestDemand');
+  const showRevision = hasPermission('approveTestDemand');
 
   const tabItems: { key: string; label: React.ReactNode; children: React.ReactNode }[] = [];
 
@@ -39,6 +42,18 @@ const ApprovalCenter: React.FC<Props> = ({ pendingRegCount = 0, pendingDemandCou
         </Badge>
       ),
       children: <DemandApproval />,
+    });
+  }
+
+  if (showRevision) {
+    tabItems.push({
+      key: 'revision',
+      label: (
+        <Badge count={pendingRevisionCount} size="small" offset={[6, 0]}>
+          <span><EditOutlined /> 变更审批</span>
+        </Badge>
+      ),
+      children: <RevisionApproval />,
     });
   }
 

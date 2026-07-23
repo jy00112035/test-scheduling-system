@@ -10,6 +10,8 @@ import type {
   TestModule,
   TestModuleWriteRequest,
   TestDemand,
+  RevisionRequest,
+  RevisionDiffResponse,
 } from '../types';
 
 export type {
@@ -234,6 +236,37 @@ class ApiService {
     return this.request<void>('/demands/batch-reject', {
       method: 'PUT',
       body: JSON.stringify(ids),
+    });
+  }
+
+  // Demand Revision
+  async submitRevision(id: number, request: RevisionRequest): Promise<TestDemand> {
+    return this.request<TestDemand>(`/demands/${id}/revision`, {
+      method: 'PUT',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async getRevisionDiff(id: number): Promise<RevisionDiffResponse> {
+    return this.request<RevisionDiffResponse>(`/demands/${id}/revision-diff`);
+  }
+
+  async getRevisionPendingApprovals(): Promise<TestDemand[]> {
+    return this.request<TestDemand[]>('/demands/revision-pending-approval');
+  }
+
+  async approveRevision(id: number): Promise<TestDemand> {
+    return this.request<TestDemand>(`/demands/${id}/approve-revision`, { method: 'PUT' });
+  }
+
+  async rejectRevision(id: number): Promise<void> {
+    return this.request<void>(`/demands/${id}/reject-revision`, { method: 'PUT' });
+  }
+
+  async approveRevisionWithChanges(id: number, request: RevisionRequest): Promise<TestDemand> {
+    return this.request<TestDemand>(`/demands/${id}/approve-revision-with-changes`, {
+      method: 'PUT',
+      body: JSON.stringify(request),
     });
   }
 

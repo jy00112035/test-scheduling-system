@@ -77,7 +77,7 @@ public class TestDemand {
     private LocalDateTime updatedAt;
 
     public enum DemandStatus {
-        submitted, pending, scheduled, completed, rejected
+        submitted, pending, scheduled, completed, rejected, revision_pending
     }
 
     @PrePersist

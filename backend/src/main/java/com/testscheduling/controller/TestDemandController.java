@@ -1,6 +1,8 @@
 package com.testscheduling.controller;
 
 import com.testscheduling.dto.ApiResponse;
+import com.testscheduling.dto.RevisionDiffResponse;
+import com.testscheduling.dto.RevisionRequest;
 import com.testscheduling.entity.TestDemand;
 import com.testscheduling.security.RequestRoleGuard;
 import com.testscheduling.service.TestDemandService;
@@ -124,6 +126,50 @@ public class TestDemandController {
         return ApiResponse.success("批量退回成功", null);
     }
 
+    // ========== 需求变更审批相关接口 ==========
+
+    @PutMapping("/{id}/revision")
+    public ApiResponse<TestDemand> submitRevision(
+            @PathVariable Long id,
+            @RequestBody RevisionRequest request,
+            HttpServletRequest httpRequest) {
+        requireRevisionEditor();
+        return ApiResponse.success("需求变更已提交审批",
+            testDemandService.submitRevision(id, request, username(httpRequest)));
+    }
+
+    @GetMapping("/{id}/revision-diff")
+    public ApiResponse<RevisionDiffResponse> getRevisionDiff(@PathVariable Long id) {
+        return ApiResponse.success(testDemandService.getRevisionDiff(id));
+    }
+
+    @GetMapping("/revision-pending-approval")
+    public ApiResponse<List<TestDemand>> getRevisionPendingApproval() {
+        return ApiResponse.success(testDemandService.findRevisionPendingApproval());
+    }
+
+    @PutMapping("/{id}/approve-revision")
+    public ApiResponse<TestDemand> approveRevision(@PathVariable Long id) {
+        requireRevisionApprover();
+        return ApiResponse.success("变更已批准", testDemandService.approveRevision(id));
+    }
+
+    @PutMapping("/{id}/reject-revision")
+    public ApiResponse<Void> rejectRevision(@PathVariable Long id) {
+        requireRevisionApprover();
+        testDemandService.rejectRevision(id);
+        return ApiResponse.success("变更已退回", null);
+    }
+
+    @PutMapping("/{id}/approve-revision-with-changes")
+    public ApiResponse<TestDemand> approveRevisionWithChanges(
+            @PathVariable Long id,
+            @RequestBody RevisionRequest request) {
+        requireRevisionApprover();
+        return ApiResponse.success("修改并批准变更成功",
+            testDemandService.approveRevisionWithChanges(id, request));
+    }
+
     private void requireDemandEditor() {
         roleGuard.requireAny(
             "testManager", "resourceManager", "projectManager", "fieldAdmin", "testLead");
@@ -131,6 +177,14 @@ public class TestDemandController {
 
     private void requireDemandApprover() {
         roleGuard.requireAny("projectManager", "fieldAdmin");
+    }
+
+    private void requireRevisionEditor() {
+        roleGuard.requireAny("testManager");
+    }
+
+    private void requireRevisionApprover() {
+        roleGuard.requireAny("projectManager", "fieldAdmin", "resourceManager");
     }
 
     private String username(HttpServletRequest request) {

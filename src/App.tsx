@@ -43,6 +43,7 @@ const AppContent: React.FC = () => {
   const { roles, userName, hasPermission } = useUserRole();
   const [pendingRegCount, setPendingRegCount] = useState(0);
   const [pendingDemandCount, setPendingDemandCount] = useState(0);
+  const [pendingRevisionCount, setPendingRevisionCount] = useState(0);
 
   const fetchPendingCounts = async () => {
     try {
@@ -53,6 +54,8 @@ const AppContent: React.FC = () => {
       if (hasPermission('approveTestDemand')) {
         const demands = await api.getPendingDemandApprovals();
         setPendingDemandCount(demands.length);
+        const revisions = await api.getRevisionPendingApprovals();
+        setPendingRevisionCount(revisions.length);
       }
     } catch {
       // ignore fetch errors
@@ -153,8 +156,8 @@ const AppContent: React.FC = () => {
     {
       key: 'approvals',
       icon: <AuditOutlined />,
-      label: (pendingRegCount + pendingDemandCount) > 0
-        ? <Badge count={pendingRegCount + pendingDemandCount} size="small" offset={[6, 0]}><span style={{ color: '#fff' }}>审批中心</span></Badge>
+      label: (pendingRegCount + pendingDemandCount + pendingRevisionCount) > 0
+        ? <Badge count={pendingRegCount + pendingDemandCount + pendingRevisionCount} size="small" offset={[6, 0]}><span style={{ color: '#fff' }}>审批中心</span></Badge>
         : '审批中心',
       permissions: ['approveRegistration', 'approveTestDemand'],
     },
@@ -196,7 +199,7 @@ const AppContent: React.FC = () => {
       case 'personal':
         return <PersonalCenter />;
       case 'approvals':
-        return <ApprovalCenter pendingRegCount={pendingRegCount} pendingDemandCount={pendingDemandCount} />;
+        return <ApprovalCenter pendingRegCount={pendingRegCount} pendingDemandCount={pendingDemandCount} pendingRevisionCount={pendingRevisionCount} />;
       default:
         return <Home onNavigate={setSelectedKey} />;
     }

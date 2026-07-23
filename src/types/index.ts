@@ -19,7 +19,7 @@ export interface TestDemand {
   versionType: string;
   versionPhase: string;
   description: string;
-  status: 'submitted' | 'pending' | 'scheduled' | 'completed' | 'rejected';
+  status: 'submitted' | 'pending' | 'scheduled' | 'completed' | 'rejected' | 'revision_pending';
   submittedBy: string;
   createdAt: string;
   confidential?: boolean;
@@ -30,6 +30,46 @@ export interface TestDemand {
   manpowerSummary?: ManpowerSummary[];
   manpowerFullySatisfied?: boolean | null;
   requiresHistoricalClassification?: boolean | null;
+}
+
+export interface RevisionRequest {
+  startDate?: string;
+  endDate?: string;
+  manpowerDetails?: DemandManpowerDetail[];
+  specialModuleDemands?: DemandSpecialModule[];
+}
+
+export interface RevisionDiffResponse {
+  demandId: number;
+  status: string;
+  original?: {
+    startDate: string;
+    endDate: string;
+    manpowerDemand: number;
+    manpowerDetails: DemandManpowerDetail[];
+    specialModuleDemands: DemandSpecialModule[];
+  };
+  modified: {
+    startDate: string;
+    endDate: string;
+    manpowerDemand: number;
+    manpowerDetails: DemandManpowerDetail[];
+    specialModuleDemands: DemandSpecialModule[];
+  };
+  changes?: Array<{
+    field: string;
+    oldValue: any;
+    newValue: any;
+  }>;
+  deletedSchedules?: Array<{
+    id: number;
+    staffName: string;
+    date: string;
+    percentage: number;
+    reason: string;
+  }>;
+  submittedBy: string;
+  submittedAt: string;
 }
 
 export interface DemandManpowerDetail {

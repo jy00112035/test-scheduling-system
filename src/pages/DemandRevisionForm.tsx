@@ -1,0 +1,233 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Form,
+  DatePicker,
+  InputNumber,
+  Button,
+  Space,
+  message,
+  Alert,
+  Card,
+  Descriptions,
+  Table,
+  Tag,
+} from 'antd';
+import dayjs from 'dayjs';
+import { TestDemand, DemandManpowerDetail, RevisionRequest } from '../types';
+import { api } from '../services/api';
+
+const { RangePicker } = DatePicker;
+
+interface DemandRevisionFormProps {
+  demand: TestDemand;
+  onSuccess: () => void;
+  onCancel: () => void;
+}
+
+const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
+  demand,
+  onSuccess,
+  onCancel,
+}) => {
+  const [form] = Form.useForm();
+  const [loading, setLoading] = useState(false);
+  const [manpowerDetails, setManpowerDetails] = useState<DemandManpowerDetail[]>([]);
+  const [scheduleInfo, setScheduleInfo] = useState<{
+    pastSchedules: Array<{ testType: string; usedManpower: number }>;
+    totalSchedules: number;
+  }>({ pastSchedules: [], totalSchedules: 0 });
+
+  useEffect(() => {
+    loadDemandDetails();
+  }, [demand.id]);
+
+  const loadDemandDetails = async () => {
+    try {
+      const demandDetail = await api.getDemand(Number(demand.id));
+      setManpowerDetails(demandDetail.manpowerDetails || []);
+
+      // 计算已使用的人力（过去排班）
+      const schedules = await api.getSchedulesByRange(
+        '2000-01-01',
+        dayjs().format('YYYY-MM-DD')
+      );
+      const demandSchedules = schedules.filter((s: any) => s.demandId === Number(demand.id));
+      const pastSchedules = demandSchedules.filter((s: any) =>
+        dayjs(s.date).isBefore(dayjs(), 'day')
+      );
+
+      // 按测试类型分组计算已使用人力
+      const usedByType: Record<string, number> = {};
+      pastSchedules.forEach((s: any) => {
+        const matchedDetail = demandDetail.manpowerDetails?.find(
+          (d: DemandManpowerDetail) => d.id === s.demandManpowerDetailId
+        );
+        if (matchedDetail) {
+          usedByType[matchedDetail.testType] = (usedByType[matchedDetail.testType] || 0) + s.percentage / 100;
+        }
+      });
+
+      setScheduleInfo({
+        pastSchedules: Object.entries(usedByType).map(([testType, usedManpower]) => ({
+          testType,
+          usedManpower,
+        })),
+        totalSchedules: demandSchedules.length,
+      });
+
+      // 设置表单初始值
+      form.setFieldsValue({
+        dateRange: [dayjs(demandDetail.startDate), dayjs(demandDetail.endDate)],
+      });
+    } catch (error: any) {
+      message.error(error.message || '获取需求详情失败');
+    }
+  };
+
+  const getUsedManpower = (testType: string): number => {
+    const found = scheduleInfo.pastSchedules.find(s => s.testType === testType);
+    return found ? found.usedManpower : 0;
+  };
+
+  const handleSubmit = async (values: any) => {
+    setLoading(true);
+    try {
+      const [startDate, endDate] = values.dateRange;
+
+      // 构建人力详情列表
+      const updatedDetails: DemandManpowerDetail[] = manpowerDetails.map(detail => ({
+        ...detail,
+        manpowerDemand: values[`manpower_${detail.id}`] ?? detail.manpowerDemand,
+      }));
+
+      const request: RevisionRequest = {
+        startDate: startDate.format('YYYY-MM-DDTHH:mm:ss'),
+        endDate: endDate.format('YYYY-MM-DDTHH:mm:ss'),
+        manpowerDetails: updatedDetails,
+      };
+
+      await api.submitRevision(Number(demand.id), request);
+      onSuccess();
+    } catch (error: any) {
+      message.error(error.message || '提交变更失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const columns = [
+    {
+      title: '测试类型',
+      dataIndex: 'testType',
+      key: 'testType',
+    },
+    {
+      title: '当前配额（人天）',
+      dataIndex: 'manpowerDemand',
+      key: 'manpowerDemand',
+      render: (value: number) => `${value} 人天`,
+    },
+    {
+      title: '已使用（过去排班）',
+      key: 'usedManpower',
+      render: (_: any, record: DemandManpowerDetail) => {
+        const used = getUsedManpower(record.testType);
+        return `${used.toFixed(1)} 人天`;
+      },
+    },
+    {
+      title: '新配额（人天）',
+      key: 'newManpower',
+      render: (_: any, record: DemandManpowerDetail) => (
+        <Form.Item
+          name={`manpower_${record.id}`}
+          initialValue={record.manpowerDemand}
+          rules={[
+            { required: true, message: '请输入人力配额' },
+            {
+              validator: async (_, value) => {
+                const used = getUsedManpower(record.testType);
+                if (value < used) {
+                  throw new Error(`不能低于已使用的 ${used.toFixed(1)} 人天`);
+                }
+              },
+            },
+          ]}
+          style={{ marginBottom: 0 }}
+        >
+          <InputNumber
+            min={0}
+            max={9999}
+            precision={1}
+            style={{ width: 120 }}
+          />
+        </Form.Item>
+      ),
+    },
+  ];
+
+  return (
+    <Form form={form} layout="vertical" onFinish={handleSubmit}>
+      <Alert
+        message="需求变更说明"
+        description={
+          <ul style={{ margin: 0, paddingLeft: 20 }}>
+            <li>只能修改测试周期和人力需求配额</li>
+            <li>已排班的人力（无论过去未来）系统自动保护，不能修改</li>
+            <li>缩短周期时，周期外的未来排班将自动删除</li>
+            <li>减少人力时，超额的未来排班将自动删除（按时间从后往前）</li>
+            <li>变更后需要重新审批</li>
+          </ul>
+        }
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+      />
+
+      <Descriptions column={2} bordered size="small" style={{ marginBottom: 16 }}>
+        <Descriptions.Item label="产品">{demand.product}</Descriptions.Item>
+        <Descriptions.Item label="版本">{demand.version || '-'}</Descriptions.Item>
+        <Descriptions.Item label="版本类型">{demand.versionType}</Descriptions.Item>
+        <Descriptions.Item label="当前状态">
+          <Tag color="blue">{demand.status === 'pending' ? '待排期' : '已排期'}</Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="已排班数量">{scheduleInfo.totalSchedules} 条</Descriptions.Item>
+      </Descriptions>
+
+      <Card title="测试周期" style={{ marginBottom: 16 }}>
+        <Form.Item
+          name="dateRange"
+          label="测试周期"
+          rules={[{ required: true, message: '请选择测试周期' }]}
+        >
+          <RangePicker
+            format="YYYY-MM-DD"
+            style={{ width: '100%' }}
+          />
+        </Form.Item>
+      </Card>
+
+      <Card title="人力需求配额" style={{ marginBottom: 16 }}>
+        <Table
+          columns={columns}
+          dataSource={manpowerDetails}
+          rowKey="id"
+          pagination={false}
+          bordered
+          size="small"
+        />
+      </Card>
+
+      <Form.Item style={{ textAlign: 'right', marginBottom: 0 }}>
+        <Space>
+          <Button onClick={onCancel}>取消</Button>
+          <Button type="primary" htmlType="submit" loading={loading}>
+            提交变更审批
+          </Button>
+        </Space>
+      </Form.Item>
+    </Form>
+  );
+};
+
+export default DemandRevisionForm;

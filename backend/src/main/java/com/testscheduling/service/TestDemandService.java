@@ -1,8 +1,11 @@
 package com.testscheduling.service;
 
 import com.testscheduling.dto.DemandFulfillmentResponse;
+import com.testscheduling.dto.RevisionDiffResponse;
+import com.testscheduling.dto.RevisionRequest;
 import com.testscheduling.entity.DemandManpowerDetail;
 import com.testscheduling.entity.DemandSpecialModule;
+import com.testscheduling.entity.Schedule;
 import com.testscheduling.entity.TestDemand;
 import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.DemandManpowerDetailRepository;
@@ -12,12 +15,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class TestDemandService {
@@ -257,6 +263,298 @@ public class TestDemandService {
         for (Long id : ids.stream().sorted().toList()) {
             rejectDemand(id);
         }
+    }
+
+    // ========== 需求变更审批相关方法 ==========
+
+    @Transactional
+    public TestDemand submitRevision(Long id, RevisionRequest request, String submittedBy) {
+        TestDemand demand = lockedDemand(id);
+
+        // 1. 验证状态：只能编辑 pending 或 scheduled 状态
+        if (demand.getStatus() != TestDemand.DemandStatus.pending
+                && demand.getStatus() != TestDemand.DemandStatus.scheduled) {
+            throw new BusinessException("DEMAND_STATUS_TRANSITION_INVALID",
+                "只能编辑待排期或已排期的需求");
+        }
+
+        // 2. 获取所有排班记录
+        List<Schedule> allSchedules = scheduleRepository.findByDemandId(id);
+        LocalDate today = LocalDate.now();
+
+        // 3. 验证新人力配额 >= 已使用人力（过去排班）
+        List<DemandManpowerDetail> requestedDetails = detailList(request.getManpowerDetails());
+        List<DemandSpecialModule> requestedSpecials = specialList(request.getSpecialModuleDemands());
+
+        // 验证功能测试类型的人力
+        for (DemandManpowerDetail newDetail : requestedDetails) {
+            BigDecimal usedManpower = allSchedules.stream()
+                .filter(s -> s.getDate().isBefore(today))
+                .filter(s -> newDetail.getId() != null
+                    && newDetail.getId().equals(s.getDemandManpowerDetailId()))
+                .map(s -> BigDecimal.valueOf(s.getPercentage()).divide(BigDecimal.valueOf(100)))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            if (newDetail.getManpowerDemand() != null
+                    && newDetail.getManpowerDemand().compareTo(usedManpower) < 0) {
+                throw new BusinessException("MANPOWER_DEMAND_INVALID",
+                    String.format("%s 人力配额不能低于已使用的人力 %s 人天",
+                        newDetail.getTestType(), usedManpower));
+            }
+        }
+
+        // 验证专项模块的人力
+        for (DemandSpecialModule newModule : requestedSpecials) {
+            BigDecimal usedManpower = allSchedules.stream()
+                .filter(s -> s.getDate().isBefore(today))
+                .filter(s -> s.getDemandSpecialModuleId() != null
+                    && s.getDemandSpecialModuleId().equals(newModule.getId()))
+                .map(s -> BigDecimal.valueOf(s.getPercentage()).divide(BigDecimal.valueOf(100)))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            if (newModule.getManpowerDemand() != null
+                    && newModule.getManpowerDemand().compareTo(usedManpower) < 0) {
+                throw new BusinessException("MANPOWER_DEMAND_INVALID",
+                    "专项模块人力配额不能低于已使用的人力");
+            }
+        }
+
+        // 4. 自动删除周期外和超额排班
+        List<Schedule> deletedSchedules = deleteExcessSchedules(
+            id, request.getStartDate(), request.getEndDate(),
+            requestedDetails, requestedSpecials, allSchedules);
+
+        // 5. 更新需求字段
+        demand.setStartDate(request.getStartDate());
+        demand.setEndDate(request.getEndDate());
+        demand.setManpowerDemand(computeTotalManpower(requestedDetails));
+
+        // 6. 更新人力详情和专项模块
+        replaceDetails(id, requestedDetails);
+        specialModuleService.replaceForDemand(id, requestedDetails, requestedSpecials);
+
+        // 7. 状态变更为 revision_pending
+        demand.setStatus(TestDemand.DemandStatus.revision_pending);
+        demand.setSubmittedBy(requireSubmitter(submittedBy));
+
+        TestDemand saved = testDemandRepository.save(demand);
+
+        // 8. 记录审计日志
+        auditLogService.record(
+            "DEMAND_REVISION_SUBMITTED",
+            AUDIT_ENTITY_TYPE,
+            id,
+            null,
+            Map.of(
+                "submittedBy", submittedBy,
+                "deletedScheduleCount", deletedSchedules.size(),
+                "newStartDate", request.getStartDate() != null ? request.getStartDate().toString() : null,
+                "newEndDate", request.getEndDate() != null ? request.getEndDate().toString() : null
+            ));
+
+        return enrichWithDetails(saved);
+    }
+
+    @Transactional
+    public List<Schedule> deleteExcessSchedules(
+            Long demandId,
+            LocalDateTime newStartDate,
+            LocalDateTime newEndDate,
+            List<DemandManpowerDetail> newDetails,
+            List<DemandSpecialModule> newSpecials,
+            List<Schedule> allSchedules) {
+
+        LocalDate start = newStartDate != null ? newStartDate.toLocalDate() : LocalDate.MIN;
+        LocalDate end = newEndDate != null ? newEndDate.toLocalDate() : LocalDate.MAX;
+        LocalDate today = LocalDate.now();
+
+        List<Schedule> toDelete = new ArrayList<>();
+
+        // 1. 删除周期外排班（只删除未来的排班，过去的排班保留）
+        for (Schedule s : allSchedules) {
+            if (s.getDate().isAfter(today)) {
+                if (s.getDate().isBefore(start) || s.getDate().isAfter(end)) {
+                    toDelete.add(s);
+                }
+            }
+        }
+
+        // 2. 删除超额排班（按日期从后往前删除）
+        // 按 detailId 分组计算已排班数量
+        Map<Long, BigDecimal> allocatedByDetailId = allSchedules.stream()
+            .filter(s -> s.getDemandManpowerDetailId() != null)
+            .filter(s -> !toDelete.contains(s))
+            .collect(Collectors.groupingBy(
+                Schedule::getDemandManpowerDetailId,
+                Collectors.reducing(
+                    BigDecimal.ZERO,
+                    s -> BigDecimal.valueOf(s.getPercentage()).divide(BigDecimal.valueOf(100)),
+                    BigDecimal::add)));
+
+        for (DemandManpowerDetail newDetail : newDetails) {
+            if (newDetail.getId() == null) continue;
+
+            BigDecimal allocated = allocatedByDetailId.getOrDefault(newDetail.getId(), BigDecimal.ZERO);
+            BigDecimal quota = newDetail.getManpowerDemand() != null
+                ? newDetail.getManpowerDemand() : BigDecimal.ZERO;
+            BigDecimal excess = allocated.subtract(quota);
+
+            if (excess.compareTo(BigDecimal.ZERO) <= 0) continue;
+
+            // 按日期从后往前排序，优先删除最远的排班
+            List<Schedule> detailSchedules = allSchedules.stream()
+                .filter(s -> newDetail.getId().equals(s.getDemandManpowerDetailId()))
+                .filter(s -> s.getDate().isAfter(today))  // 只删除未来的
+                .filter(s -> !toDelete.contains(s))
+                .sorted((a, b) -> b.getDate().compareTo(a.getDate()))
+                .toList();
+
+            for (Schedule s : detailSchedules) {
+                if (excess.compareTo(BigDecimal.ZERO) <= 0) break;
+
+                BigDecimal scheduleManpower = BigDecimal.valueOf(s.getPercentage())
+                    .divide(BigDecimal.valueOf(100));
+                toDelete.add(s);
+                excess = excess.subtract(scheduleManpower);
+            }
+        }
+
+        // 3. 按专项模块删除超额排班
+        Map<Long, BigDecimal> allocatedBySpecialId = allSchedules.stream()
+            .filter(s -> s.getDemandSpecialModuleId() != null)
+            .filter(s -> !toDelete.contains(s))
+            .collect(Collectors.groupingBy(
+                Schedule::getDemandSpecialModuleId,
+                Collectors.reducing(
+                    BigDecimal.ZERO,
+                    s -> BigDecimal.valueOf(s.getPercentage()).divide(BigDecimal.valueOf(100)),
+                    BigDecimal::add)));
+
+        for (DemandSpecialModule newSpecial : newSpecials) {
+            if (newSpecial.getId() == null) continue;
+
+            BigDecimal allocated = allocatedBySpecialId.getOrDefault(newSpecial.getId(), BigDecimal.ZERO);
+            BigDecimal quota = newSpecial.getManpowerDemand() != null
+                ? newSpecial.getManpowerDemand() : BigDecimal.ZERO;
+            BigDecimal excess = allocated.subtract(quota);
+
+            if (excess.compareTo(BigDecimal.ZERO) <= 0) continue;
+
+            List<Schedule> specialSchedules = allSchedules.stream()
+                .filter(s -> newSpecial.getId().equals(s.getDemandSpecialModuleId()))
+                .filter(s -> s.getDate().isAfter(today))
+                .filter(s -> !toDelete.contains(s))
+                .sorted((a, b) -> b.getDate().compareTo(a.getDate()))
+                .toList();
+
+            for (Schedule s : specialSchedules) {
+                if (excess.compareTo(BigDecimal.ZERO) <= 0) break;
+
+                BigDecimal scheduleManpower = BigDecimal.valueOf(s.getPercentage())
+                    .divide(BigDecimal.valueOf(100));
+                toDelete.add(s);
+                excess = excess.subtract(scheduleManpower);
+            }
+        }
+
+        // 4. 执行删除
+        for (Schedule s : toDelete) {
+            scheduleRepository.delete(s);
+        }
+
+        return toDelete;
+    }
+
+    @Transactional(readOnly = true)
+    public RevisionDiffResponse getRevisionDiff(Long id) {
+        TestDemand demand = findById(id);
+
+        if (demand.getStatus() != TestDemand.DemandStatus.revision_pending) {
+            throw new BusinessException("DEMAND_NOT_IN_REVISION",
+                "需求不在变更审批状态");
+        }
+
+        // 获取当前排班（用于显示已删除的排班）
+        List<Schedule> currentSchedules = scheduleRepository.findByDemandId(id);
+
+        // 构建变更对比响应
+        RevisionDiffResponse response = new RevisionDiffResponse();
+        response.setDemandId(id);
+        response.setStatus(demand.getStatus());
+        response.setSubmittedBy(demand.getSubmittedBy());
+        response.setSubmittedAt(demand.getUpdatedAt());
+
+        // 原始快照（从审计日志或数据库历史中获取，这里简化处理）
+        RevisionDiffResponse.DemandSnapshot modified = new RevisionDiffResponse.DemandSnapshot();
+        modified.setStartDate(demand.getStartDate());
+        modified.setEndDate(demand.getEndDate());
+        modified.setManpowerDemand(demand.getManpowerDemand());
+        modified.setManpowerDetails(demand.getManpowerDetails());
+        modified.setSpecialModuleDemands(demand.getSpecialModuleDemands());
+        response.setModified(modified);
+
+        return response;
+    }
+
+    @Transactional
+    public TestDemand approveRevision(Long id) {
+        TestDemand demand = lockedDemand(id);
+        requireStatus(demand, TestDemand.DemandStatus.revision_pending);
+
+        // 检查是否还有排班，决定状态
+        boolean hasSchedules = scheduleRepository.existsByDemandId(id);
+        demand.setStatus(hasSchedules
+            ? TestDemand.DemandStatus.scheduled
+            : TestDemand.DemandStatus.pending);
+
+        return testDemandRepository.save(demand);
+    }
+
+    @Transactional
+    public void rejectRevision(Long id) {
+        TestDemand demand = lockedDemand(id);
+        requireStatus(demand, TestDemand.DemandStatus.revision_pending);
+        demand.setStatus(TestDemand.DemandStatus.rejected);
+        testDemandRepository.save(demand);
+    }
+
+    @Transactional
+    public TestDemand approveRevisionWithChanges(Long id, RevisionRequest request) {
+        TestDemand demand = lockedDemand(id);
+        requireStatus(demand, TestDemand.DemandStatus.revision_pending);
+
+        // 应用修改
+        if (request.getStartDate() != null) {
+            demand.setStartDate(request.getStartDate());
+        }
+        if (request.getEndDate() != null) {
+            demand.setEndDate(request.getEndDate());
+        }
+
+        List<DemandManpowerDetail> requestedDetails = detailList(request.getManpowerDetails());
+        List<DemandSpecialModule> requestedSpecials = specialList(request.getSpecialModuleDemands());
+
+        if (!requestedDetails.isEmpty()) {
+            demand.setManpowerDemand(computeTotalManpower(requestedDetails));
+            replaceDetails(id, requestedDetails);
+        }
+        if (!requestedSpecials.isEmpty()) {
+            specialModuleService.replaceForDemand(id, requestedDetails, requestedSpecials);
+        }
+
+        // 检查是否还有排班，决定状态
+        boolean hasSchedules = scheduleRepository.existsByDemandId(id);
+        demand.setStatus(hasSchedules
+            ? TestDemand.DemandStatus.scheduled
+            : TestDemand.DemandStatus.pending);
+
+        return testDemandRepository.save(demand);
+    }
+
+    @Transactional(readOnly = true)
+    public List<TestDemand> findRevisionPendingApproval() {
+        return enrichWithDetails(
+            testDemandRepository.findByStatus(TestDemand.DemandStatus.revision_pending));
     }
 
     private void copyEditableFields(TestDemand target, TestDemand source) {
