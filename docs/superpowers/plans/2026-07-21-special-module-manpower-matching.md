@@ -1675,6 +1675,7 @@ git commit -m "feat: enforce module matching in schedule workbench"
 - Modify: `backend/src/test/java/com/testscheduling/migration/MigrationSmokeTest.java`
 - Create: `backend/src/test/java/com/testscheduling/integration/SpecialModuleSchedulingIntegrationTest.java`
 - Create: `docs/特殊模块人力排班验收清单.md`
+- Create: `docs/verification/2026-07-23-task14-h2-runtime-upgrade.md`
 
 - [x] **Step 1: 写完整服务集成测试**
 
@@ -1724,7 +1725,7 @@ Run: `cd backend && mvn spring-boot:run`
 
 Expected: Flyway 将现有库 baseline 到 V1、执行 V2 和 V3，JPA `validate` 通过；历史需求、人员和排班接口可读取。
 
-Evidence (2026-07-23, `6823e33`): 非空 H2 文件复制到仓库外临时目录后由 V1 升至 V3，JPA 初始化成功；`/api/demands`、`/api/staff`、`/api/schedules` 均返回 HTTP 200 和非空数据；仓库内原文件 SHA-256 未变化。`MigrationSmokeTest` 同时覆盖 legacy V1 升级、当前 V3 重启和 JPA validate。
+Evidence (2026-07-23, `6823e33`): 非空 H2 文件复制到仓库外临时目录后由 V1 升至 V3，JPA 初始化成功；`/api/demands`、`/api/staff`、`/api/schedules` 均返回 HTTP 200 和非空数据；仓库内原文件 SHA-256 未变化。`MigrationSmokeTest` 同时覆盖 legacy V1 升级、当前 V3 重启和 JPA validate。持久化证据见 [Task 14 H2 运行时升级验证记录](../../verification/2026-07-23-task14-h2-runtime-upgrade.md)。
 
 - [ ] **Step 5: 验证 MySQL profile**
 

@@ -95,7 +95,9 @@ class SpecialModuleSchedulingIntegrationTest {
             () -> publishService.publishOne(workflow.demand().getId()));
 
         assertEquals("STAFF_MODULE_NOT_FAMILIAR", error.getErrorCode());
-        assertTrue(scheduleRepository.findByDemandId(workflow.demand().getId()).stream()
+        List<Schedule> persisted = scheduleRepository.findByDemandId(workflow.demand().getId());
+        assertEquals(1, persisted.size());
+        assertTrue(persisted.stream()
             .noneMatch(row -> Boolean.TRUE.equals(row.getPublished())));
         assertTrue(auditLogRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc(
                 "SCHEDULE", workflow.demand().getId().toString()).stream()
@@ -119,9 +121,13 @@ class SpecialModuleSchedulingIntegrationTest {
         assertEquals(1, response.success().get(0).scheduleCount());
         assertEquals(invalid.demand().getId(), response.failed().get(0).demandId());
         assertEquals("STAFF_MODULE_NOT_FAMILIAR", response.failed().get(0).reasonCode());
-        assertTrue(scheduleRepository.findByDemandId(invalid.demand().getId()).stream()
+        List<Schedule> invalidSchedules = scheduleRepository.findByDemandId(invalid.demand().getId());
+        List<Schedule> validSchedules = scheduleRepository.findByDemandId(valid.demand().getId());
+        assertEquals(1, invalidSchedules.size());
+        assertTrue(invalidSchedules.stream()
             .noneMatch(row -> Boolean.TRUE.equals(row.getPublished())));
-        assertTrue(scheduleRepository.findByDemandId(valid.demand().getId()).stream()
+        assertEquals(1, validSchedules.size());
+        assertTrue(validSchedules.stream()
             .allMatch(row -> Boolean.TRUE.equals(row.getPublished())));
         assertTrue(auditLogRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc(
                 "SCHEDULE", valid.demand().getId().toString()).stream()
