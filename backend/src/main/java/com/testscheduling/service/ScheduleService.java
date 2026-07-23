@@ -1,29 +1,40 @@
 package com.testscheduling.service;
 
 import com.testscheduling.dto.GanttViewItem;
+import com.testscheduling.dto.ScheduleDeleteScope;
 import com.testscheduling.entity.Schedule;
 import com.testscheduling.entity.TestDemand;
 import com.testscheduling.entity.TestStaff;
 import com.testscheduling.entity.User;
+import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.ScheduleRepository;
 import com.testscheduling.repository.TestDemandRepository;
 import com.testscheduling.repository.TestStaffRepository;
 import com.testscheduling.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
 public class ScheduleService {
+
+    private static final String PUBLISHED_MODIFICATION_ERROR_CODE =
+        "SCHEDULE_PUBLISHED_MODIFICATION_FORBIDDEN";
+    private static final String PUBLISHED_MODIFICATION_ERROR_MESSAGE =
+        "已发布排班必须先取消发布后再修改";
 
     @Autowired
     private ScheduleRepository scheduleRepository;
@@ -37,13 +48,19 @@ public class ScheduleService {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private ScheduleEligibilityService eligibilityService;
+
+    @Autowired
+    private SchedulePublishService publishService;
+
     public List<Schedule> findAll() {
         return scheduleRepository.findAll();
     }
 
     public Schedule findById(Long id) {
         return scheduleRepository.findById(id)
-            .orElseThrow(() -> new RuntimeException("排班记录不存在"));
+            .orElseThrow(() -> error("SCHEDULE_NOT_FOUND", "排班记录不存在"));
     }
 
     public List<Schedule> findByDate(LocalDate date) {
@@ -62,81 +79,231 @@ public class ScheduleService {
         return scheduleRepository.findByStaffIdAndDateRange(staffId, startDate, endDate);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Schedule create(Schedule schedule) {
-        validateConfidentialClearance(schedule.getDemandId(), schedule.getStaffId());
+        lockScopes(Collections.singletonList(schedule));
+        eligibilityService.validate(schedule, null);
         return scheduleRepository.save(schedule);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<Schedule> createBatch(List<Schedule> schedules) {
+        if (schedules == null) {
+            throw error("SCHEDULE_REQUIRED", "排班信息不能为空");
+        }
+        lockScopes(schedules);
+        ScheduleEligibilityService.ValidationContext context =
+            eligibilityService.prepareContext(schedules);
         for (Schedule schedule : schedules) {
-            validateConfidentialClearance(schedule.getDemandId(), schedule.getStaffId());
+            eligibilityService.validate(schedule, null, context);
+            context.addSchedule(schedule);
         }
         return scheduleRepository.saveAll(schedules);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Schedule update(Long id, Schedule schedule) {
-        Schedule existing = findById(id);
-        existing.setDate(schedule.getDate());
-        existing.setPercentage(schedule.getPercentage());
+        Schedule existing = lockExisting(id, schedule.getStaffId());
+        requireDraftMutable(existing);
+        if (existing.getDemandManpowerDetailId() == null
+                && existing.getDemandSpecialModuleId() == null) {
+            throw error("SCHEDULE_HISTORICAL_READ_ONLY", "历史排班只能通过归类接口补充人力归属");
+        }
+        Schedule candidate = copy(existing);
+        candidate.setStaffId(schedule.getStaffId());
+        candidate.setDate(schedule.getDate());
+        candidate.setPercentage(schedule.getPercentage());
+        candidate.setDemandManpowerDetailId(schedule.getDemandManpowerDetailId());
+        candidate.setDemandSpecialModuleId(schedule.getDemandSpecialModuleId());
+        eligibilityService.validate(candidate, id);
+        copyWritableFields(candidate, existing);
         return scheduleRepository.save(existing);
     }
 
-    @Transactional
-    public void delete(Long id) {
-        scheduleRepository.deleteById(id);
+    public void validateOnly(Schedule schedule) {
+        eligibilityService.validate(schedule, null);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public Schedule move(Long id, Long staffId, LocalDate date, Integer percentage) {
+        Schedule existing = lockExisting(id, staffId);
+        requireDraftMutable(existing);
+        Schedule candidate = copy(existing);
+        candidate.setStaffId(staffId);
+        candidate.setDate(date);
+        candidate.setPercentage(percentage);
+        eligibilityService.validate(candidate, id);
+        copyWritableFields(candidate, existing);
+        return scheduleRepository.save(existing);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public Schedule classifyHistorical(
+            Long id, Long demandManpowerDetailId, Long demandSpecialModuleId) {
+        // The locked schedule-scope query acquires the demand first. It is followed by
+        // the ordered schedule-row lock, then staff; all schedule mutations lock demand
+        // before staff, so this order cannot form a cross-service wait cycle.
+        TestDemand demand = demandRepository.findByScheduleIdForUpdate(id)
+            .orElseThrow(() -> error("SCHEDULE_NOT_FOUND", "排班记录不存在"));
+        Schedule existing = scheduleRepository.findByDemandIdForUpdate(demand.getId()).stream()
+            .filter(schedule -> Objects.equals(schedule.getId(), id))
+            .findFirst()
+            .orElseThrow(() -> error("SCHEDULE_NOT_FOUND", "排班记录不存在"));
+        lockStaffIds(Collections.singletonList(existing.getStaffId()));
+        if (existing.getDemandManpowerDetailId() != null
+                || existing.getDemandSpecialModuleId() != null) {
+            throw error("SCHEDULE_ALREADY_CLASSIFIED", "排班已经完成人力归属");
+        }
+        Schedule candidate = copy(existing);
+        candidate.setDemandManpowerDetailId(demandManpowerDetailId);
+        candidate.setDemandSpecialModuleId(demandSpecialModuleId);
+        eligibilityService.validate(candidate, id);
+        existing.setDemandManpowerDetailId(demandManpowerDetailId);
+        existing.setDemandSpecialModuleId(demandSpecialModuleId);
+        return scheduleRepository.save(existing);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public void delete(Long id) {
+        Schedule snapshot = findById(id);
+        lockDemandIds(List.of(snapshot.getDemandId()));
+        Schedule existing = scheduleRepository.findByDemandIdForUpdate(snapshot.getDemandId()).stream()
+            .filter(schedule -> Objects.equals(schedule.getId(), id))
+            .findFirst()
+            .orElseThrow(() -> error("SCHEDULE_NOT_FOUND", "排班记录不存在"));
+        if (Boolean.TRUE.equals(existing.getPublished())) {
+            throw error("PUBLISHED_SCHEDULE_PROTECTED", "已发布排班必须先取消发布或按需求清理全部");
+        }
+        scheduleRepository.delete(existing);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void deleteByDemandId(Long demandId) {
-        scheduleRepository.findByDemandId(demandId)
-            .forEach(s -> scheduleRepository.deleteById(s.getId()));
+        deleteByDemandId(demandId, ScheduleDeleteScope.DRAFT_ONLY);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public void deleteByDemandId(Long demandId, ScheduleDeleteScope scope) {
+        TestDemand demand = demandRepository.findByIdForUpdate(demandId)
+            .orElseThrow(() -> error("DEMAND_NOT_FOUND", "测试需求不存在"));
+        scheduleRepository.findByDemandIdForUpdate(demandId);
+        if (scope == ScheduleDeleteScope.ALL) {
+            scheduleRepository.deleteByDemandId(demandId);
+            if (demand.getStatus() == TestDemand.DemandStatus.scheduled) {
+                demand.setStatus(TestDemand.DemandStatus.pending);
+                demandRepository.save(demand);
+            }
+        } else {
+            scheduleRepository.deleteByDemandIdAndPublishedFalse(demandId);
+        }
     }
 
     public List<Schedule> findPublished() {
         return scheduleRepository.findByPublishedTrue();
     }
 
-    @Transactional
     public void publishByDemandId(Long demandId) {
-        TestDemand demand = demandRepository.findById(demandId).orElse(null);
-        if (demand != null && Boolean.TRUE.equals(demand.getConfidential())) {
-            List<Schedule> schedules = scheduleRepository.findByDemandId(demandId);
-            for (Schedule s : schedules) {
-                validateStaffConfidentialClearance(s.getStaffId(), "无法发布保密项目排班");
-            }
-        }
-        scheduleRepository.findByDemandId(demandId)
-            .forEach(s -> {
-                s.setPublished(true);
-                scheduleRepository.save(s);
-            });
+        publishService.publishOne(demandId);
     }
 
-    private void validateConfidentialClearance(Long demandId, Long staffId) {
-        TestDemand demand = demandRepository.findById(demandId).orElse(null);
-        if (demand != null && Boolean.TRUE.equals(demand.getConfidential())) {
-            validateStaffConfidentialClearance(staffId, "无法参与保密项目测试");
+    private void lockScopes(Collection<Schedule> schedules) {
+        for (Schedule schedule : schedules) {
+            if (schedule == null) {
+                throw error("SCHEDULE_REQUIRED", "排班信息不能为空");
+            }
         }
+        lockDemandIds(schedules.stream().map(Schedule::getDemandId).toList());
+        lockStaffIds(schedules.stream().map(Schedule::getStaffId).toList());
+    }
+
+    private Schedule lockExisting(Long id, Long targetStaffId) {
+        Schedule snapshot = findById(id);
+        lockDemandIds(Collections.singletonList(snapshot.getDemandId()));
+        lockStaffIds(Collections.singletonList(targetStaffId));
+        return scheduleRepository.findByIdForUpdate(id)
+            .orElseThrow(() -> error("SCHEDULE_NOT_FOUND", "排班记录不存在"));
+    }
+
+    private void lockDemandIds(Collection<Long> demandIds) {
+        demandIds.stream()
+            .filter(Objects::nonNull)
+            .distinct()
+            .sorted()
+            .forEach(demandId -> demandRepository.findByIdForUpdate(demandId)
+                .orElseThrow(() -> error("DEMAND_NOT_FOUND", "测试需求不存在")));
+        if (demandIds.stream().anyMatch(Objects::isNull)) {
+            throw error("DEMAND_NOT_FOUND", "测试需求不存在");
+        }
+    }
+
+    private void lockStaffIds(Collection<Long> staffIds) {
+        staffIds.stream()
+            .filter(Objects::nonNull)
+            .distinct()
+            .sorted()
+            .forEach(staffId -> testStaffRepository.findByIdForUpdate(staffId)
+                .orElseThrow(() -> error("STAFF_NOT_FOUND", "测试人员不存在")));
+        if (staffIds.stream().anyMatch(Objects::isNull)) {
+            throw error("STAFF_NOT_FOUND", "测试人员不存在");
+        }
+    }
+
+    private Schedule copy(Schedule source) {
+        Schedule copy = new Schedule();
+        copy.setId(source.getId());
+        copy.setDemandId(source.getDemandId());
+        copy.setStaffId(source.getStaffId());
+        copy.setDemandManpowerDetailId(source.getDemandManpowerDetailId());
+        copy.setDemandSpecialModuleId(source.getDemandSpecialModuleId());
+        copy.setDate(source.getDate());
+        copy.setPercentage(source.getPercentage());
+        copy.setProduct(source.getProduct());
+        copy.setTestManager(source.getTestManager());
+        copy.setVersionType(source.getVersionType());
+        copy.setVersion(source.getVersion());
+        copy.setPublished(source.getPublished());
+        copy.setCreatedAt(source.getCreatedAt());
+        copy.setLockVersion(source.getLockVersion());
+        return copy;
+    }
+
+    private void copyWritableFields(Schedule source, Schedule target) {
+        target.setStaffId(source.getStaffId());
+        target.setDate(source.getDate());
+        target.setPercentage(source.getPercentage());
+        target.setDemandManpowerDetailId(source.getDemandManpowerDetailId());
+        target.setDemandSpecialModuleId(source.getDemandSpecialModuleId());
+    }
+
+    private void requireDraftMutable(Schedule schedule) {
+        if (Boolean.TRUE.equals(schedule.getPublished())) {
+            throw error(PUBLISHED_MODIFICATION_ERROR_CODE,
+                PUBLISHED_MODIFICATION_ERROR_MESSAGE);
+        }
+    }
+
+    private BusinessException error(String code, String message) {
+        return new BusinessException(code, message);
     }
 
     private void validateStaffConfidentialClearance(Long staffId, String actionMessage) {
         TestStaff staff = testStaffRepository.findById(staffId).orElse(null);
         if (staff == null) {
-            throw new RuntimeException("人员不存在");
+            throw error("STAFF_NOT_FOUND", "人员不存在");
         }
 
         User user = userRepository.findByUsername(staff.getEmpNo()).orElse(null);
         if (user == null || !Boolean.TRUE.equals(user.getConfidentialClearance())) {
-            throw new RuntimeException(staff.getName() + " 不具备保密权限，" + actionMessage);
+            throw error("CONFIDENTIAL_CLEARANCE_REQUIRED",
+                staff.getName() + " 不具备保密权限，" + actionMessage);
         }
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void unpublishByDemandId(Long demandId) {
-        scheduleRepository.findByDemandId(demandId)
+        demandRepository.findByIdForUpdate(demandId)
+            .orElseThrow(() -> error("DEMAND_NOT_FOUND", "测试需求不存在"));
+        scheduleRepository.findByDemandIdForUpdate(demandId)
             .forEach(s -> {
                 s.setPublished(false);
                 scheduleRepository.save(s);

@@ -5,9 +5,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Space, DatePicker, Select, InputNumber, Tag, Button, Popconfirm, Popover, Divider, Tooltip, Checkbox, Modal, Input, Dropdown } from 'antd';
-import { DeleteOutlined, SearchOutlined, DownOutlined } from '@ant-design/icons';
+import { DeleteOutlined, SearchOutlined, DownOutlined, LockOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import type { ScheduleItem, DemandItem, StaffItem, DailyStatusEntry } from './workbenchTypes';
+import type { AllocationTarget, ScheduleItem, DemandItem, StaffItem, DailyStatusEntry } from './workbenchTypes';
 import {
   getWeekDates,
   DAY_LABELS,
@@ -19,6 +19,7 @@ import {
   isAvailableForAssignment,
   getMaxCapacity,
   getVersionTypeColor,
+  isStaffEligibleForAllocationTarget,
 } from './workbenchCalculations';
 import { DailyAvailabilityStatus, DailyStatusLabels, DailyStatusColors } from '../../types';
 
@@ -29,6 +30,7 @@ interface ScheduleTimelineProps {
   weekViewDate: dayjs.Dayjs;
   dailyStatuses: Map<string, DailyStatusEntry>;
   selectedDemand: DemandItem | null;
+  draggedAllocationTarget: AllocationTarget | null;
   draggedSchedule: ScheduleItem | null;
   dragOverCell: string | null;
   dragOverTrash: boolean;
@@ -70,6 +72,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
   weekViewDate,
   dailyStatuses,
   selectedDemand,
+  draggedAllocationTarget,
   draggedSchedule,
   dragOverCell,
   dragOverTrash,
@@ -188,7 +191,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
         <Space size={8}>
           <span>人力排布视图</span>
           {/* 垃圾桶拖放区域 */}
-          {draggedSchedule && (
+          {draggedSchedule && !draggedSchedule.published && (
             <div
               onDrop={(e) => {
                 e.preventDefault();
@@ -243,7 +246,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
           />
           <Dropdown
             trigger={['click']}
-            dropdownRender={() => (
+            popupRender={() => (
               <div style={{ padding: 8, background: '#fff', borderRadius: 4, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
                 <div style={{ marginBottom: 4 }}>
                   <Checkbox
@@ -312,7 +315,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
           />
           <Dropdown
             trigger={['click']}
-            dropdownRender={() => (
+            popupRender={() => (
               <div style={{ padding: 8, background: '#fff', borderRadius: 4, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
                 <div style={{ marginBottom: 4 }}>
                   <Checkbox
@@ -351,7 +354,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
         </Space>
       }
       style={{ flex: 1, overflow: 'hidden', minWidth: 0, display: 'flex', flexDirection: 'column' }}
-      bodyStyle={{ padding: 0, overflow: 'auto', flex: 1, minHeight: 0, overscrollBehavior: 'contain' }}
+      styles={{ body: { padding: 0, overflow: 'auto', flex: 1, minHeight: 0, overscrollBehavior: 'contain' } }}
     >
       {/* 表格 */}
       <style>{`
@@ -430,7 +433,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                   onCancel={() => setFilterModalOpen(false)}
                   onOk={() => setFilterModalOpen(false)}
                   width={360}
-                  destroyOnClose={false}
+                  destroyOnHidden={false}
                 >
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ fontSize: 12, color: '#999' }}>取消勾选的测试类型不计入空闲工作量统计：</div>
@@ -485,7 +488,8 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                 );
               })}
             </tr>
-            {filteredStaffs.map(staff => (
+            {filteredStaffs.map(staff => {
+              return (
               <tr key={staff.id}>
                 {/* Sticky columns */}
                 <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 12, whiteSpace: 'nowrap' }}>
@@ -507,12 +511,18 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                   {staff.testType || '-'}
                 </td>
                 <td style={{ position: 'sticky', left: 240, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
-                  {staff.familiarModules ? (
-                    <Tooltip title={staff.familiarModules}>
-                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>
-                        {staff.familiarModules}
-                      </div>
-                    </Tooltip>
+                  {staff.familiarModules && staff.familiarModules.length > 0 ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, maxWidth: 130 }}>
+                      {staff.familiarModules.map(module => (
+                        <Tag
+                          key={module.id}
+                          color={module.enabled ? 'blue' : 'default'}
+                          style={{ margin: 0, fontSize: 9, lineHeight: '15px', padding: '0 3px' }}
+                        >
+                          {module.testType}: {module.moduleName}{!module.enabled && '（已停用）'}
+                        </Tag>
+                      ))}
+                    </div>
                   ) : '-'}
                 </td>
 
@@ -527,6 +537,13 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                   const hasConflict = totalPercent > maxCapacity;
                   const isWeekendColumn = [0, 6].includes(date.day());
                   const canAssign = isAvailableForAssignment(dailyStatuses, staff.id, dateStr);
+                  const matchesAllocationTarget = draggedAllocationTarget
+                    ? isStaffEligibleForAllocationTarget(staff, draggedAllocationTarget)
+                    : true;
+                  const canDropAllocation = canAssign && matchesAllocationTarget;
+                  const allocationReason = draggedAllocationTarget?.kind === 'special' && !matchesAllocationTarget
+                    ? `不熟悉${draggedAllocationTarget.moduleName}`
+                    : null;
 
                   const statusBgColor = dailyStatus && dailyStatus !== 'AVAILABLE'
                     ? `${DailyStatusColors[dailyStatus as DailyAvailabilityStatus]}18`
@@ -536,7 +553,11 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                     : statusBgColor || (isWeekendColumn ? '#fff7e6' : '#fff');
 
                   let cellCursor: React.CSSProperties['cursor'] = 'default';
-                  if (selectedDemand) {
+                  if (draggedAllocationTarget) {
+                    cellCursor = canDropAllocation ? 'copy' : 'not-allowed';
+                  } else if (draggedSchedule) {
+                    cellCursor = 'not-allowed';
+                  } else if (selectedDemand) {
                     cellCursor = canAssign ? 'copy' : 'not-allowed';
                   } else if (canManageDailyAvailability) {
                     cellCursor = 'pointer';
@@ -648,23 +669,34 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                         <div
                           key={schedule.id}
                           className="schedule-item"
-                          draggable
+                          role="button"
+                          aria-label={`${schedule.published ? '已发布排班' : '编辑排班'} ${schedule.product}`}
+                          aria-disabled={schedule.published}
+                          tabIndex={schedule.published ? -1 : 0}
+                          draggable={!schedule.published}
                           style={{
                             background: `${getVersionTypeColor(schedule.versionType)}20`,
                             borderLeft: `3px solid ${getVersionTypeColor(schedule.versionType)}`,
                             marginBottom: 1,
                             padding: '1px 18px 1px 4px',
                             position: 'relative',
-                            cursor: 'grab',
+                            cursor: schedule.published ? 'default' : 'grab',
+                            opacity: schedule.published ? 0.72 : 1,
                             fontSize: 11,
                             display: 'flex',
                             justifyContent: 'space-between',
                             alignItems: 'center',
                             whiteSpace: 'nowrap',
                           }}
-                          onClick={() => onEditSchedule(schedule)}
-                          onDragStart={(e) => onScheduleDragStart(e, schedule)}
-                          onDragEnd={onScheduleDragEnd}
+                          onClick={schedule.published ? undefined : () => onEditSchedule(schedule)}
+                          onKeyDown={schedule.published ? undefined : (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              onEditSchedule(schedule);
+                            }
+                          }}
+                          onDragStart={schedule.published ? undefined : (e) => onScheduleDragStart(e, schedule)}
+                          onDragEnd={schedule.published ? undefined : onScheduleDragEnd}
                         >
                           <span
                             className="product-name"
@@ -683,7 +715,13 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                               ? `${schedule.percentage}%`
                               : `${schedule.percentage}%`}
                           </span>
-                          <div style={{ position: 'absolute', top: 0, right: 0 }}>
+                          {schedule.published && (
+                            <LockOutlined
+                              aria-hidden="true"
+                              style={{ position: 'absolute', top: 2, right: 3, color: '#8c8c8c', fontSize: 10 }}
+                            />
+                          )}
+                          {!schedule.published && <div style={{ position: 'absolute', top: 0, right: 0 }}>
                             <Popconfirm
                               title="确定删除？"
                               onConfirm={(e) => {
@@ -694,6 +732,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                               cancelText="取消"
                             >
                               <Button
+                                aria-label={`删除排班 ${schedule.product}`}
                                 type="text"
                                 size="small"
                                 danger
@@ -702,39 +741,61 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                                 onClick={(e) => e.stopPropagation()}
                               />
                             </Popconfirm>
-                          </div>
+                          </div>}
                         </div>
                       ))}
                     </div>
                   );
 
                   const cellKey = `${staff.id}-${dateStr}`;
+                  const cellAcceptsDrop = draggedSchedule
+                    ? Boolean(draggedAllocationTarget && canDropAllocation)
+                    : (draggedAllocationTarget
+                      ? canDropAllocation
+                      : Boolean(selectedDemand && canAssign));
 
-                  return (
+                  const cell = (
                     <td
                       key={dateStr}
+                      aria-label={draggedAllocationTarget
+                        ? `${staff.name}：${canDropAllocation
+                          ? `可分配${draggedAllocationTarget.kind === 'special' ? draggedAllocationTarget.moduleName : `${draggedAllocationTarget.testType}通用人力`}`
+                          : allocationReason || '当前不可分配'}`
+                        : draggedSchedule ? `${staff.name}：排班需先归类` : undefined}
+                      aria-disabled={draggedAllocationTarget && !draggedSchedule
+                        ? !canDropAllocation : undefined}
+                      tabIndex={draggedAllocationTarget && !draggedSchedule
+                        ? (canDropAllocation ? 0 : -1) : undefined}
                       style={{
                         background: cellBackground,
                         cursor: cellCursor,
                         padding: 0,
                       }}
                       onDrop={() => {
-                        onCellDragOver(null);
-                        if (draggedSchedule) {
+                        if (draggedSchedule && cellAcceptsDrop) {
+                          onCellDragOver(null);
                           onScheduleTransfer(draggedSchedule, staff, dateStr);
-                        } else {
+                        } else if (cellAcceptsDrop) {
+                          onCellDragOver(null);
                           onDrop(staff, dateStr);
                         }
                       }}
                       onDragOver={(e) => {
-                        if (selectedDemand || draggedSchedule) {
+                        if (cellAcceptsDrop) {
                           e.preventDefault();
                           onCellDragOver(cellKey);
                         }
                       }}
+                      onKeyDown={(event) => {
+                        if (!draggedSchedule && draggedAllocationTarget && canDropAllocation
+                            && (event.key === 'Enter' || event.key === ' ')) {
+                          event.preventDefault();
+                          onDrop(staff, dateStr);
+                        }
+                      }}
                     >
                       <div
-                        className={dragOverCell === cellKey ? 'drop-active' : ''}
+                        className={dragOverCell === cellKey && cellAcceptsDrop ? 'drop-active' : ''}
                         style={{
                           width: '100%',
                           minHeight: 28,
@@ -747,9 +808,15 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                       </div>
                     </td>
                   );
+                  return allocationReason ? (
+                    <Tooltip key={dateStr} title={allocationReason}>
+                      {cell}
+                    </Tooltip>
+                  ) : cell;
                 })}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -1,10 +1,13 @@
 const DRAFT_KEY_PREFIX = 'demand_draft_';
 const DRAFT_TIMESTAMP_KEY = 'demand_draft_timestamp_';
 
+import type { SpecialModuleDemandInput } from '../types';
+
 export interface DraftData {
   formData: Record<string, any>;
   manpowerInputs: Record<string, number>;
   manpowerRemarks: Record<string, string>;
+  specialModuleDemands?: SpecialModuleDemandInput[];
   timestamp: number;
 }
 
@@ -31,7 +34,8 @@ export function getDraft(draftId: string): DraftData | null {
   try {
     const raw = localStorage.getItem(DRAFT_KEY_PREFIX + draftId);
     if (!raw) return null;
-    return JSON.parse(raw) as DraftData;
+    const draft = JSON.parse(raw) as DraftData;
+    return { ...draft, specialModuleDemands: draft.specialModuleDemands ?? [] };
   } catch (error) {
     console.warn('读取草稿失败:', error);
     return null;

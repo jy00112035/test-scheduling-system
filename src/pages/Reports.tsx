@@ -27,6 +27,7 @@ const Reports: React.FC = () => {
 
   useEffect(() => {
     fetchReports();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Legacy dependency behavior; refactor under dedicated tests.
   }, [dateRange]);
 
   const fetchReports = async () => {

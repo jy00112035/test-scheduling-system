@@ -26,6 +26,10 @@ export interface TestDemand {
   priority?: string;
   testDeviceCount?: number;
   manpowerDetails?: DemandManpowerDetail[];
+  specialModuleDemands?: DemandSpecialModule[];
+  manpowerSummary?: ManpowerSummary[];
+  manpowerFullySatisfied?: boolean | null;
+  requiresHistoricalClassification?: boolean | null;
 }
 
 export interface DemandManpowerDetail {
@@ -34,6 +38,196 @@ export interface DemandManpowerDetail {
   testType: string;
   manpowerDemand: number;
   remark?: string;
+}
+
+export interface TestModule {
+  id: number;
+  moduleName: string;
+  testType: string;
+  enabled: boolean;
+  sortOrder: number;
+  lockVersion: number;
+  createdAt: string;
+  updatedAt: string;
+  referenced: boolean | null;
+}
+
+export interface TestModuleWriteRequest {
+  moduleName: string;
+  testType: string;
+  sortOrder: number;
+}
+
+export interface DemandSpecialModule {
+  id: number;
+  demandId: number;
+  moduleId: number;
+  manpowerDemand: number;
+  createdAt: string;
+  updatedAt: string;
+  moduleName: string;
+  testType: string;
+  enabled: boolean;
+  allocatedManpower: number;
+  remainingManpower: number;
+}
+
+export interface DemandSpecialModuleWriteRequest {
+  moduleId: number;
+  manpowerDemand: number;
+}
+
+export interface SpecialModuleDemandInput {
+  moduleId?: number;
+  testType: string;
+  manpowerDemand?: number;
+  // UI-only replacement allowance for a persisted disabled module. Never send to the API.
+  historicalManpowerDemand?: number;
+}
+
+export interface ManpowerSummary {
+  testType: string;
+  totalManpower: number;
+  specialManpower: number;
+  generalManpower: number;
+}
+
+export interface FamiliarModule extends TestModule {}
+
+export interface ScheduleWriteRequest {
+  demandId: number;
+  staffId: number;
+  date: string;
+  percentage: number;
+  demandManpowerDetailId: number;
+  demandSpecialModuleId?: number | null;
+}
+
+export interface ScheduleClassificationRequest {
+  demandManpowerDetailId: number;
+  demandSpecialModuleId?: number | null;
+}
+
+export interface ScheduleRecommendationRequest {
+  mode: 'FIXED_RANGE' | 'FULL_DEMAND';
+  demandIds: number[];
+  dateRange?: { startDate: string; endDate: string };
+  fixedStaffIds?: number[];
+  excludedStaffIds?: number[];
+  includeSaturdays?: boolean;
+  includeSundays?: boolean;
+  replaceExistingDrafts?: boolean;
+}
+
+export interface ScheduleRecommendationResponse {
+  generatedSchedules: RecommendationSchedule[];
+  fulfillment: Array<{
+    demandId: number;
+    fullySatisfied: boolean;
+    requiresHistoricalClassification: boolean;
+    specialModuleGaps: Array<{
+      demandManpowerDetailId: number;
+      demandSpecialModuleId: number;
+      shortage: number;
+      reasonCode: string;
+      reason: string;
+    }>;
+    generalGaps: Array<{
+      demandManpowerDetailId: number;
+      demandSpecialModuleId: number | null;
+      shortage: number;
+      reasonCode: string;
+      reason: string;
+    }>;
+    specialModules: SpecialModuleFulfillment[];
+    summary: ManpowerFulfillmentSummary[];
+    totalRequired: number;
+    totalAllocated: number;
+    totalShortage: number;
+  }>;
+}
+
+export interface SpecialModuleFulfillment {
+  demandManpowerDetailId: number;
+  demandSpecialModuleId: number;
+  moduleId: number;
+  moduleName: string;
+  testType: string;
+  required: number;
+  allocated: number;
+  remaining: number;
+}
+
+export interface ManpowerFulfillmentSummary {
+  demandManpowerDetailId: number;
+  testType: string;
+  required: number;
+  specialRequired: number;
+  generalRequired: number;
+  specialAllocated: number;
+  generalAllocated: number;
+  specialRemaining: number;
+  generalRemaining: number;
+  shortage: number;
+}
+
+export interface BackendSchedule {
+  id: number;
+  demandId: number;
+  staffId: number;
+  demandManpowerDetailId: number | null;
+  demandSpecialModuleId: number | null;
+  date: string;
+  percentage: number;
+  product: string | null;
+  testManager: string | null;
+  versionType: string | null;
+  version: string | null;
+  lockVersion: number;
+  published: boolean | null;
+  createdAt: string;
+}
+
+export interface RecommendationSchedule extends BackendSchedule {
+  product: string;
+  versionType: string;
+  published: boolean;
+}
+
+export interface DemandFulfillment {
+  demandId: number;
+  fullySatisfied: boolean;
+  requiresHistoricalClassification: boolean;
+  specialModuleGaps: Array<{
+    demandManpowerDetailId: number;
+    demandSpecialModuleId: number;
+    moduleId: number;
+    moduleName: string;
+    testType: string;
+    required: number;
+    allocated: number;
+    shortage: number;
+  }>;
+  generalGaps: Array<{
+    demandManpowerDetailId: number;
+    demandSpecialModuleId: number | null;
+    moduleId: number | null;
+    moduleName: string | null;
+    testType: string;
+    required: number;
+    allocated: number;
+    shortage: number;
+  }>;
+  specialModules: SpecialModuleFulfillment[];
+  summary: ManpowerFulfillmentSummary[];
+  totalRequired: number;
+  totalAllocated: number;
+  totalShortage: number;
+}
+
+export interface BatchPublishResponse {
+  success: Array<{ demandId: number; scheduleCount: number }>;
+  failed: Array<{ demandId: number; reasonCode: string; reason: string }>;
 }
 
 export interface Schedule {

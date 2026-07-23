@@ -4,7 +4,73 @@
 // ============================================================
 
 import dayjs from 'dayjs';
-import type { DemandItem, ScheduleItem, StaffItem, BatchMetrics, ConflictDetail, DailyStatusEntry, UnfulfilledDetail, HighRiskDemandDetail } from './workbenchTypes';
+import type { AllocationTarget, DemandItem, ScheduleItem, StaffItem, BatchMetrics, ConflictDetail, DailyStatusEntry, UnfulfilledDetail, HighRiskDemandDetail } from './workbenchTypes';
+
+export function normalizeSchedulePercentage(value: number | null | undefined): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 100;
+  return Math.min(100, Math.max(10, Math.round(numeric / 10) * 10));
+}
+
+export function groupSchedulesByDemandOwnership(
+  demand: DemandItem,
+  schedules: ScheduleItem[],
+): { allocatedByDetailId: Record<number, number>; unclassifiedSchedules: ScheduleItem[] } {
+  const details = demand.manpowerDetails || [];
+  const detailById = new Map(details.filter(detail => detail.id != null).map(detail => [detail.id!, detail]));
+  const detailByTestType = new Map(details.filter(detail => detail.id != null)
+    .map(detail => [detail.testType, detail]));
+  const specialById = new Map((demand.specialModuleDemands || []).map(module => [module.id, module]));
+  const allocatedByDetailId: Record<number, number> = {};
+  const unclassifiedSchedules: ScheduleItem[] = [];
+
+  schedules.filter(schedule => schedule.demandId === demand.id).forEach(schedule => {
+    const explicitDetail = schedule.demandManpowerDetailId == null
+      ? undefined : detailById.get(schedule.demandManpowerDetailId);
+    const special = schedule.demandSpecialModuleId == null
+      ? undefined : specialById.get(schedule.demandSpecialModuleId);
+    const owningDetail = explicitDetail || (special ? detailByTestType.get(special.testType) : undefined);
+    if (owningDetail?.id == null) {
+      unclassifiedSchedules.push(schedule);
+      return;
+    }
+    allocatedByDetailId[owningDetail.id] = (allocatedByDetailId[owningDetail.id] || 0)
+      + schedule.percentage / 100;
+  });
+
+  return { allocatedByDetailId, unclassifiedSchedules };
+}
+
+export function getAllocationTargetForSchedule(
+  demands: DemandItem[],
+  schedule: ScheduleItem,
+): AllocationTarget | null {
+  if (schedule.demandId == null || schedule.demandManpowerDetailId == null) return null;
+  const demand = demands.find(item => item.id === schedule.demandId);
+  const detail = demand?.manpowerDetails?.find(item => item.id === schedule.demandManpowerDetailId);
+  if (!demand || !detail?.id) return null;
+  if (schedule.demandSpecialModuleId != null) {
+    const special = demand.specialModuleDemands?.find(item => item.id === schedule.demandSpecialModuleId);
+    if (!special) return null;
+    return {
+      kind: 'special',
+      demandId: demand.id,
+      demandManpowerDetailId: detail.id,
+      demandSpecialModuleId: special.id,
+      testType: detail.testType,
+      moduleId: special.moduleId,
+      moduleName: special.moduleName,
+      remainingManpower: Number(special.remainingManpower || 0),
+    };
+  }
+  return {
+    kind: 'general',
+    demandId: demand.id,
+    demandManpowerDetailId: detail.id,
+    testType: detail.testType,
+    remainingManpower: 0,
+  };
+}
 
 // ---- 常量 ----
 
@@ -191,14 +257,11 @@ export function sortDemandsByRisk(
 
 export function filterPendingDemands(
   demands: DemandItem[],
-  schedules: ScheduleItem[],
-  staffIds: number[],
+  _schedules: ScheduleItem[],
+  _staffIds: number[],
   filterTestTypes: string[]
 ): DemandItem[] {
   return demands.filter(d => {
-    const allocatedDays = getDemandAllocatedDays(schedules, d.id, staffIds);
-    const hasRemaining = allocatedDays < Number(d.manpowerDemand || 0);
-
     let matchesTestType = true;
     if (filterTestTypes.length > 0) {
       matchesTestType = (d.manpowerDetails || []).some((md) =>
@@ -206,23 +269,22 @@ export function filterPendingDemands(
       );
     }
 
-    return hasRemaining && matchesTestType;
+    const needsAllocation = d.manpowerFullySatisfied !== true
+      || d.requiresHistoricalClassification === true;
+
+    return needsAllocation && matchesTestType;
   });
 }
 
 export function filterAssignedDemands(
   demands: DemandItem[],
-  schedules: ScheduleItem[],
-  staffIds: number[],
+  _schedules: ScheduleItem[],
+  _staffIds: number[],
   filterTestTypes: string[]
 ): DemandItem[] {
   return demands.filter(d => {
-    const demandSchedules = schedules.filter(s =>
-      s.demandId === d.id && staffIds.includes(s.staffId)
-    );
-    const allocatedDays = demandSchedules.reduce((sum, s) => sum + s.percentage / 100, 0);
-    const isFullyAllocated = demandSchedules.length > 0 &&
-      allocatedDays >= Number(d.manpowerDemand || 0);
+    const isFullyAllocated = d.manpowerFullySatisfied === true
+      && d.requiresHistoricalClassification !== true;
     const isNotClosed = d.status !== 'completed';
 
     let matchesTestType = true;
@@ -234,6 +296,69 @@ export function filterAssignedDemands(
 
     return isFullyAllocated && isNotClosed && matchesTestType;
   });
+}
+
+export function getAllocationTargets(
+  demand: DemandItem,
+  schedules: ScheduleItem[],
+): AllocationTarget[] {
+  const details = demand.manpowerDetails || [];
+  const detailByTestType = new Map(
+    details.filter(detail => detail.id != null).map(detail => [detail.testType, detail]),
+  );
+  const targets: AllocationTarget[] = [];
+
+  for (const special of demand.specialModuleDemands || []) {
+    const detail = detailByTestType.get(special.testType);
+    const remaining = special.remainingManpower;
+    if (detail?.id == null || remaining <= 0) continue;
+    targets.push({
+      kind: 'special',
+      demandId: demand.id,
+      demandManpowerDetailId: detail.id,
+      demandSpecialModuleId: special.id,
+      testType: special.testType,
+      moduleId: special.moduleId,
+      moduleName: special.moduleName,
+      remainingManpower: Number(remaining),
+    });
+  }
+
+  for (const detail of details) {
+    if (detail.id == null) continue;
+    const summary = demand.manpowerSummary?.find(item => item.testType === detail.testType);
+    const specialRequired = (demand.specialModuleDemands || [])
+      .filter(item => item.testType === detail.testType)
+      .reduce((sum, item) => sum + Number(item.manpowerDemand || 0), 0);
+    const required = Number(summary?.generalManpower
+      ?? Math.max(0, Number(detail.manpowerDemand || 0) - specialRequired));
+    const allocated = schedules
+      .filter(schedule => schedule.demandId === demand.id
+        && schedule.demandManpowerDetailId === detail.id
+        && schedule.demandSpecialModuleId == null)
+      .reduce((sum, schedule) => sum + schedule.percentage / 100, 0);
+    const remaining = Math.max(0, required - allocated);
+    if (remaining <= 0) continue;
+    targets.push({
+      kind: 'general',
+      demandId: demand.id,
+      demandManpowerDetailId: detail.id,
+      testType: detail.testType,
+      remainingManpower: remaining,
+    });
+  }
+
+  return targets;
+}
+
+export function isStaffEligibleForAllocationTarget(
+  staff: StaffItem,
+  target: AllocationTarget,
+): boolean {
+  if (target.kind === 'special') {
+    return staff.familiarModules?.some(module => module.id === target.moduleId) === true;
+  }
+  return staff.testType === target.testType;
 }
 
 // ---- 冲突检测 ----
@@ -287,7 +412,7 @@ export function calculateBatchMetrics(
   staffIds: number[],
   selectedDemandIds: Set<number>,
   priorityOptions: string[],
-  unfulfilledDemands: Set<number>,
+  _unfulfilledDemands: Set<number>,
   conflictDetails: ConflictDetail[],
   unfulfilledDetails: UnfulfilledDetail[]
 ): BatchMetrics {
@@ -314,10 +439,11 @@ export function calculateBatchMetrics(
   // 草稿排班数量
   const draftCount = schedules.filter(s => !s.published).length;
 
-  // 可发布需求：有草稿排班 + 无冲突 + 已满足（不依赖 selectedDemandIds，覆盖手动拖动场景）
+  // 可发布需求以后端明细满足状态为准。
   const publishableCount = demands.filter(d =>
     schedules.some(s => s.demandId === d.id && !s.published) &&
-    !unfulfilledDemands.has(d.id) &&
+    d.manpowerFullySatisfied === true &&
+    d.requiresHistoricalClassification !== true &&
     !conflictDetails.some(c =>
       schedules.some(s => s.demandId === d.id && s.staffId === c.staffId && s.date === c.date)
     )

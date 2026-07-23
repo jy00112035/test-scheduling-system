@@ -4,6 +4,7 @@ import com.testscheduling.dto.LoginRequest;
 import com.testscheduling.dto.LoginResponse;
 import com.testscheduling.dto.RegisterRequest;
 import com.testscheduling.entity.User;
+import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.UserRepository;
 import com.testscheduling.util.JwtUtil;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,7 +13,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class AuthService {
@@ -139,30 +143,99 @@ public class AuthService {
     }
 
     @Transactional
-    public void approveUser(Long id) {
-        User user = userRepository.findById(id)
-            .orElseThrow(() -> new RuntimeException("用户不存在"));
+    public void approveUser(Long id, List<String> approverRoles, String approverUsername) {
+        User user = requireApprovalTarget(lockedApprovalTarget(id),
+            approverRoles, approverUsername);
         user.setEnabled(true);
         userRepository.save(user);
     }
 
     @Transactional
-    public void rejectUser(Long id) {
-        userRepository.deleteById(id);
+    public void rejectUser(Long id, List<String> approverRoles, String approverUsername) {
+        User user = requireApprovalTarget(lockedApprovalTarget(id),
+            approverRoles, approverUsername);
+        userRepository.delete(user);
     }
 
     @Transactional
-    public void batchApprove(List<Long> ids) {
-        for (Long id : ids) {
-            userRepository.findById(id).ifPresent(user -> {
-                user.setEnabled(true);
-                userRepository.save(user);
-            });
+    public void batchApprove(
+            List<Long> ids, List<String> approverRoles, String approverUsername) {
+        List<User> users = requireApprovalTargets(ids, approverRoles, approverUsername);
+        for (User user : users) {
+            user.setEnabled(true);
+            userRepository.save(user);
         }
     }
 
     @Transactional
-    public void batchReject(List<Long> ids) {
-        userRepository.deleteAllById(ids);
+    public void batchReject(
+            List<Long> ids, List<String> approverRoles, String approverUsername) {
+        userRepository.deleteAll(requireApprovalTargets(ids, approverRoles, approverUsername));
+    }
+
+    private List<User> requireApprovalTargets(
+            Collection<Long> ids, List<String> approverRoles, String approverUsername) {
+        if (ids == null || ids.isEmpty() || ids.stream().anyMatch(java.util.Objects::isNull)) {
+            throw approvalForbidden();
+        }
+        List<Long> orderedIds = ids.stream().distinct().sorted().toList();
+        List<User> users = userRepository.findAllByIdInForUpdate(orderedIds);
+        if (users.size() != orderedIds.size()) {
+            throw approvalForbidden();
+        }
+        return users.stream()
+            .map(user -> requireApprovalTarget(user, approverRoles, approverUsername))
+            .toList();
+    }
+
+    private User lockedApprovalTarget(Long id) {
+        if (id == null) {
+            throw approvalForbidden();
+        }
+        return userRepository.findByIdForUpdate(id)
+            .orElseThrow(this::approvalForbidden);
+    }
+
+    private User requireApprovalTarget(
+            User target, List<String> approverRoles, String approverUsername) {
+        if (approverRoles == null || approverRoles.isEmpty()) {
+            throw approvalForbidden();
+        }
+        if (Boolean.TRUE.equals(target.getEnabled())) {
+            throw approvalForbidden();
+        }
+        Set<String> targetRoles = target.getRoles() == null
+            ? Set.of() : new HashSet<>(target.getRoles());
+        if (approverRoles.contains("admin")
+                && onlyContains(targetRoles, Set.of("fieldAdmin", "projectManager"))) {
+            return target;
+        }
+        if (approverRoles.contains("projectManager")
+                && onlyContains(targetRoles,
+                    Set.of("testManager", "resourceManager", "testLead"))) {
+            return target;
+        }
+        if (approverRoles.contains("resourceManager")
+                && onlyContains(targetRoles, Set.of("testExecutor"))) {
+            return target;
+        }
+        if (approverRoles.contains("testLead")
+                && onlyContains(targetRoles, Set.of("testExecutor"))) {
+            User approver = userRepository.findByUsername(approverUsername)
+                .orElseThrow(this::approvalForbidden);
+            if (approver.getTestType() != null
+                    && approver.getTestType().equals(target.getTestType())) {
+                return target;
+            }
+        }
+        throw approvalForbidden();
+    }
+
+    private boolean onlyContains(Set<String> requested, Set<String> allowed) {
+        return !requested.isEmpty() && allowed.containsAll(requested);
+    }
+
+    private BusinessException approvalForbidden() {
+        return new BusinessException("APPROVAL_SCOPE_FORBIDDEN", "无权审批该注册申请");
     }
 }

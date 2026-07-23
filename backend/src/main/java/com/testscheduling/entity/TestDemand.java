@@ -1,5 +1,6 @@
 package com.testscheduling.entity;
 
+import com.testscheduling.dto.ManpowerSummary;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -55,6 +56,22 @@ public class TestDemand {
 
     @Transient
     private List<DemandManpowerDetail> manpowerDetails;
+
+    @Transient
+    private List<DemandSpecialModule> specialModuleDemands;
+
+    @Transient
+    private List<ManpowerSummary> manpowerSummary;
+
+    @Transient
+    private Boolean manpowerFullySatisfied;
+
+    @Transient
+    private Boolean requiresHistoricalClassification;
+
+    @Version
+    @Column(name = "lock_version")
+    private Long lockVersion;
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

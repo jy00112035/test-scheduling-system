@@ -6,7 +6,9 @@ import com.testscheduling.dto.LoginRequest;
 import com.testscheduling.dto.LoginResponse;
 import com.testscheduling.dto.RegisterRequest;
 import com.testscheduling.entity.User;
+import com.testscheduling.security.RequestRoleGuard;
 import com.testscheduling.service.AuthService;
+import com.testscheduling.service.FieldConfigService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +22,12 @@ public class AuthController {
 
     @Autowired
     private AuthService authService;
+
+    @Autowired
+    private RequestRoleGuard roleGuard;
+
+    @Autowired
+    private FieldConfigService fieldConfigService;
 
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
@@ -60,9 +68,15 @@ public class AuthController {
         }
     }
 
+    @GetMapping("/registration-options/test-types")
+    public ApiResponse<List<String>> getRegistrationTestTypes() {
+        return ApiResponse.success(fieldConfigService.findRegistrationTestTypes());
+    }
+
     @SuppressWarnings("unchecked")
     @GetMapping("/pending-approvals")
     public ApiResponse<List<User>> getPendingApprovals(HttpServletRequest httpRequest) {
+        requireRegistrationApprover();
         try {
             List<String> roles = (List<String>) httpRequest.getAttribute("roles");
             String username = (String) httpRequest.getAttribute("username");
@@ -77,42 +91,45 @@ public class AuthController {
     }
 
     @PutMapping("/approve/{id}")
-    public ApiResponse<Void> approveUser(@PathVariable Long id) {
-        try {
-            authService.approveUser(id);
-            return ApiResponse.success("已批准", null);
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+    public ApiResponse<Void> approveUser(@PathVariable Long id, HttpServletRequest request) {
+        requireRegistrationApprover();
+        authService.approveUser(id, roles(request), username(request));
+        return ApiResponse.success("已批准", null);
     }
 
     @PutMapping("/reject/{id}")
-    public ApiResponse<Void> rejectUser(@PathVariable Long id) {
-        try {
-            authService.rejectUser(id);
-            return ApiResponse.success("已拒绝", null);
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+    public ApiResponse<Void> rejectUser(@PathVariable Long id, HttpServletRequest request) {
+        requireRegistrationApprover();
+        authService.rejectUser(id, roles(request), username(request));
+        return ApiResponse.success("已拒绝", null);
     }
 
     @PutMapping("/batch-approve")
-    public ApiResponse<Void> batchApprove(@RequestBody List<Long> ids) {
-        try {
-            authService.batchApprove(ids);
-            return ApiResponse.success("批量批准成功", null);
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+    public ApiResponse<Void> batchApprove(
+            @RequestBody List<Long> ids, HttpServletRequest request) {
+        requireRegistrationApprover();
+        authService.batchApprove(ids, roles(request), username(request));
+        return ApiResponse.success("批量批准成功", null);
     }
 
     @PutMapping("/batch-reject")
-    public ApiResponse<Void> batchReject(@RequestBody List<Long> ids) {
-        try {
-            authService.batchReject(ids);
-            return ApiResponse.success("批量拒绝成功", null);
-        } catch (Exception e) {
-            return ApiResponse.error(e.getMessage());
-        }
+    public ApiResponse<Void> batchReject(
+            @RequestBody List<Long> ids, HttpServletRequest request) {
+        requireRegistrationApprover();
+        authService.batchReject(ids, roles(request), username(request));
+        return ApiResponse.success("批量拒绝成功", null);
+    }
+
+    private void requireRegistrationApprover() {
+        roleGuard.requireAny("projectManager", "resourceManager", "testLead");
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> roles(HttpServletRequest request) {
+        return (List<String>) request.getAttribute("roles");
+    }
+
+    private String username(HttpServletRequest request) {
+        return (String) request.getAttribute("username");
     }
 }

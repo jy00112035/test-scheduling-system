@@ -17,6 +17,7 @@ public class StaffRequest {
     private String status;
     private String role;
     private List<String> roles;
+    private List<Long> familiarModuleIds;
     private String familiarModules;
     private Boolean confidentialClearance;
 }

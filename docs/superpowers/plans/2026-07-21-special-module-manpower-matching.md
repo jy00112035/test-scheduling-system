@@ -1675,8 +1675,9 @@ git commit -m "feat: enforce module matching in schedule workbench"
 - Modify: `backend/src/test/java/com/testscheduling/migration/MigrationSmokeTest.java`
 - Create: `backend/src/test/java/com/testscheduling/integration/SpecialModuleSchedulingIntegrationTest.java`
 - Create: `docs/特殊模块人力排班验收清单.md`
+- Create: `docs/verification/2026-07-23-task14-h2-runtime-upgrade.md`
 
-- [ ] **Step 1: 写完整服务集成测试**
+- [x] **Step 1: 写完整服务集成测试**
 
 使用 `@SpringBootTest` 和测试数据库覆盖：创建模块 -> 跨组人员配置熟悉模块 -> 创建需求 -> 审批 -> 推荐 -> 发布。核心断言：
 
@@ -1690,13 +1691,17 @@ assertFalse(auditLogRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc("
 
 第二场景移除人员模块关系后发布，断言 `STAFF_MODULE_NOT_FAMILIAR`；第三场景一个需求失败、另一个成功，断言批量结果部分成功。
 
-- [ ] **Step 2: 运行全部后端测试**
+Evidence (2026-07-23, `6823e33`): `SpecialModuleSchedulingIntegrationTest` 使用真实 Spring/Flyway/JPA 和公开服务 API 覆盖上述 3 个场景；定向运行 3/3 通过。
+
+- [x] **Step 2: 运行全部后端测试**
 
 Run: `cd backend && mvn clean test`
 
 Expected: BUILD SUCCESS，零失败、零错误。
 
-- [ ] **Step 3: 运行前端全量检查**
+Evidence (2026-07-23, `6823e33`): `cd backend && mvn clean test` 完成，278/278 通过，0 failures，0 errors，0 skipped；报告位于 `backend/target/surefire-reports/`。
+
+- [x] **Step 3: 运行前端全量检查**
 
 Run: `npm test`
 
@@ -1710,13 +1715,17 @@ Run: `npm run build`
 
 Expected: TypeScript 和 Vite 构建成功。
 
-- [ ] **Step 4: 验证 H2 文件数据库升级**
+Evidence (2026-07-23, `6823e33`): `npm test` 为 18 个测试文件、147/147 通过；`npm run lint` 退出码 0；`npm run build` 成功，只有非阻断的大包体提示。
+
+- [x] **Step 4: 验证 H2 文件数据库升级**
 
 备份 `backend/data/testdb.mv.db`，使用现有 H2 数据启动后端：
 
 Run: `cd backend && mvn spring-boot:run`
 
-Expected: Flyway 将现有库 baseline 到 V1、执行 V2，JPA `validate` 通过；历史需求、人员和排班接口可读取。
+Expected: Flyway 将现有库 baseline 到 V1、执行 V2 和 V3，JPA `validate` 通过；历史需求、人员和排班接口可读取。
+
+Evidence (2026-07-23, `6823e33`): 非空 H2 文件复制到仓库外临时目录后由 V1 升至 V3，JPA 初始化成功；`/api/demands`、`/api/staff`、`/api/schedules` 均返回 HTTP 200 和非空数据；仓库内原文件 SHA-256 未变化。`MigrationSmokeTest` 同时覆盖 legacy V1 升级、当前 V3 重启和 JPA validate。持久化证据见 [Task 14 H2 运行时升级验证记录](../../verification/2026-07-23-task14-h2-runtime-upgrade.md)。
 
 - [ ] **Step 5: 验证 MySQL profile**
 
@@ -1726,7 +1735,9 @@ Expected: Flyway 将现有库 baseline 到 V1、执行 V2，JPA `validate` 通�
 
 Run: `cd backend && SPRING_PROFILES_ACTIVE=mysql MYSQL_URL='jdbc:mysql://localhost:3306/test_scheduling?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai' MYSQL_USERNAME=root mvn spring-boot:run`
 
-Expected: V1、V2 全部执行，应用启动成功。不要把真实密码写入仓库。
+Expected: V1、V2、V3 全部执行，应用启动成功。不要把真实密码写入仓库。
+
+Status (2026-07-23): 待验。仅观察到 MySQL 客户端 9.6.0；未验证 MySQL 8 服务端或一次性空 schema；`MYSQL_URL`、`MYSQL_USERNAME`、`MYSQL_PASSWORD`、`JWT_SECRET` 均不可用；未创建或修改任何 MySQL schema。
 
 - [ ] **Step 6: 浏览器端到端验收**
 
@@ -1743,12 +1754,20 @@ Expected: V1、V2 全部执行，应用启动成功。不要把真实密码写�
 9. 推荐后移除能力，发布被后端拦截。
 10. 批量发布显示逐需求成功和失败原因。
 
-- [ ] **Step 7: 提交验收文档**
+Status (2026-07-23): 工作流 1-10 均待验；没有提交可复验的页面截图和相关请求/响应或后端错误码，不以临时浏览器观察或自动化测试替代人工通过结论。
+
+- [x] **Step 7: 提交验收文档**
 
 ```bash
 git add backend/src/test docs/特殊模块人力排班验收清单.md
 git commit -m "test: verify special module scheduling workflow"
 ```
+
+Evidence (2026-07-23): `docs/特殊模块人力排班验收清单.md` 已创建，并在文档复核后按计划工作流 1-10、自动化门禁和待验证状态完成校正；提交记录可通过 `git log -- docs/特殊模块人力排班验收清单.md` 复验。
+
+- [ ] **Task 14 最终门禁：未完成**
+
+Pending: MySQL 8 空库迁移/启动和浏览器人工工作流 1-10 均未完成，因此不得将 Task 14 或下方最终验收门禁标记为完成。
 
 ---
 

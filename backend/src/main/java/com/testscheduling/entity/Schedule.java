@@ -22,6 +22,12 @@ public class Schedule {
 
     private Long staffId;
 
+    @Column(name = "demand_manpower_detail_id")
+    private Long demandManpowerDetailId;
+
+    @Column(name = "demand_special_module_id")
+    private Long demandSpecialModuleId;
+
     private LocalDate date;
 
     private Integer percentage;
@@ -33,6 +39,10 @@ public class Schedule {
     private String versionType;
 
     private String version;
+
+    @Version
+    @Column(name = "lock_version", nullable = false)
+    private Long lockVersion;
 
     private Boolean published = false;
 

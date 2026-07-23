@@ -3,6 +3,8 @@ package com.testscheduling.controller;
 import com.testscheduling.dto.ApiResponse;
 import com.testscheduling.entity.StaffDailyStatus.DailyAvailabilityStatus;
 import com.testscheduling.service.StaffDailyStatusService;
+import com.testscheduling.security.RequestRoleGuard;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,6 +18,12 @@ public class StaffDailyStatusController {
     @Autowired
     private StaffDailyStatusService service;
 
+    @Autowired
+    private RequestRoleGuard roleGuard;
+
+    @Autowired
+    private HttpServletRequest request;
+
     @GetMapping
     public ApiResponse<java.util.List<com.testscheduling.entity.StaffDailyStatus>> getStatuses(
             @RequestParam String startDate,
@@ -27,13 +35,15 @@ public class StaffDailyStatusController {
 
     @PutMapping
     public ApiResponse<Void> setStatus(@RequestBody Map<String, Object> body) {
+        roleGuard.requireAny("fieldAdmin", "testLead");
         Long staffId = Long.valueOf(body.get("staffId").toString());
         LocalDate date = LocalDate.parse(body.get("date").toString());
         DailyAvailabilityStatus status = DailyAvailabilityStatus.valueOf(body.get("status").toString());
         Double percentage = body.containsKey("percentage") && body.get("percentage") != null
                 ? Double.valueOf(body.get("percentage").toString())
                 : 100.0;
-        service.setStatus(staffId, date, status, percentage);
+        service.setStatus(staffId, date, status, percentage,
+            (String) request.getAttribute("username"));
         return ApiResponse.success("设置成功", null);
     }
 }

@@ -2,6 +2,8 @@
 // 人力排布工作台 — 共享类型定义
 // ============================================================
 
+import type { DemandSpecialModule, FamiliarModule, ManpowerSummary } from '../../types';
+
 // ---- 基础数据 ----
 
 export interface ScheduleItem {
@@ -13,15 +15,37 @@ export interface ScheduleItem {
   versionType: string;
   version?: string;
   demandId?: number;
+  demandManpowerDetailId?: number | null;
+  demandSpecialModuleId?: number | null;
   testManager?: string;
   published?: boolean;
 }
 
 export interface ManpowerDetail {
+  id?: number;
   testType: string;
   manpowerDemand: number;
   remark?: string;
 }
+
+export type AllocationTarget =
+  | {
+      kind: 'special';
+      demandId: number;
+      demandManpowerDetailId: number;
+      demandSpecialModuleId: number;
+      testType: string;
+      moduleId: number;
+      moduleName: string;
+      remainingManpower: number;
+    }
+  | {
+      kind: 'general';
+      demandId: number;
+      demandManpowerDetailId: number;
+      testType: string;
+      remainingManpower: number;
+    };
 
 export interface DemandItem {
   id: number;
@@ -39,6 +63,10 @@ export interface DemandItem {
   priority?: string;
   testDeviceCount?: number;
   manpowerDetails?: ManpowerDetail[];
+  specialModuleDemands?: DemandSpecialModule[];
+  manpowerSummary?: ManpowerSummary[];
+  manpowerFullySatisfied: boolean;
+  requiresHistoricalClassification: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -55,8 +83,12 @@ export interface StaffItem {
   status: string;
   role?: string;
   roles?: string[];
-  familiarModules?: string;
+  familiarModules?: FamiliarModule[];
   confidentialClearance?: boolean;
+}
+
+export function formatFamiliarModules(familiarModules?: FamiliarModule[]): string {
+  return familiarModules?.map(module => module.moduleName).join(', ') || '-';
 }
 
 export interface DailyStatusEntry {

@@ -1,0 +1,19 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:test-${random.uuid};MODE=MySQL;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 1
+    ignore-migration-patterns:
+      - "*:ignored"
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+jwt:
+  secret: test-only-jwt-signing-secret-isolated-from-runtime-2026
+  expiration: 86400000

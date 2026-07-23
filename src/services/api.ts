@@ -1,9 +1,42 @@
 const API_BASE_URL = '/api';
 
+import type {
+  BatchPublishResponse,
+  BackendSchedule,
+  ScheduleRecommendationRequest,
+  ScheduleRecommendationResponse,
+  ScheduleClassificationRequest,
+  ScheduleWriteRequest,
+  TestModule,
+  TestModuleWriteRequest,
+  TestDemand,
+} from '../types';
+
+export type {
+  BatchPublishResponse,
+  BackendSchedule,
+  DemandSpecialModule,
+  DemandFulfillment,
+  RecommendationSchedule,
+  ScheduleRecommendationRequest,
+  ScheduleRecommendationResponse,
+  ScheduleClassificationRequest,
+  ScheduleWriteRequest,
+  TestModule,
+  TestModuleWriteRequest,
+} from '../types';
+
 interface ApiResponse<T> {
   code: number;
   message: string;
   data: T;
+}
+
+export class ApiError extends Error {
+  constructor(message: string, public readonly errorCode?: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
 }
 
 class ApiService {
@@ -47,7 +80,8 @@ class ApiService {
     const result: ApiResponse<T> = await response.json();
 
     if (result.code !== 200) {
-      throw new Error(result.message || '请求失败');
+      const errorData = result.data as T & { errorCode?: string } | null;
+      throw new ApiError(result.message || '请求失败', errorData?.errorCode);
     }
 
     return result.data;
@@ -86,6 +120,10 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  async getRegistrationTestTypes() {
+    return this.request<string[]>('/auth/registration-options/test-types');
   }
 
   async getPendingApprovals() {
@@ -138,6 +176,12 @@ class ApiService {
     return this.request<any>(`/demands/${id}`, {
       method: 'PUT',
       body: JSON.stringify(demand),
+    });
+  }
+
+  async resubmitDemand(id: number): Promise<TestDemand> {
+    return this.request<TestDemand>(`/demands/${id}/resubmit`, {
+      method: 'PUT',
     });
   }
 
@@ -195,7 +239,7 @@ class ApiService {
 
   // Schedules
   async getSchedules() {
-    return this.request<any[]>('/schedules');
+    return this.request<BackendSchedule[]>('/schedules');
   }
 
   async getSchedulesByDate(date: string) {
@@ -222,15 +266,15 @@ class ApiService {
     });
   }
 
-  async createSchedule(schedule: any) {
-    return this.request<any>('/schedules', {
+  async createSchedule(schedule: ScheduleWriteRequest) {
+    return this.request<BackendSchedule>('/schedules', {
       method: 'POST',
       body: JSON.stringify(schedule),
     });
   }
 
-  async createSchedulesBatch(schedules: any[]) {
-    return this.request<any[]>('/schedules/batch', {
+  async createSchedulesBatch(schedules: ScheduleWriteRequest[]) {
+    return this.request<BackendSchedule[]>('/schedules/batch', {
       method: 'POST',
       body: JSON.stringify(schedules),
     });
@@ -246,8 +290,12 @@ class ApiService {
     return this.request<any[]>('/schedules/gantt-view');
   }
 
-  async deleteSchedulesByDemand(demandId: number) {
-    return this.request<void>(`/schedules/demand/${demandId}`, {
+  async deleteSchedulesByDemand(
+    demandId: number,
+    scope: 'draft_only' | 'all' = 'draft_only',
+  ) {
+    const query = scope === 'all' ? '?scope=all' : '';
+    return this.request<void>(`/schedules/demand/${demandId}${query}`, {
       method: 'DELETE',
     });
   }
@@ -338,6 +386,91 @@ class ApiService {
   async deleteFieldConfig(id: number) {
     return this.request<void>(`/field-configs/${id}`, {
       method: 'DELETE',
+    });
+  }
+
+  // Test modules
+  async getTestModules(testType?: string, enabled?: boolean) {
+    const params = new URLSearchParams();
+    if (testType !== undefined) params.set('testType', testType);
+    if (enabled !== undefined) params.set('enabled', String(enabled));
+    const query = params.toString();
+    return this.request<TestModule[]>(`/test-modules${query ? `?${query}` : ''}`);
+  }
+
+  async createTestModule(module: TestModuleWriteRequest) {
+    return this.request<TestModule>('/test-modules', {
+      method: 'POST',
+      body: JSON.stringify(module),
+    });
+  }
+
+  async updateTestModule(
+    id: number,
+    module: TestModuleWriteRequest
+  ) {
+    return this.request<TestModule>(`/test-modules/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(module),
+    });
+  }
+
+  async setTestModuleStatus(id: number, enabled: boolean) {
+    return this.request<TestModule>(`/test-modules/${id}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    });
+  }
+
+  async deleteTestModule(id: number) {
+    return this.request<void>(`/test-modules/${id}`, { method: 'DELETE' });
+  }
+
+  async migrateLegacyStaffModules() {
+    return this.request<{
+      createdRelations: number;
+      duplicateNames: Record<string, string[]>;
+      unmatched: Record<string, string[]>;
+      missingStaffAccounts: string[];
+    }>('/staff/modules/migrate-legacy', { method: 'POST' });
+  }
+
+  // Structured scheduling contracts
+  async recommendScheduleDraft(request: ScheduleRecommendationRequest) {
+    return this.request<ScheduleRecommendationResponse>('/schedules/recommend/draft', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async validateSchedule(request: ScheduleWriteRequest) {
+    return this.request<{ valid: boolean }>('/schedules/validate', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async moveSchedule(
+    id: number,
+    request: Pick<ScheduleWriteRequest, 'staffId' | 'date' | 'percentage'>
+  ) {
+    return this.request<BackendSchedule>(`/schedules/${id}/move`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async classifySchedule(id: number, request: ScheduleClassificationRequest) {
+    return this.request<BackendSchedule>(`/schedules/${id}/classify`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async batchPublishSchedules(request: { demandIds: number[] }) {
+    return this.request<BatchPublishResponse>('/schedules/batch-publish', {
+      method: 'POST',
+      body: JSON.stringify(request),
     });
   }
 }

@@ -2,6 +2,7 @@ package com.testscheduling.controller;
 
 import com.testscheduling.dto.ApiResponse;
 import com.testscheduling.entity.FieldConfig;
+import com.testscheduling.security.RequestRoleGuard;
 import com.testscheduling.service.FieldConfigService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -14,6 +15,9 @@ public class FieldConfigController {
 
     @Autowired
     private FieldConfigService fieldConfigService;
+
+    @Autowired
+    private RequestRoleGuard roleGuard;
 
     @GetMapping
     public ApiResponse<List<FieldConfig>> getAllConfigs() {
@@ -40,11 +44,13 @@ public class FieldConfigController {
 
     @PostMapping
     public ApiResponse<FieldConfig> createConfig(@RequestBody FieldConfig config) {
+        requireFieldAdmin();
         return ApiResponse.success("创建成功", fieldConfigService.create(config));
     }
 
     @PutMapping("/{id}")
     public ApiResponse<FieldConfig> updateConfig(@PathVariable Long id, @RequestBody FieldConfig config) {
+        requireFieldAdmin();
         try {
             return ApiResponse.success("更新成功", fieldConfigService.update(id, config));
         } catch (Exception e) {
@@ -54,11 +60,16 @@ public class FieldConfigController {
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteConfig(@PathVariable Long id) {
+        requireFieldAdmin();
         try {
             fieldConfigService.delete(id);
             return ApiResponse.success("删除成功", null);
         } catch (Exception e) {
             return ApiResponse.error(e.getMessage());
         }
+    }
+
+    private void requireFieldAdmin() {
+        roleGuard.requireAny("fieldAdmin");
     }
 }

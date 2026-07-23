@@ -1,7 +1,11 @@
 package com.testscheduling.repository;
 
 import com.testscheduling.entity.TestStaff;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.Optional;
@@ -14,4 +18,22 @@ public interface TestStaffRepository extends JpaRepository<TestStaff, Long> {
     List<TestStaff> findByGroupName(String groupName);
 
     Optional<TestStaff> findByEmpNo(String empNo);
+
+    List<TestStaff> findByEmpNoIn(List<String> empNos);
+
+    @Query("select distinct s.groupName from TestStaff s "
+        + "where s.groupName is not null and trim(s.groupName) <> ''")
+    List<String> findDistinctReferencedGroupNames();
+
+    @Query("select distinct s.testType from TestStaff s "
+        + "where s.testType is not null and trim(s.testType) <> ''")
+    List<String> findDistinctReferencedTestTypes();
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from TestStaff s where s.id = :id")
+    Optional<TestStaff> findByIdForUpdate(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from TestStaff s where s.id in :ids order by s.id")
+    List<TestStaff> findAllByIdInForUpdate(@Param("ids") List<Long> ids);
 }

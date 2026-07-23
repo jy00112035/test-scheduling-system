@@ -11,6 +11,7 @@ import {
   Popconfirm,
   Modal,
   InputNumber,
+  Tabs,
 } from 'antd';
 import {
   PlusOutlined,
@@ -19,6 +20,7 @@ import {
   SaveOutlined,
 } from '@ant-design/icons';
 import { api } from '../services/api';
+import TestModuleConfigPanel from '../components/TestModuleConfigPanel';
 
 const { TextArea } = Input;
 const { Option } = Select;
@@ -193,7 +195,7 @@ const BaseConfig: React.FC = () => {
     },
   ];
 
-  return (
+  const fieldConfigContent = (
     <div>
       <Card style={{ marginBottom: 16 }}>
         <Space>
@@ -314,6 +316,24 @@ const BaseConfig: React.FC = () => {
         </Form>
       </Modal>
     </div>
+  );
+
+  const testTypeConfig = configs.find(config => config.fieldName === 'testType');
+  const testTypes = testTypeConfig?.options
+    ? testTypeConfig.options.split(',').map(option => option.trim()).filter(Boolean)
+    : [];
+
+  return (
+    <Tabs
+      items={[
+        { key: 'fields', label: '基础字段', children: fieldConfigContent },
+        {
+          key: 'modules',
+          label: '特殊模块配置',
+          children: <TestModuleConfigPanel testTypes={testTypes} />,
+        },
+      ]}
+    />
   );
 };
 

@@ -27,6 +27,7 @@ const TaskKanban: React.FC = () => {
 
   useEffect(() => {
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Legacy dependency behavior; refactor under dedicated tests.
   }, [viewDate]);
 
   const fetchData = async () => {

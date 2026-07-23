@@ -337,6 +337,7 @@ const TestDemandList: React.FC = () => {
         const isSubmitted = record.status === 'submitted';
         const isReadonly = record.status === 'pending' || record.status === 'scheduled';
         const isCompleted = record.status === 'completed';
+        const isScheduled = record.status === 'scheduled';
 
         if (isCompleted || isSubmitted) return null;
 
@@ -352,20 +353,22 @@ const TestDemandList: React.FC = () => {
                 编辑
               </Button>
             )}
-            <Popconfirm
-              title="确定关闭此需求？"
-              onConfirm={() => handleClose(record.id)}
-              okText="确定"
-              cancelText="取消"
-            >
-              <Button
-                type="link"
-                size="small"
-                icon={<CheckCircleOutlined />}
+            {isScheduled && (
+              <Popconfirm
+                title="确定关闭此需求？"
+                onConfirm={() => handleClose(record.id)}
+                okText="确定"
+                cancelText="取消"
               >
-                关闭
-              </Button>
-            </Popconfirm>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<CheckCircleOutlined />}
+                >
+                  关闭
+                </Button>
+              </Popconfirm>
+            )}
             {!isReadonly && (
               <Popconfirm
                 title="确定删除此需求？"
