@@ -31,6 +31,7 @@ public class TestDemandService {
     private final ScheduleRepository scheduleRepository;
     private final AuditLogService auditLogService;
     private final DemandFulfillmentService fulfillmentService;
+    private final FieldConfigService fieldConfigService;
 
     public TestDemandService(
             TestDemandRepository testDemandRepository,
@@ -38,13 +39,15 @@ public class TestDemandService {
             DemandSpecialModuleService specialModuleService,
             ScheduleRepository scheduleRepository,
             AuditLogService auditLogService,
-            DemandFulfillmentService fulfillmentService) {
+            DemandFulfillmentService fulfillmentService,
+            FieldConfigService fieldConfigService) {
         this.testDemandRepository = testDemandRepository;
         this.detailRepository = detailRepository;
         this.specialModuleService = specialModuleService;
         this.scheduleRepository = scheduleRepository;
         this.auditLogService = auditLogService;
         this.fulfillmentService = fulfillmentService;
+        this.fieldConfigService = fieldConfigService;
     }
 
     @Transactional(readOnly = true)
@@ -297,6 +300,7 @@ public class TestDemandService {
     }
 
     private void replaceDetails(Long demandId, List<DemandManpowerDetail> details) {
+        fieldConfigService.validateTestTypeOptionsForDemandWrite(details);
         detailRepository.deleteByDemandId(demandId);
         detailRepository.flush();
         if (details.isEmpty()) {

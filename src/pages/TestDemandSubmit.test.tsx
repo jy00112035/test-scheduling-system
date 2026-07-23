@@ -136,6 +136,27 @@ describe('TestDemandSubmit special module requests', () => {
     expect(onBack).not.toHaveBeenCalled();
   });
 
+  it.each(['submitted', 'pending'] as const)(
+    'treats authoritative %s status as success after a resubmit response is lost', async (status) => {
+    vi.spyOn(api, 'updateDemand').mockResolvedValue({});
+    vi.spyOn(api, 'resubmitDemand').mockRejectedValue(new Error('网络连接中断'));
+    const getDemand = vi.spyOn(api, 'getDemand').mockResolvedValue({ ...editDemand, status });
+    const success = vi.spyOn(message, 'success');
+    const failure = vi.spyOn(message, 'error');
+    const onBack = vi.fn();
+    renderPage({ initialValues: editDemand, isEdit: true, onBack });
+    const user = userEvent.setup();
+    await screen.findByDisplayValue('历史产品');
+
+    await user.click(screen.getByRole('button', { name: /保存修改/ }));
+
+    await waitFor(() => expect(getDemand).toHaveBeenCalledWith(7));
+    await waitFor(() => expect(success).toHaveBeenCalledWith('测试需求已更新并重新提交，请等待项目经理审批！'));
+    await new Promise((resolve) => window.setTimeout(resolve, 550));
+    expect(failure).not.toHaveBeenCalled();
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
   it('does not run the delayed success navigation after the submit session unmounts', async () => {
     vi.spyOn(api, 'updateDemand').mockResolvedValue({});
     vi.spyOn(api, 'resubmitDemand').mockResolvedValue({ ...editDemand, status: 'submitted' });

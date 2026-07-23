@@ -71,4 +71,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
      */
     @Query("SELECT u FROM User u WHERE u.enabled = false AND 'testExecutor' MEMBER OF u.roles")
     List<User> findPendingTestExecutors();
+
+    @Query("select distinct u.testType from User u "
+        + "where u.testType is not null and trim(u.testType) <> ''")
+    List<String> findDistinctReferencedTestTypes();
 }

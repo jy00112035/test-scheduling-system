@@ -33,6 +33,10 @@ public interface TestModuleConfigRepository extends JpaRepository<TestModuleConf
 
     List<TestModuleConfig> findByEnabledOrderByTestTypeAscSortOrderAscModuleNameAsc(boolean enabled);
 
+    @Query("select distinct m.testType from TestModuleConfig m "
+        + "where m.testType is not null and trim(m.testType) <> ''")
+    List<String> findDistinctReferencedTestTypes();
+
     @Query(value = """
         SELECT module_id
         FROM demand_special_module

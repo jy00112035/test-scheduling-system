@@ -1,9 +1,13 @@
 package com.testscheduling.service;
 
 import com.testscheduling.entity.FieldConfig;
+import com.testscheduling.entity.DemandManpowerDetail;
+import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.FieldConfigRepository;
 import com.testscheduling.repository.DemandManpowerDetailRepository;
+import com.testscheduling.repository.TestModuleConfigRepository;
 import com.testscheduling.repository.TestStaffRepository;
+import com.testscheduling.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +28,12 @@ public class FieldConfigService {
 
     @Autowired
     private DemandManpowerDetailRepository demandManpowerDetailRepository;
+
+    @Autowired
+    private TestModuleConfigRepository testModuleConfigRepository;
+
+    @Autowired
+    private UserRepository userRepository;
 
     public List<FieldConfig> findAll() {
         return fieldConfigRepository.findAllByOrderBySortOrderAsc();
@@ -58,6 +68,28 @@ public class FieldConfigService {
         appendOption("testType", testType);
     }
 
+    @Transactional
+    public void validateTestTypeOptionsForDemandWrite(List<DemandManpowerDetail> details) {
+        FieldConfig config = fieldConfigRepository.findByFieldNameForUpdate("testType")
+            .orElseThrow(() -> new BusinessException("DEMAND_TEST_TYPE_NOT_CONFIGURED",
+                "测试类型配置不存在或已删除"));
+        LinkedHashSet<String> configuredOptions = new LinkedHashSet<>(
+            parseOptions(config.getOptions()));
+        if (details == null) {
+            return;
+        }
+        details.stream()
+            .map(DemandManpowerDetail::getTestType)
+            .filter(testType -> testType != null && !testType.isBlank())
+            .map(String::trim)
+            .filter(testType -> !configuredOptions.contains(testType))
+            .findFirst()
+            .ifPresent(testType -> {
+                throw new BusinessException("DEMAND_TEST_TYPE_NOT_CONFIGURED",
+                    "测试类型已删除或不可用: " + testType);
+            });
+    }
+
     private void appendOption(String fieldName, String value) {
         if (value == null || value.isBlank()) {
             return;
@@ -85,6 +117,10 @@ public class FieldConfigService {
     public FieldConfig update(Long id, FieldConfig config) {
         FieldConfig existing = fieldConfigRepository.findByIdForUpdate(id)
             .orElseThrow(() -> new RuntimeException("字段配置不存在"));
+        if (isStaffOptionField(existing.getFieldName())
+                && !existing.getFieldName().equals(config.getFieldName())) {
+            throw systemFieldImmutable();
+        }
         boolean staffOptionField = isStaffOptionField(existing.getFieldName())
             || isStaffOptionField(config.getFieldName());
         existing.setFieldName(config.getFieldName());
@@ -100,6 +136,11 @@ public class FieldConfigService {
 
     private boolean isStaffOptionField(String fieldName) {
         return "groupName".equals(fieldName) || "testType".equals(fieldName);
+    }
+
+    private BusinessException systemFieldImmutable() {
+        return new BusinessException("FIELD_CONFIG_SYSTEM_FIELD_IMMUTABLE",
+            "系统字段不能改名或删除");
     }
 
     private String mergeReferencedOptions(String fieldName, String requestedOptions) {
@@ -119,6 +160,8 @@ public class FieldConfigService {
             List<String> referenced = new ArrayList<>(
                 testStaffRepository.findDistinctReferencedTestTypes());
             referenced.addAll(demandManpowerDetailRepository.findDistinctReferencedTestTypes());
+            referenced.addAll(testModuleConfigRepository.findDistinctReferencedTestTypes());
+            referenced.addAll(userRepository.findDistinctReferencedTestTypes());
             return referenced;
         }
         return List.of();
@@ -137,6 +180,11 @@ public class FieldConfigService {
 
     @Transactional
     public void delete(Long id) {
-        fieldConfigRepository.deleteById(id);
+        FieldConfig existing = fieldConfigRepository.findByIdForUpdate(id)
+            .orElseThrow(() -> new RuntimeException("字段配置不存在"));
+        if (isStaffOptionField(existing.getFieldName())) {
+            throw systemFieldImmutable();
+        }
+        fieldConfigRepository.delete(existing);
     }
 }

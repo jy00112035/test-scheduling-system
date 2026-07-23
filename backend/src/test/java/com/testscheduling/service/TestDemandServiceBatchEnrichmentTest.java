@@ -56,7 +56,7 @@ class TestDemandServiceBatchEnrichmentTest {
             });
         TestDemandService service = new TestDemandService(
             demandRepository, detailRepository, specialService, mock(ScheduleRepository.class),
-            mock(AuditLogService.class), fulfillmentService);
+            mock(AuditLogService.class), fulfillmentService, mock(FieldConfigService.class));
 
         List<TestDemand> result = service.findPendingAndScheduled();
 
@@ -97,7 +97,7 @@ class TestDemandServiceBatchEnrichmentTest {
 
         TestDemandService service = new TestDemandService(
             demandRepository, detailRepository, specialService, mock(ScheduleRepository.class),
-            mock(AuditLogService.class), fulfillmentService);
+            mock(AuditLogService.class), fulfillmentService, mock(FieldConfigService.class));
 
         List<TestDemand> result = service.findPendingAndScheduled();
 
@@ -142,7 +142,7 @@ class TestDemandServiceBatchEnrichmentTest {
 
         TestDemandService service = new TestDemandService(
             demandRepository, detailRepository, specialService, mock(ScheduleRepository.class),
-            mock(AuditLogService.class), fulfillmentService);
+            mock(AuditLogService.class), fulfillmentService, mock(FieldConfigService.class));
 
         List<TestDemand> result = service.findPendingAndScheduled();
 

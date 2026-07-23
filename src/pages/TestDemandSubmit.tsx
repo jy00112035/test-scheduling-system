@@ -258,10 +258,15 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
             if (submitSessionRef.current === submitSession) {
               applyDemandValues(authoritative);
             }
+            if (['submitted', 'pending', 'scheduled', 'completed'].includes(authoritative.status)) {
+              // The server may have committed the transition before the response was lost.
+            } else {
+              throw resubmitError;
+            }
           } catch {
             // Preserve the lifecycle transition error as the actionable failure.
+            throw resubmitError;
           }
-          throw resubmitError;
         }
         if (submitSessionRef.current !== submitSession) return;
         message.success('测试需求已更新并重新提交，请等待项目经理审批！');

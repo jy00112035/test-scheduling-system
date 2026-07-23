@@ -3,9 +3,14 @@ package com.testscheduling.service;
 import com.testscheduling.entity.DemandManpowerDetail;
 import com.testscheduling.entity.FieldConfig;
 import com.testscheduling.entity.TestDemand;
+import com.testscheduling.entity.TestModuleConfig;
 import com.testscheduling.entity.TestStaff;
+import com.testscheduling.entity.User;
+import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.FieldConfigRepository;
+import com.testscheduling.repository.TestModuleConfigRepository;
 import com.testscheduling.repository.TestStaffRepository;
+import com.testscheduling.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -20,6 +25,8 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
@@ -37,6 +44,8 @@ class FieldConfigOptionReferenceIntegrationTest {
     @Autowired FieldConfigService service;
     @Autowired FieldConfigRepository configRepository;
     @Autowired TestStaffRepository staffRepository;
+    @Autowired TestModuleConfigRepository moduleRepository;
+    @Autowired UserRepository userRepository;
     @Autowired TestDemandService demandService;
 
     @Test
@@ -59,6 +68,11 @@ class FieldConfigOptionReferenceIntegrationTest {
         staff.setTestType("人员引用类型");
         staffRepository.saveAndFlush(staff);
 
+        FieldConfig group = savedConfig(
+            "groupName", "管理员项目,人员引用项目,未引用项目");
+        FieldConfig testType = savedConfig(
+            "testType", "管理员类型,人员引用类型,需求引用类型,未引用类型");
+
         TestDemand demand = new TestDemand();
         demand.setProduct("字段引用需求-" + UUID.randomUUID());
         demand.setVersionType("release");
@@ -67,11 +81,6 @@ class FieldConfigOptionReferenceIntegrationTest {
         detail.setManpowerDemand(BigDecimal.ONE);
         demand.setManpowerDetails(List.of(detail));
         demandService.create(demand, "field-reference-submitter");
-
-        FieldConfig group = savedConfig(
-            "groupName", "管理员项目,人员引用项目,未引用项目");
-        FieldConfig testType = savedConfig(
-            "testType", "管理员类型,人员引用类型,需求引用类型,未引用类型");
 
         FieldConfig updatedGroup = service.update(group.getId(),
             changes("groupName", "管理员项目"));
@@ -83,6 +92,54 @@ class FieldConfigOptionReferenceIntegrationTest {
         assertTrue(options(updatedTestType).containsAll(
             Set.of("管理员类型", "人员引用类型", "需求引用类型")));
         assertFalse(options(updatedTestType).contains("未引用类型"));
+    }
+
+    @Test
+    void manualUpdateRetainsModuleAndUserTestTypeReferences() {
+        TestModuleConfig module = new TestModuleConfig();
+        module.setModuleName("字段引用模块-" + UUID.randomUUID());
+        module.setTestType("模块引用类型");
+        module.setEnabled(true);
+        module.setSortOrder(1);
+        moduleRepository.saveAndFlush(module);
+
+        User user = new User();
+        user.setUsername("field-reference-user-" + UUID.randomUUID());
+        user.setPassword("encoded-password");
+        user.setTestType("用户引用类型");
+        userRepository.saveAndFlush(user);
+
+        FieldConfig testType = savedConfig(
+            "testType", "管理员类型,模块引用类型,用户引用类型,未引用类型");
+
+        FieldConfig updated = service.update(testType.getId(),
+            changes("testType", "管理员类型"));
+
+        assertTrue(options(updated).containsAll(
+            Set.of("管理员类型", "模块引用类型", "用户引用类型")));
+        assertFalse(options(updated).contains("未引用类型"));
+    }
+
+    @Test
+    void systemTestTypeFieldCannotBeRenamed() {
+        FieldConfig testType = savedConfig("testType", "功能测试");
+
+        BusinessException failure = assertThrows(BusinessException.class,
+            () -> service.update(testType.getId(), changes("renamedTestType", "功能测试")));
+
+        assertEquals("FIELD_CONFIG_SYSTEM_FIELD_IMMUTABLE", failure.getErrorCode());
+        assertEquals("testType", configRepository.findById(testType.getId()).orElseThrow().getFieldName());
+    }
+
+    @Test
+    void systemTestTypeFieldCannotBeDeleted() {
+        FieldConfig testType = savedConfig("testType", "功能测试");
+
+        BusinessException failure = assertThrows(BusinessException.class,
+            () -> service.delete(testType.getId()));
+
+        assertEquals("FIELD_CONFIG_SYSTEM_FIELD_IMMUTABLE", failure.getErrorCode());
+        assertTrue(configRepository.existsById(testType.getId()));
     }
 
     private FieldConfig savedConfig(String fieldName, String options) {
