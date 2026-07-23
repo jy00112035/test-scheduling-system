@@ -9,6 +9,7 @@ import type {
   ScheduleWriteRequest,
   TestModule,
   TestModuleWriteRequest,
+  TestDemand,
 } from '../types';
 
 export type {
@@ -175,6 +176,12 @@ class ApiService {
     return this.request<any>(`/demands/${id}`, {
       method: 'PUT',
       body: JSON.stringify(demand),
+    });
+  }
+
+  async resubmitDemand(id: number): Promise<TestDemand> {
+    return this.request<TestDemand>(`/demands/${id}/resubmit`, {
+      method: 'PUT',
     });
   }
 

@@ -191,9 +191,9 @@ class SecurityAuthorizationHttpIntegrationTest {
                 .header("Authorization", editor)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(request.replace("\"completed\"", "\"scheduled\"")))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.status").value("submitted"))
-            .andExpect(jsonPath("$.data.submittedBy").value(editorUsername));
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.data.errorCode")
+                .value("DEMAND_STATUS_TRANSITION_INVALID"));
 
         mockMvc.perform(put("/api/demands/{id}/approve", created.getId())
                 .header("Authorization", approver))
@@ -204,9 +204,9 @@ class SecurityAuthorizationHttpIntegrationTest {
                 .header("Authorization", editor)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(request))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.status").value("pending"))
-            .andExpect(jsonPath("$.data.submittedBy").value(editorUsername));
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.data.errorCode")
+                .value("DEMAND_STATUS_TRANSITION_INVALID"));
 
         mockMvc.perform(post("/api/demands/{id}/close", created.getId())
                 .header("Authorization", editor))
@@ -225,6 +225,15 @@ class SecurityAuthorizationHttpIntegrationTest {
         mockMvc.perform(put("/api/demands/{id}/reject", rejected.getId())
                 .header("Authorization", approver))
             .andExpect(status().isOk());
+        String editedRejectedProduct = rejectedProduct + "-edited";
+        mockMvc.perform(put("/api/demands/{id}", rejected.getId())
+                .header("Authorization", editor)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request.replace(product, editedRejectedProduct)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.product").value(editedRejectedProduct))
+            .andExpect(jsonPath("$.data.status").value("rejected"))
+            .andExpect(jsonPath("$.data.submittedBy").value(editorUsername));
         mockMvc.perform(put("/api/demands/{id}/resubmit", rejected.getId())
                 .header("Authorization", editor))
             .andExpect(status().isOk())

@@ -50,6 +50,14 @@ public class StaffModuleService {
         List<Long> requestedIds = distinctIds(requestedModuleIds);
         lockModuleIds(requestedIds);
         lockStaffIds(List.of(staffId));
+        return replaceModulesWithLocksHeld(staff, requestedIds);
+    }
+
+    @Transactional
+    public List<TestModuleConfig> replaceModulesWithLocksHeld(
+            TestStaff staff, List<Long> requestedModuleIds) {
+        Long staffId = requireStaffId(staff);
+        List<Long> requestedIds = distinctIds(requestedModuleIds);
         List<Long> existingIds = staffModuleRepository.findModuleIdsByStaffId(staffId);
         Map<Long, TestModuleConfig> modulesById = loadRequestedModules(requestedIds);
 
@@ -85,7 +93,7 @@ public class StaffModuleService {
     }
 
     @Transactional
-    public void lockModulesForStaffUpdate(List<Long> requestedModuleIds) {
+    public void lockModulesForStaffMutation(List<Long> requestedModuleIds) {
         lockModuleIds(distinctIds(requestedModuleIds));
     }
 

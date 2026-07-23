@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card,
   Form,
@@ -20,7 +20,6 @@ import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
 import { TestDemand, DemandManpowerDetail, SpecialModuleDemandInput, TestModule } from '../types';
 import { api } from '../services/api';
-import { useUserRole } from '../context/UserRoleContext';
 import SpecialModuleDemandEditor from '../components/SpecialModuleDemandEditor';
 import { calculateManpowerSummary, validateSpecialModuleRows } from '../utils/specialModuleCalculations';
 import { mergeEditDraftSpecialRows } from '../utils/specialModuleDraftContext';
@@ -55,7 +54,6 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
 }) => {
   const [form] = Form.useForm();
   const navigate = useNavigate();
-  const { userName } = useUserRole();
   const [loading, setLoading] = useState(false);
   const [fieldConfigs, setFieldConfigs] = useState<FieldConfig[]>([]);
   const [manpowerInputs, setManpowerInputs] = useState<Record<string, number>>({});
@@ -66,6 +64,11 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
   const specialModuleSectionRef = useRef<HTMLDivElement>(null);
   const draftId = useRef(isEdit ? `edit_${initialValues?.id}` : 'new').current;
   const hasShownDraftPrompt = useRef(false);
+  const submitSessionRef = useRef(0);
+
+  useEffect(() => () => {
+    submitSessionRef.current += 1;
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -158,45 +161,47 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
     };
   }, [draftId, form, manpowerInputs, manpowerRemarks, specialModuleRows, onDirtyChange]);
 
-  useEffect(() => {
-    if (initialValues) {
-      form.setFieldsValue({
-        ...initialValues,
-        dateRange: [
-          dayjs(initialValues.startDate),
-          dayjs(initialValues.endDate),
-        ],
+  const applyDemandValues = useCallback((demand: TestDemand) => {
+    form.setFieldsValue({
+      ...demand,
+      dateRange: [
+        dayjs(demand.startDate),
+        dayjs(demand.endDate),
+      ],
+    });
+    if (demand.manpowerDetails) {
+      const map: Record<string, number> = {};
+      const remarkMap: Record<string, string> = {};
+      demand.manpowerDetails.forEach((d: DemandManpowerDetail) => {
+        map[d.testType] = d.manpowerDemand;
+        if (d.remark) remarkMap[d.testType] = d.remark;
       });
-      // 回填各测试类型人力和备注
-      if (initialValues.manpowerDetails) {
-        const map: Record<string, number> = {};
-        const remarkMap: Record<string, string> = {};
-        initialValues.manpowerDetails.forEach((d: DemandManpowerDetail) => {
-          map[d.testType] = d.manpowerDemand;
-          if (d.remark) remarkMap[d.testType] = d.remark;
-        });
-        setManpowerInputs(map);
-        setManpowerRemarks(remarkMap);
-      }
-      const enrichedModules = (initialValues.specialModuleDemands ?? []).map((row) => ({
-        id: row.moduleId, moduleName: row.moduleName, testType: row.testType, enabled: row.enabled,
-        sortOrder: 0, lockVersion: 0, createdAt: row.createdAt, updatedAt: row.updatedAt, referenced: true,
-      }));
-      if (enrichedModules.length > 0) setModules((current) => [...current, ...enrichedModules.filter((item) => !current.some((module) => module.id === item.id))]);
-      setSpecialModuleRows((initialValues.specialModuleDemands ?? []).map((row) => ({
-        moduleId: row.moduleId,
-        testType: row.testType,
-        manpowerDemand: row.manpowerDemand,
-        historicalManpowerDemand: row.manpowerDemand,
-      })));
+      setManpowerInputs(map);
+      setManpowerRemarks(remarkMap);
     }
-  }, [initialValues, form]);
+    const enrichedModules = (demand.specialModuleDemands ?? []).map((row) => ({
+      id: row.moduleId, moduleName: row.moduleName, testType: row.testType, enabled: row.enabled,
+      sortOrder: 0, lockVersion: 0, createdAt: row.createdAt, updatedAt: row.updatedAt, referenced: true,
+    }));
+    if (enrichedModules.length > 0) setModules((current) => [...current, ...enrichedModules.filter((item) => !current.some((module) => module.id === item.id))]);
+    setSpecialModuleRows((demand.specialModuleDemands ?? []).map((row) => ({
+      moduleId: row.moduleId,
+      testType: row.testType,
+      manpowerDemand: row.manpowerDemand,
+      historicalManpowerDemand: row.manpowerDemand,
+    })));
+  }, [form]);
+
+  useEffect(() => {
+    if (initialValues) applyDemandValues(initialValues);
+  }, [initialValues, applyDemandValues]);
 
   const handleVersionTypeChange = () => {
     form.setFieldValue('versionPhase', undefined);
   };
 
   const handleSubmit = async (values: any) => {
+    const submitSession = ++submitSessionRef.current;
     // 构建按测试类型分组的人力需求明细
     const testTypes = Array.from(new Set([...getSelectOptions('testType'), ...Object.keys(manpowerInputs)]));
     const manpowerDetails: DemandManpowerDetail[] = testTypes
@@ -240,15 +245,29 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         confidential: values.confidential || false,
         priority: values.priority,
         testDeviceCount: values.testDeviceCount,
-        status: 'submitted',
-        submittedBy: userName || '测试经理',
       };
 
       if (isEdit && initialValues) {
-        await api.updateDemand(Number(initialValues.id), demandData);
+        const demandId = Number(initialValues.id);
+        await api.updateDemand(demandId, demandData);
+        try {
+          await api.resubmitDemand(demandId);
+        } catch (resubmitError) {
+          try {
+            const authoritative = await api.getDemand(demandId);
+            if (submitSessionRef.current === submitSession) {
+              applyDemandValues(authoritative);
+            }
+          } catch {
+            // Preserve the lifecycle transition error as the actionable failure.
+          }
+          throw resubmitError;
+        }
+        if (submitSessionRef.current !== submitSession) return;
         message.success('测试需求已更新并重新提交，请等待项目经理审批！');
       } else {
         await api.createDemand(demandData);
+        if (submitSessionRef.current !== submitSession) return;
         message.success('测试需求已成功提交，请等待项目经理审批！');
       }
       clearDraft(draftId);
@@ -256,6 +275,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
       window.dispatchEvent(new CustomEvent('refresh-pending-counts'));
 
       setTimeout(() => {
+        if (submitSessionRef.current !== submitSession) return;
         setLoading(false);
         if (onBack) {
           onBack();
@@ -264,6 +284,7 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         }
       }, 500);
     } catch (error: any) {
+      if (submitSessionRef.current !== submitSession) return;
       setLoading(false);
       message.error(error.message || '提交失败，请重试！');
     }

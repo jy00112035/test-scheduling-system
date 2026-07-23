@@ -92,7 +92,7 @@ class TestStaffServiceTest {
 
         StaffCreateResponse response = service.create(request, "actor-admin");
 
-        verify(staffModuleService, never()).replaceModules(any(), any());
+        verify(staffModuleService, never()).replaceModulesWithLocksHeld(any(), any());
         verify(fieldConfigService).appendStaffOptions(null, null);
         assertEquals("支付模块", response.getStaff().getLegacyFamiliarModules());
         assertEquals(List.of(), response.getStaff().getFamiliarModules());
@@ -117,12 +117,13 @@ class TestStaffServiceTest {
         when(testStaffRepository.save(existing)).thenReturn(existing);
         when(userRepository.findByUsername("T1001")).thenReturn(Optional.of(user("T1001", "旧模块")));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(staffModuleService.replaceModules(existing, List.of())).thenReturn(List.of());
+        when(staffModuleService.replaceModulesWithLocksHeld(existing, List.of()))
+            .thenReturn(List.of());
         when(staffModuleService.findModulesByStaffId(101L)).thenReturn(List.of());
 
         TestStaff response = service.update(101L, request, "actor-admin");
 
-        verify(staffModuleService).replaceModules(existing, List.of());
+        verify(staffModuleService).replaceModulesWithLocksHeld(existing, List.of());
         assertEquals(List.of(), response.getFamiliarModules());
         assertEquals("支付模块", response.getLegacyFamiliarModules());
     }
@@ -136,7 +137,8 @@ class TestStaffServiceTest {
         when(testStaffRepository.save(existing)).thenReturn(existing);
         when(userRepository.findByUsername("T1001")).thenReturn(Optional.of(user("T1001", "支付模块")));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(staffModuleService.replaceModules(existing, List.of(11L))).thenReturn(List.of(payment));
+        when(staffModuleService.replaceModulesWithLocksHeld(existing, List.of(11L)))
+            .thenReturn(List.of(payment));
         when(staffModuleService.findModulesByStaffId(101L)).thenReturn(List.of(payment));
 
         TestStaff response = service.update(101L, request, "actor-admin");
@@ -162,7 +164,7 @@ class TestStaffServiceTest {
         assertEquals("T1001", existing.getEmpNo());
         verify(testStaffRepository, never()).save(any());
         verify(userRepository, never()).save(any());
-        verify(staffModuleService, never()).replaceModules(any(), any());
+        verify(staffModuleService, never()).replaceModulesWithLocksHeld(any(), any());
     }
 
     @Test

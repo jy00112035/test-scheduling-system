@@ -90,6 +90,7 @@ public class TestDemandService {
     @Transactional
     public TestDemand update(Long id, TestDemand demand) {
         TestDemand existing = lockedDemand(id);
+        requireStatus(existing, TestDemand.DemandStatus.rejected);
         List<DemandManpowerDetail> beforeDetails = existing.getManpowerDetails();
         List<DemandSpecialModule> beforeSpecials = existing.getSpecialModuleDemands();
         boolean detailsProvided = demand.getManpowerDetails() != null;
@@ -129,7 +130,11 @@ public class TestDemandService {
 
     @Transactional
     public void delete(Long id) {
-        lockedDemand(id);
+        TestDemand demand = lockedDemand(id);
+        if (demand.getStatus() != TestDemand.DemandStatus.submitted
+                && demand.getStatus() != TestDemand.DemandStatus.rejected) {
+            throw invalidStatusTransition();
+        }
         if (scheduleRepository.existsByDemandId(id)) {
             throw immutableScheduledDemand();
         }
@@ -273,9 +278,13 @@ public class TestDemandService {
 
     private void requireStatus(TestDemand demand, TestDemand.DemandStatus required) {
         if (demand.getStatus() != required) {
-            throw new BusinessException("DEMAND_STATUS_TRANSITION_INVALID",
-                "当前需求状态不允许执行该操作");
+            throw invalidStatusTransition();
         }
+    }
+
+    private BusinessException invalidStatusTransition() {
+        return new BusinessException("DEMAND_STATUS_TRANSITION_INVALID",
+            "当前需求状态不允许执行该操作");
     }
 
     private TestDemand lockedDemand(Long id) {

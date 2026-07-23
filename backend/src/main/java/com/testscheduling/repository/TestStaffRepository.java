@@ -21,6 +21,14 @@ public interface TestStaffRepository extends JpaRepository<TestStaff, Long> {
 
     List<TestStaff> findByEmpNoIn(List<String> empNos);
 
+    @Query("select distinct s.groupName from TestStaff s "
+        + "where s.groupName is not null and trim(s.groupName) <> ''")
+    List<String> findDistinctReferencedGroupNames();
+
+    @Query("select distinct s.testType from TestStaff s "
+        + "where s.testType is not null and trim(s.testType) <> ''")
+    List<String> findDistinctReferencedTestTypes();
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from TestStaff s where s.id = :id")
     Optional<TestStaff> findByIdForUpdate(@Param("id") Long id);

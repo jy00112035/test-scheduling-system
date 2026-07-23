@@ -22,6 +22,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -53,6 +54,34 @@ class TestDemandControllerTest {
             .andExpect(jsonPath("$.code").value(400))
             .andExpect(jsonPath("$.data.errorCode")
                 .value("DEMAND_WITH_SCHEDULE_IMMUTABLE"));
+    }
+
+    @Test
+    void genericUpdateReturnsStableLifecycleBusinessError() throws Exception {
+        when(service.update(org.mockito.ArgumentMatchers.eq(7L), any(TestDemand.class)))
+            .thenThrow(new BusinessException(
+                "DEMAND_STATUS_TRANSITION_INVALID", "当前需求状态不允许执行该操作"));
+
+        mockMvc.perform(put("/api/demands/{id}", 7L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.data.errorCode")
+                .value("DEMAND_STATUS_TRANSITION_INVALID"));
+    }
+
+    @Test
+    void deleteReturnsStableLifecycleBusinessError() throws Exception {
+        doThrow(new BusinessException(
+            "DEMAND_STATUS_TRANSITION_INVALID", "当前需求状态不允许执行该操作"))
+            .when(service).delete(7L);
+
+        mockMvc.perform(delete("/api/demands/{id}", 7L))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.data.errorCode")
+                .value("DEMAND_STATUS_TRANSITION_INVALID"));
     }
 
     @Test

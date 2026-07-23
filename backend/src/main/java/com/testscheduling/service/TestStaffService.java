@@ -112,6 +112,9 @@ public class TestStaffService {
     public StaffCreateResponse create(StaffRequest request, String actorUsername) {
         User actor = requireActor(actorUsername);
         List<String> assignedRoles = roleAssignmentPolicy.authorizeCreate(actor, request);
+        if (request.getFamiliarModuleIds() != null) {
+            staffModuleService.lockModulesForStaffMutation(request.getFamiliarModuleIds());
+        }
         if (userRepository.existsByUsername(request.getEmpNo())) {
             throw duplicateAccount();
         }
@@ -140,11 +143,12 @@ public class TestStaffService {
         user.setConfidentialClearance(request.getConfidentialClearance() != null ? request.getConfidentialClearance() : false);
         user.setEnabled(true);
         userRepository.save(user);
-        fieldConfigService.appendStaffOptions(request.getGroupName(), request.getTestType());
 
         if (request.getFamiliarModuleIds() != null) {
-            staffModuleService.replaceModules(savedStaff, request.getFamiliarModuleIds());
+            staffModuleService.replaceModulesWithLocksHeld(
+                savedStaff, request.getFamiliarModuleIds());
         }
+        fieldConfigService.appendStaffOptions(request.getGroupName(), request.getTestType());
         enrichWithRole(savedStaff);
 
         return new StaffCreateResponse(savedStaff, plainPassword);
@@ -153,7 +157,7 @@ public class TestStaffService {
     @Transactional
     public TestStaff update(Long id, StaffRequest request, String actorUsername) {
         if (request.getFamiliarModuleIds() != null) {
-            staffModuleService.lockModulesForStaffUpdate(request.getFamiliarModuleIds());
+            staffModuleService.lockModulesForStaffMutation(request.getFamiliarModuleIds());
         }
         TestStaff existing = testStaffRepository.findByIdForUpdate(id)
             .orElseThrow(() -> new RuntimeException("人员不存在"));
@@ -171,7 +175,8 @@ public class TestStaffService {
         }
 
         if (request.getFamiliarModuleIds() != null) {
-            staffModuleService.replaceModules(existing, request.getFamiliarModuleIds());
+            staffModuleService.replaceModulesWithLocksHeld(
+                existing, request.getFamiliarModuleIds());
         }
 
         existing.setName(request.getName());

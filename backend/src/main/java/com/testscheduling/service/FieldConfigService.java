@@ -2,6 +2,8 @@ package com.testscheduling.service;
 
 import com.testscheduling.entity.FieldConfig;
 import com.testscheduling.repository.FieldConfigRepository;
+import com.testscheduling.repository.DemandManpowerDetailRepository;
+import com.testscheduling.repository.TestStaffRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -9,12 +11,19 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Arrays;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 
 @Service
 public class FieldConfigService {
 
     @Autowired
     private FieldConfigRepository fieldConfigRepository;
+
+    @Autowired
+    private TestStaffRepository testStaffRepository;
+
+    @Autowired
+    private DemandManpowerDetailRepository demandManpowerDetailRepository;
 
     public List<FieldConfig> findAll() {
         return fieldConfigRepository.findAllByOrderBySortOrderAsc();
@@ -81,7 +90,7 @@ public class FieldConfigService {
         existing.setFieldName(config.getFieldName());
         existing.setFieldType(config.getFieldType());
         existing.setOptions(staffOptionField
-            ? mergeOptions(existing.getOptions(), config.getOptions())
+            ? mergeReferencedOptions(config.getFieldName(), config.getOptions())
             : config.getOptions());
         existing.setDescription(config.getDescription());
         existing.setRequired(config.getRequired());
@@ -93,18 +102,37 @@ public class FieldConfigService {
         return "groupName".equals(fieldName) || "testType".equals(fieldName);
     }
 
-    private String mergeOptions(String existingOptions, String requestedOptions) {
-        List<String> merged = new ArrayList<>();
-        for (String options : List.of(
-                existingOptions == null ? "" : existingOptions,
-                requestedOptions == null ? "" : requestedOptions)) {
-            Arrays.stream(options.split(","))
-                .map(String::trim)
-                .filter(option -> !option.isEmpty())
-                .filter(option -> !merged.contains(option))
-                .forEach(merged::add);
-        }
+    private String mergeReferencedOptions(String fieldName, String requestedOptions) {
+        LinkedHashSet<String> merged = new LinkedHashSet<>(parseOptions(requestedOptions));
+        referencedOptions(fieldName).stream()
+            .map(String::trim)
+            .filter(option -> !option.isEmpty())
+            .forEach(merged::add);
         return String.join(",", merged);
+    }
+
+    private List<String> referencedOptions(String fieldName) {
+        if ("groupName".equals(fieldName)) {
+            return testStaffRepository.findDistinctReferencedGroupNames();
+        }
+        if ("testType".equals(fieldName)) {
+            List<String> referenced = new ArrayList<>(
+                testStaffRepository.findDistinctReferencedTestTypes());
+            referenced.addAll(demandManpowerDetailRepository.findDistinctReferencedTestTypes());
+            return referenced;
+        }
+        return List.of();
+    }
+
+    private List<String> parseOptions(String options) {
+        if (options == null || options.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(options.split(","))
+            .map(String::trim)
+            .filter(option -> !option.isEmpty())
+            .distinct()
+            .toList();
     }
 
     @Transactional

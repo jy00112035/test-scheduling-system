@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Modal } from 'antd';
+import { message } from 'antd';
 import TestDemandSubmit from './TestDemandSubmit';
 import api from '../services/api';
 import * as drafts from '../utils/draftStorage';
@@ -73,8 +74,9 @@ describe('TestDemandSubmit special module requests', () => {
     expect(createDemand.mock.calls[0][0].specialModuleDemands[0]).toEqual({ moduleId: 11, manpowerDemand: 1 });
   });
 
-  it('updates with configured and historical groups while retaining the historical remark', async () => {
+  it('updates rejected fields before resubmitting and retains the historical remark', async () => {
     const updateDemand = vi.spyOn(api, 'updateDemand').mockResolvedValue({});
+    const resubmitDemand = vi.spyOn(api, 'resubmitDemand').mockResolvedValue({ ...editDemand, status: 'submitted' });
     renderPage({ initialValues: editDemand, isEdit: true });
     const user = userEvent.setup();
     await screen.findByDisplayValue('历史产品');
@@ -87,6 +89,67 @@ describe('TestDemandSubmit special module requests', () => {
       { testType: '历史小组', manpowerDemand: 1, remark: '历史备注' },
     ]));
     expect(updateDemand.mock.calls[0][1].specialModuleDemands).toEqual([{ moduleId: 11, manpowerDemand: 1 }]);
+    expect(updateDemand.mock.calls[0][1]).not.toHaveProperty('status');
+    expect(updateDemand.mock.calls[0][1]).not.toHaveProperty('submittedBy');
+    expect(resubmitDemand).toHaveBeenCalledWith(7);
+    expect(updateDemand.mock.invocationCallOrder[0]).toBeLessThan(resubmitDemand.mock.invocationCallOrder[0]);
+  });
+
+  it('does not resubmit or report success when the rejected update fails', async () => {
+    vi.spyOn(api, 'updateDemand').mockRejectedValue(new Error('更新失败'));
+    const resubmitDemand = vi.spyOn(api, 'resubmitDemand').mockResolvedValue({ ...editDemand, status: 'submitted' });
+    const getDemand = vi.spyOn(api, 'getDemand').mockResolvedValue(editDemand);
+    const success = vi.spyOn(message, 'success');
+    const failure = vi.spyOn(message, 'error');
+    const onBack = vi.fn();
+    renderPage({ initialValues: editDemand, isEdit: true, onBack });
+    const user = userEvent.setup();
+    await screen.findByDisplayValue('历史产品');
+
+    await user.click(screen.getByRole('button', { name: /保存修改/ }));
+
+    await waitFor(() => expect(failure).toHaveBeenCalledWith('更新失败'));
+    expect(resubmitDemand).not.toHaveBeenCalled();
+    expect(getDemand).not.toHaveBeenCalled();
+    expect(success).not.toHaveBeenCalled();
+    expect(onBack).not.toHaveBeenCalled();
+  });
+
+  it('refetches authoritative rejected data and never reports success when resubmit fails', async () => {
+    vi.spyOn(api, 'updateDemand').mockResolvedValue({});
+    vi.spyOn(api, 'resubmitDemand').mockRejectedValue(new Error('重新提交失败'));
+    const authoritative = { ...editDemand, product: '服务器权威产品' };
+    const getDemand = vi.spyOn(api, 'getDemand').mockResolvedValue(authoritative);
+    const success = vi.spyOn(message, 'success');
+    const failure = vi.spyOn(message, 'error');
+    const onBack = vi.fn();
+    renderPage({ initialValues: editDemand, isEdit: true, onBack });
+    const user = userEvent.setup();
+    await screen.findByDisplayValue('历史产品');
+
+    await user.click(screen.getByRole('button', { name: /保存修改/ }));
+
+    await waitFor(() => expect(getDemand).toHaveBeenCalledWith(7));
+    expect(await screen.findByDisplayValue('服务器权威产品')).toBeInTheDocument();
+    expect(failure).toHaveBeenCalledWith('重新提交失败');
+    expect(success).not.toHaveBeenCalled();
+    expect(onBack).not.toHaveBeenCalled();
+  });
+
+  it('does not run the delayed success navigation after the submit session unmounts', async () => {
+    vi.spyOn(api, 'updateDemand').mockResolvedValue({});
+    vi.spyOn(api, 'resubmitDemand').mockResolvedValue({ ...editDemand, status: 'submitted' });
+    const onBack = vi.fn();
+    const page = renderPage({ initialValues: editDemand, isEdit: true, onBack });
+    const user = userEvent.setup();
+    await screen.findByDisplayValue('历史产品');
+
+    await user.click(screen.getByRole('button', { name: /保存修改/ }));
+    await waitFor(() => expect(api.resubmitDemand).toHaveBeenCalledWith(7));
+    page.unmount();
+    await new Promise((resolve) => window.setTimeout(resolve, 550));
+
+    expect(onBack).not.toHaveBeenCalled();
   });
 
   it('keeps configured group fields usable when module loading fails and disables new special rows', async () => {

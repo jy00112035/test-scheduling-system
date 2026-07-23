@@ -1,6 +1,7 @@
 package com.testscheduling.service;
 
 import com.testscheduling.entity.FieldConfig;
+import com.testscheduling.dto.StaffRequest;
 import com.testscheduling.repository.FieldConfigRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -28,6 +30,7 @@ import static org.mockito.Mockito.doAnswer;
 class FieldConfigOptionConcurrencyIntegrationTest {
 
     @Autowired FieldConfigService service;
+    @Autowired TestStaffService staffService;
     @SpyBean FieldConfigRepository repository;
 
     private final ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -84,12 +87,12 @@ class FieldConfigOptionConcurrencyIntegrationTest {
     }
 
     @Test
-    void manualUpdateWaitsForAppendAndMergesFreshStaffOption() throws Exception {
+    void manualUpdateWaitsForStaffCreateAndKeepsItsReferencedOption() throws Exception {
         repository.deleteAll();
         FieldConfig config = new FieldConfig();
         config.setFieldName("groupName");
         config.setFieldType("select");
-        config.setOptions("已有项目");
+        config.setOptions("待删除旧项目");
         config = repository.saveAndFlush(config);
 
         CountDownLatch appendAtSave = new CountDownLatch(1);
@@ -107,8 +110,12 @@ class FieldConfigOptionConcurrencyIntegrationTest {
             return saving;
         }).when(repository).save(any(FieldConfig.class));
 
-        Future<?> append = executor.submit(
-            () -> service.appendStaffOptions("自动追加项目", null));
+        StaffRequest staff = new StaffRequest();
+        staff.setName("并发字段人员");
+        staff.setEmpNo("FIELD-CONCURRENT-" + java.util.UUID.randomUUID());
+        staff.setGroupName("自动追加项目");
+        staff.setStatus("active");
+        Future<?> append = executor.submit(() -> staffService.create(staff, "admin"));
         assertTrue(appendAtSave.await(5, TimeUnit.SECONDS));
 
         FieldConfig manualChanges = new FieldConfig();
@@ -130,7 +137,8 @@ class FieldConfigOptionConcurrencyIntegrationTest {
         append.get(5, TimeUnit.SECONDS);
         manual.get(5, TimeUnit.SECONDS);
         FieldConfig saved = repository.findById(configId).orElseThrow();
-        assertEquals(Set.of("已有项目", "自动追加项目", "管理员项目"),
-            Set.copyOf(Arrays.asList(saved.getOptions().split(","))));
+        Set<String> savedOptions = Set.copyOf(Arrays.asList(saved.getOptions().split(",")));
+        assertTrue(savedOptions.containsAll(Set.of("自动追加项目", "管理员项目")));
+        assertFalse(savedOptions.contains("待删除旧项目"));
     }
 }

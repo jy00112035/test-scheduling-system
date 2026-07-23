@@ -170,6 +170,18 @@ describe('ApiService special-module contracts', () => {
     });
   });
 
+  it('resubmits a rejected demand through the explicit lifecycle endpoint', async () => {
+    const demand = { id: '7', status: 'submitted' };
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(respond(demand));
+
+    const result = await api.resubmitDemand(7);
+
+    expect(result).toEqual(demand);
+    expect(fetchMock).toHaveBeenCalledWith('/api/demands/7/resubmit', expect.objectContaining({
+      method: 'PUT',
+    }));
+  });
+
   it('uses the test-module CRUD endpoints', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(respond([]))
