@@ -8,9 +8,20 @@ import * as XLSX from 'xlsx';
 import { message } from 'antd';
 import { buildStaffExportRows, STAFF_IMPORT_MAX_FILE_SIZE, STAFF_IMPORT_MAX_ROWS } from '../utils/staffSpreadsheet';
 
-vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: { testType: '功能测试' } }) }));
+const actorContext = vi.hoisted(() => ({
+  roles: ['admin'] as string[],
+  testType: '功能测试',
+}));
+
+vi.mock('../context/AuthContext', () => ({
+  useAuth: () => ({ user: { testType: actorContext.testType } }),
+}));
 vi.mock('../context/UserRoleContext', () => ({
-  useUserRole: () => ({ hasRole: () => false, hasPermission: () => true, roles: ['testManager'] }),
+  useUserRole: () => ({
+    hasRole: (role: string) => actorContext.roles.includes(role),
+    hasPermission: () => true,
+    roles: actorContext.roles,
+  }),
 }));
 
 const moduleFixture = (overrides: Partial<TestModule> = {}): TestModule => ({
@@ -47,6 +58,8 @@ function workbookData(rows: Record<string, unknown>[]) {
 describe('StaffManagement familiar modules', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    actorContext.roles = ['admin'];
+    actorContext.testType = '功能测试';
     window.matchMedia = (query: string) => ({
       matches: false, media: query, onchange: null, addListener: () => undefined, removeListener: () => undefined,
       addEventListener: () => undefined, removeEventListener: () => undefined, dispatchEvent: () => false,
@@ -68,6 +81,81 @@ describe('StaffManagement familiar modules', () => {
       moduleFixture({ id: 12, moduleName: '接口模块', testType: '自动化测试', enabled: true }),
     ]);
     vi.spyOn(api, 'getStaffRolesByEmpNo').mockResolvedValue(['testExecutor']);
+  });
+
+  it('treats combined test lead and executor roles as a restricted test lead', async () => {
+    actorContext.roles = ['testLead', 'testExecutor'];
+    vi.spyOn(api, 'getStaff').mockResolvedValue([
+      {
+        id: 7, name: '同组人员', empNo: 'EMP007', joinDate: '2026-07-01', groupName: '功能测试组',
+        testType: '功能测试', initialCoefficient: 0.3, currentCoefficient: 0.3,
+        status: 'active', roles: ['testExecutor'], familiarModules: [],
+      },
+      {
+        id: 8, name: '跨组人员', empNo: 'EMP008', joinDate: '2026-07-01', groupName: '自动化测试组',
+        testType: '自动化测试', initialCoefficient: 0.3, currentCoefficient: 0.3,
+        status: 'active', roles: ['testExecutor'], familiarModules: [],
+      },
+    ]);
+
+    render(<StaffManagement />);
+
+    await screen.findByText('同组人员');
+    expect(screen.queryByRole('button', { name: /添加人员/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /导入人员/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('删除')).not.toBeInTheDocument();
+    expect(screen.getAllByText('编辑')).toHaveLength(1);
+  });
+
+  it.each([
+    { actor: 'resourceManager', offered: ['测试执行人员'], hidden: ['测试经理', '测试组长', '资源主管', '项目经理', '字段管理员'] },
+    { actor: 'fieldAdmin', offered: ['测试执行人员'], hidden: ['测试经理', '测试组长', '资源主管', '项目经理', '字段管理员'] },
+    { actor: 'projectManager', offered: ['测试执行人员', '测试经理', '测试组长', '资源主管'], hidden: ['项目经理', '字段管理员'] },
+    { actor: 'admin', offered: ['测试执行人员', '测试经理', '测试组长', '资源主管', '项目经理', '字段管理员'], hidden: [] },
+  ])('offers only backend-assignable roles and safe controls to $actor', async ({ actor, offered, hidden }) => {
+    actorContext.roles = [actor];
+    render(<StaffManagement />);
+    const user = userEvent.setup();
+
+    expect(await screen.findByRole('button', { name: /添加人员/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /导入人员/ })).toBeInTheDocument();
+    expect(await screen.findByText('删除')).toBeInTheDocument();
+    expect(screen.getByText('编辑')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /添加人员/ }));
+    await user.click(screen.getByRole('combobox', { name: '角色' }));
+    for (const label of offered) {
+      expect(await screen.findByText(label, { selector: '.ant-select-item-option-content' })).toBeInTheDocument();
+    }
+    for (const label of hidden) {
+      expect(screen.queryByText(label, { selector: '.ant-select-item-option-content' })).not.toBeInTheDocument();
+    }
+  });
+
+  it('keeps a restricted lead target role readonly and hides unsafe elevated-target actions', async () => {
+    actorContext.roles = ['testLead', 'testExecutor'];
+    vi.spyOn(api, 'getStaff').mockResolvedValue([
+      {
+        id: 7, name: '普通执行员', empNo: 'EMP007', joinDate: '2026-07-01', groupName: '功能测试组',
+        testType: '功能测试', initialCoefficient: 0.3, currentCoefficient: 0.3,
+        status: 'active', roles: ['testExecutor'], familiarModules: [],
+      },
+      {
+        id: 8, name: '字段管理员目标', empNo: 'EMP008', joinDate: '2026-07-01', groupName: '功能测试组',
+        testType: '功能测试', initialCoefficient: 0.3, currentCoefficient: 0.3,
+        status: 'active', roles: ['fieldAdmin'], familiarModules: [],
+      },
+    ]);
+    vi.spyOn(api, 'getStaffRolesByEmpNo').mockResolvedValue(['testExecutor']);
+    render(<StaffManagement />);
+    const user = userEvent.setup();
+
+    await screen.findByText('字段管理员目标');
+    expect(screen.getAllByText('编辑')).toHaveLength(1);
+    await user.click(screen.getByText('编辑'));
+    const roleSelector = await screen.findByRole('combobox', { name: '角色' });
+    expect(roleSelector).toBeDisabled();
+    expect(roleSelector.closest('.ant-select')).toHaveTextContent(/测试执行人员|testExecutor/);
   });
 
   it('preserves disabled historical modules and submits cross-group structured module ids', async () => {

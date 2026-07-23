@@ -59,7 +59,7 @@ class MigrationSmokeTest {
             () -> assertColumnExists("TEST_MODULE_CONFIG", "LOCK_VERSION")
         );
 
-        assertEquals(List.of("1", "2", "3"), jdbc.queryForList(
+        assertEquals(List.of("1", "2", "3", "4"), jdbc.queryForList(
             "select \"version\" from \"flyway_schema_history\" "
                 + "where \"success\" = true and \"type\" = 'SQL' order by \"installed_rank\"",
             String.class));
@@ -144,7 +144,7 @@ class MigrationSmokeTest {
             JdbcTemplate migrated = context.getBean(JdbcTemplate.class);
             assertAll(
                 () -> assertNotNull(context.getBean(EntityManagerFactory.class)),
-                () -> assertEquals(List.of("1:BASELINE", "2:SQL", "3:SQL"),
+                () -> assertEquals(List.of("1:BASELINE", "2:SQL", "3:SQL", "4:SQL"),
                     successfulVersionedMigrations(migrated)),
                 () -> assertEquals(1, migrated.queryForObject(
                     "select count(*) from users where username = 'legacy-smoke-user'",
@@ -164,14 +164,14 @@ class MigrationSmokeTest {
     }
 
     @Test
-    void restartsCurrentFileAtV3WithoutRerunningMigrationsAndJpaValidates() {
-        String databaseUrl = fileDatabaseUrl("current-v3");
+    void restartsCurrentFileAtV4WithoutRerunningMigrationsAndJpaValidates() {
+        String databaseUrl = fileDatabaseUrl("current-v4");
         try (ConfigurableApplicationContext first = startApplication(databaseUrl)) {
             JdbcTemplate current = first.getBean(JdbcTemplate.class);
             current.update(
                 "insert into test_demand (product, version_type, status, lock_version) "
                     + "values ('current-file-sentinel', '维护', 'pending', 0)");
-            assertEquals(List.of("1:SQL", "2:SQL", "3:SQL"),
+            assertEquals(List.of("1:SQL", "2:SQL", "3:SQL", "4:SQL"),
                 successfulVersionedMigrations(current));
         }
 
@@ -179,9 +179,9 @@ class MigrationSmokeTest {
             JdbcTemplate current = restarted.getBean(JdbcTemplate.class);
             assertAll(
                 () -> assertNotNull(restarted.getBean(EntityManagerFactory.class)),
-                () -> assertEquals(List.of("1:SQL", "2:SQL", "3:SQL"),
+                () -> assertEquals(List.of("1:SQL", "2:SQL", "3:SQL", "4:SQL"),
                     successfulVersionedMigrations(current)),
-                () -> assertEquals(3, current.queryForObject(
+                () -> assertEquals(4, current.queryForObject(
                     "select count(*) from \"flyway_schema_history\" "
                         + "where \"success\" = true and \"type\" = 'SQL'",
                     Integer.class)),

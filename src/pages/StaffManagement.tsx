@@ -44,6 +44,14 @@ import {
   STAFF_IMPORT_MAX_ROWS,
   STAFF_IMPORT_TEMPLATE_FILENAME,
 } from '../utils/staffSpreadsheet';
+import {
+  canAssignStaffRoles,
+  canChangeStaffRoles,
+  canCreateStaff,
+  canDeleteStaff,
+  canEditStaff,
+  getStaffRoleOptions,
+} from '../utils/staffRolePolicy';
 
 const { Option, OptGroup } = Select;
 
@@ -58,6 +66,7 @@ interface Staff {
   currentCoefficient: number;
   status: 'active' | 'leave' | 'resigned';
   role?: string;
+  roles?: string[];
   familiarModules?: FamiliarModule[];
   hasStructuredFamiliarModules?: boolean;
   confidentialClearance?: boolean;
@@ -128,15 +137,14 @@ const roleLabels: Record<string, string> = {
 
 const StaffManagement: React.FC = () => {
   const { user } = useAuth();
-  const { hasRole, hasPermission, roles } = useUserRole();
-  const canManageStaff = hasPermission('manageStaff');
-  // 仅有 testLead 角色时才受限制（只能编辑同 testType，不能删除/导入/添加）
-  const isOnlyTestLead = canManageStaff && hasRole('testLead') && roles.length === 1 && roles[0] === 'testLead';
+  const { roles } = useUserRole();
+  const canCreate = canCreateStaff(roles);
 
   const [staffs, setStaffs] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingStaff, setEditingStaff] = useState<Staff | null>(null);
+  const [editingStaffRoles, setEditingStaffRoles] = useState<string[]>([]);
   const [form] = Form.useForm();
   const [searchText, setSearchText] = useState('');
   const [fieldConfigs, setFieldConfigs] = useState<FieldConfig[]>([]);
@@ -164,6 +172,10 @@ const StaffManagement: React.FC = () => {
   const importSaveSessionRef = useRef<number | null>(null);
   const familiarModuleEditRef = useRef({ session: 0, initialized: false, changed: false, isCreate: false });
   const selectedFamiliarModuleIds = Form.useWatch('familiarModuleIds', form) || [];
+  const staffRoleOptions = useMemo(
+    () => getStaffRoleOptions(roles, editingStaffRoles),
+    [roles, editingStaffRoles],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -270,6 +282,7 @@ const StaffManagement: React.FC = () => {
 
   // 打开导入弹窗
   const openImportModal = () => {
+    if (!canCreate) return;
     if (importSaveSessionRef.current !== null) return;
     resetImportPreview();
     setImportModalVisible(true);
@@ -407,6 +420,10 @@ const StaffManagement: React.FC = () => {
             const parsedStatus = parseStaffStatus(statusKey ? rowObj[statusKey] : 'active');
             const rowErrors = [
               ...parsedRoles.invalid.map(role => `无效角色：${role}`),
+              ...(!canAssignStaffRoles(
+                roles,
+                parsedRoles.roles.length ? parsedRoles.roles : ['testExecutor'],
+              ) ? ['无权分配导入人员角色'] : []),
               ...(parsedStatus.invalid ? [`无效状态：${rowObj[statusKey!]}`] : []),
             ];
 
@@ -554,15 +571,18 @@ const StaffManagement: React.FC = () => {
   };
 
   const handleAdd = () => {
+    if (!canCreate) return;
     if (staffSaveSessionRef.current !== null) return;
     const session = ++editSessionRef.current;
     familiarModuleEditRef.current = { session, initialized: true, changed: false, isCreate: true };
     setEditingStaff(null);
+    setEditingStaffRoles([]);
     form.resetFields();
     setIsModalVisible(true);
   };
 
   const handleEdit = async (record: Staff) => {
+    if (!canEditStaff(roles, user?.testType, record)) return;
     if (staffSaveSessionRef.current !== null) return;
     const session = ++editSessionRef.current;
     const familiarModuleIds = record.hasStructuredFamiliarModules === false
@@ -584,6 +604,7 @@ const StaffManagement: React.FC = () => {
         familiarModuleIds,
         confidentialClearance: record.confidentialClearance || false,
       });
+      setEditingStaffRoles(roles && roles.length > 0 ? roles : ['testExecutor']);
       setEditingStaff(record);
       setIsModalVisible(true);
     } catch {
@@ -595,6 +616,7 @@ const StaffManagement: React.FC = () => {
         familiarModuleIds,
         confidentialClearance: record.confidentialClearance || false,
       });
+      setEditingStaffRoles(['testExecutor']);
       setEditingStaff(record);
       setIsModalVisible(true);
     }
@@ -605,6 +627,7 @@ const StaffManagement: React.FC = () => {
     editSessionRef.current += 1;
     familiarModuleEditRef.current = { session: editSessionRef.current, initialized: false, changed: false, isCreate: false };
     setEditingStaff(null);
+    setEditingStaffRoles([]);
     form.resetFields();
     setIsModalVisible(false);
   };
@@ -847,7 +870,7 @@ const StaffManagement: React.FC = () => {
       fixed: 'right' as const,
       render: (_: any, record: Staff) => (
         <Space size="small">
-          {(!isOnlyTestLead || (user?.testType && record.testType === user.testType)) && (
+          {canEditStaff(roles, user?.testType, record) && (
             <Button
               type="link"
               size="small"
@@ -857,7 +880,7 @@ const StaffManagement: React.FC = () => {
               编辑
             </Button>
           )}
-          {!isOnlyTestLead && (
+          {canDeleteStaff(roles, record) && (
             <Popconfirm
               title="确定删除此人员？"
               onConfirm={() => handleDelete(record.id)}
@@ -892,7 +915,7 @@ const StaffManagement: React.FC = () => {
           />
         )}
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16, gap: 8, position: 'sticky', top: 0, zIndex: 10, background: '#fff', paddingTop: 8, paddingBottom: 8 }}>
-          {!isOnlyTestLead && selectedRowKeys.length > 0 && (
+          {selectedRowKeys.length > 0 && (
             <Popconfirm
               title={`确定删除选中的 ${selectedRowKeys.length} 条人员数据？`}
               onConfirm={handleBatchDelete}
@@ -913,7 +936,7 @@ const StaffManagement: React.FC = () => {
           <Button icon={<ExportOutlined />} onClick={exportStaffs} aria-label="导出人员">
             导出人员
           </Button>
-          {!isOnlyTestLead && (
+          {canCreate && (
             <Upload
               showUploadList={false}
               accept=".xlsx,.xls"
@@ -926,7 +949,7 @@ const StaffManagement: React.FC = () => {
               </Button>
             </Upload>
           )}
-          {!isOnlyTestLead && (
+          {canCreate && (
             <Button
               type="primary"
               icon={<PlusOutlined />}
@@ -944,10 +967,11 @@ const StaffManagement: React.FC = () => {
           bordered
           sticky={{ offsetHeader: 48 }}
           loading={loading}
-          rowSelection={isOnlyTestLead ? undefined : {
+          rowSelection={canDeleteStaff(roles, { roles: ['testExecutor'] }) ? {
             selectedRowKeys,
             onChange: (keys) => setSelectedRowKeys(keys),
-          }}
+            getCheckboxProps: record => ({ disabled: !canDeleteStaff(roles, record) }),
+          } : undefined}
           pagination={{
             current: pagination.current,
             pageSize: pagination.pageSize,
@@ -1084,13 +1108,16 @@ const StaffManagement: React.FC = () => {
             label="角色"
             rules={[{ required: true, message: '请选择至少一个角色' }]}
           >
-            <Select mode="multiple" placeholder="请选择角色（可多选）">
-              <Option value="testManager">测试经理</Option>
-              <Option value="testLead">测试组长</Option>
-              <Option value="resourceManager">资源主管</Option>
-              <Option value="projectManager">项目经理</Option>
-              <Option value="testExecutor">测试执行人员</Option>
-              <Option value="fieldAdmin">字段管理员</Option>
+            <Select
+              mode="multiple"
+              placeholder="请选择角色（可多选）"
+              disabled={Boolean(editingStaff) && !canChangeStaffRoles(roles)}
+            >
+              {staffRoleOptions.map(option => (
+                <Option key={option.role} value={option.role} disabled={option.disabled}>
+                  {roleLabels[option.role] || option.role}
+                </Option>
+              ))}
             </Select>
           </Form.Item>
 

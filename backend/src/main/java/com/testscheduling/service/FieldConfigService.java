@@ -53,7 +53,7 @@ public class FieldConfigService {
         if (value == null || value.isBlank()) {
             return;
         }
-        fieldConfigRepository.findByFieldName(fieldName).ifPresent(config -> {
+        fieldConfigRepository.findByFieldNameForUpdate(fieldName).ifPresent(config -> {
             List<String> options = config.getOptions() == null || config.getOptions().isBlank()
                 ? new ArrayList<>()
                 : new ArrayList<>(Arrays.stream(config.getOptions().split(","))
