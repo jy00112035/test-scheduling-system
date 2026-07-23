@@ -51,6 +51,7 @@ import {
   canDeleteStaff,
   canEditStaff,
   getStaffRoleOptions,
+  getStaffTargetRoles,
 } from '../utils/staffRolePolicy';
 
 const { Option, OptGroup } = Select;
@@ -594,31 +595,39 @@ const StaffManagement: React.FC = () => {
       changed: false,
       isCreate: false,
     };
-    try {
-      const roles = await api.getStaffRolesByEmpNo(record.empNo);
+    const recordRoles = record.roles?.length || record.role
+      ? getStaffTargetRoles(record)
+      : null;
+    const openEditor = (resolvedRoles: string[]) => {
       if (!mountedRef.current || session !== editSessionRef.current) return;
       form.setFieldsValue({
         ...record,
         joinDate: dayjs(record.joinDate),
-        roles: roles && roles.length > 0 ? roles : ['testExecutor'],
+        roles: resolvedRoles,
         familiarModuleIds,
         confidentialClearance: record.confidentialClearance || false,
       });
-      setEditingStaffRoles(roles && roles.length > 0 ? roles : ['testExecutor']);
+      setEditingStaffRoles(resolvedRoles);
       setEditingStaff(record);
       setIsModalVisible(true);
+    };
+    try {
+      const loadedRoles = await api.getStaffRolesByEmpNo(record.empNo);
+      const resolvedRoles = loadedRoles?.length ? loadedRoles : recordRoles;
+      if (!resolvedRoles) {
+        if (mountedRef.current && session === editSessionRef.current) {
+          message.error('人员角色加载失败，请重试');
+        }
+        return;
+      }
+      openEditor(resolvedRoles);
     } catch {
       if (!mountedRef.current || session !== editSessionRef.current) return;
-      form.setFieldsValue({
-        ...record,
-        joinDate: dayjs(record.joinDate),
-        roles: ['testExecutor'],
-        familiarModuleIds,
-        confidentialClearance: record.confidentialClearance || false,
-      });
-      setEditingStaffRoles(['testExecutor']);
-      setEditingStaff(record);
-      setIsModalVisible(true);
+      if (!recordRoles) {
+        message.error('人员角色加载失败，请重试');
+        return;
+      }
+      openEditor(recordRoles);
     }
   };
 
@@ -681,7 +690,6 @@ const StaffManagement: React.FC = () => {
       const staffData = {
         ...staffValues,
         joinDate: dayjs(values.joinDate).format('YYYY-MM-DD'),
-        role: values.roles?.[0] || 'testExecutor',
         confidentialClearance: values.confidentialClearance || false,
       } as Record<string, unknown>;
       const familiarModuleEdit = familiarModuleEditRef.current;
@@ -696,6 +704,7 @@ const StaffManagement: React.FC = () => {
         if (!ownsStaffSave()) return;
         message.success('人员信息已更新');
       } else {
+        staffData.role = values.roles?.[0] || 'testExecutor';
         await api.createStaff(staffData);
         if (!ownsStaffSave()) return;
         await fetchFieldConfigs();

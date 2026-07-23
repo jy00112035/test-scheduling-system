@@ -5,6 +5,7 @@ import jakarta.persistence.EntityManagerFactory;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.flywaydb.core.Flyway;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
@@ -59,10 +60,8 @@ class MigrationSmokeTest {
             () -> assertColumnExists("TEST_MODULE_CONFIG", "LOCK_VERSION")
         );
 
-        assertEquals(List.of("1", "2", "3", "4"), jdbc.queryForList(
-            "select \"version\" from \"flyway_schema_history\" "
-                + "where \"success\" = true and \"type\" = 'SQL' order by \"installed_rank\"",
-            String.class));
+        assertEquals(List.of("1:SQL", "2:SQL", "3:SQL", "3.1:JDBC", "4:SQL"),
+            successfulVersionedMigrations(jdbc));
         assertEquals(0, jdbc.queryForObject(
             "select count(*) from \"flyway_schema_history\" where \"type\" = 'BASELINE'",
             Integer.class));
@@ -144,7 +143,8 @@ class MigrationSmokeTest {
             JdbcTemplate migrated = context.getBean(JdbcTemplate.class);
             assertAll(
                 () -> assertNotNull(context.getBean(EntityManagerFactory.class)),
-                () -> assertEquals(List.of("1:BASELINE", "2:SQL", "3:SQL", "4:SQL"),
+                () -> assertEquals(List.of(
+                    "1:BASELINE", "2:SQL", "3:SQL", "3.1:JDBC", "4:SQL"),
                     successfulVersionedMigrations(migrated)),
                 () -> assertEquals(1, migrated.queryForObject(
                     "select count(*) from users where username = 'legacy-smoke-user'",
@@ -171,7 +171,7 @@ class MigrationSmokeTest {
             current.update(
                 "insert into test_demand (product, version_type, status, lock_version) "
                     + "values ('current-file-sentinel', '维护', 'pending', 0)");
-            assertEquals(List.of("1:SQL", "2:SQL", "3:SQL", "4:SQL"),
+            assertEquals(List.of("1:SQL", "2:SQL", "3:SQL", "3.1:JDBC", "4:SQL"),
                 successfulVersionedMigrations(current));
         }
 
@@ -179,14 +179,39 @@ class MigrationSmokeTest {
             JdbcTemplate current = restarted.getBean(JdbcTemplate.class);
             assertAll(
                 () -> assertNotNull(restarted.getBean(EntityManagerFactory.class)),
-                () -> assertEquals(List.of("1:SQL", "2:SQL", "3:SQL", "4:SQL"),
+                () -> assertEquals(List.of(
+                    "1:SQL", "2:SQL", "3:SQL", "3.1:JDBC", "4:SQL"),
                     successfulVersionedMigrations(current)),
-                () -> assertEquals(4, current.queryForObject(
+                () -> assertEquals(5, current.queryForObject(
                     "select count(*) from \"flyway_schema_history\" "
-                        + "where \"success\" = true and \"type\" = 'SQL'",
+                        + "where \"success\" = true and \"version\" is not null",
                     Integer.class)),
                 () -> assertEquals(1, current.queryForObject(
                     "select count(*) from test_demand where product = 'current-file-sentinel'",
+                    Integer.class))
+            );
+        }
+    }
+
+    @Test
+    void startsAgainstReleasedV4HistoryWithoutApplyingV3Point1OutOfOrder() {
+        String databaseUrl = fileDatabaseUrl("released-v4");
+        Flyway.configure()
+            .dataSource(databaseUrl, "sa", "")
+            .locations("classpath:db/migration")
+            .javaMigrationClassProvider(List::of)
+            .load()
+            .migrate();
+
+        try (ConfigurableApplicationContext context = startApplication(databaseUrl)) {
+            JdbcTemplate current = context.getBean(JdbcTemplate.class);
+            assertAll(
+                () -> assertNotNull(context.getBean(EntityManagerFactory.class)),
+                () -> assertEquals(List.of("1:SQL", "2:SQL", "3:SQL", "4:SQL"),
+                    successfulVersionedMigrations(current)),
+                () -> assertEquals(0, current.queryForObject(
+                    "select count(*) from \"flyway_schema_history\" "
+                        + "where \"version\" = '3.1'",
                     Integer.class))
             );
         }

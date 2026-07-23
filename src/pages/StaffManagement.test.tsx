@@ -158,6 +158,70 @@ describe('StaffManagement familiar modules', () => {
     expect(roleSelector.closest('.ant-select')).toHaveTextContent(/测试执行人员|testExecutor/);
   });
 
+  it.each(['admin', 'projectManager'])(
+    'preserves record roles when role lookup fails for %s edit',
+    async (actorRole) => {
+      actorContext.roles = [actorRole];
+      vi.spyOn(api, 'getStaff').mockResolvedValue([{
+        id: 7,
+        name: '多角色人员',
+        empNo: 'EMP007',
+        joinDate: '2026-07-01',
+        groupName: '功能测试组',
+        testType: '功能测试',
+        initialCoefficient: 0.3,
+        currentCoefficient: 0.3,
+        status: 'active',
+        roles: ['testManager', 'resourceManager'],
+        familiarModules: [],
+      }]);
+      vi.spyOn(api, 'getStaffRolesByEmpNo').mockRejectedValue(new Error('角色服务不可用'));
+      const updateStaff = vi.spyOn(api, 'updateStaff').mockResolvedValue({});
+      render(<StaffManagement />);
+      const user = userEvent.setup();
+
+      await user.click(await screen.findByText('编辑'));
+      expect(await screen.findByRole('dialog')).toBeInTheDocument();
+      const roleSelector = screen.getByRole('combobox', { name: '角色' });
+      expect(roleSelector).toBeEnabled();
+      expect(roleSelector.closest('.ant-select')).toHaveTextContent(/测试经理|testManager/);
+      expect(roleSelector.closest('.ant-select')).toHaveTextContent(/资源主管|resourceManager/);
+      await user.click(screen.getByRole('button', { name: /保存/ }));
+
+      await waitFor(() => expect(updateStaff).toHaveBeenCalledTimes(1));
+      expect(updateStaff.mock.calls[0][1]).toMatchObject({
+        roles: ['testManager', 'resourceManager'],
+      });
+      expect(updateStaff.mock.calls[0][1]).not.toHaveProperty('role');
+    },
+  );
+
+  it('blocks edit when neither lookup nor record can establish existing roles', async () => {
+    vi.spyOn(api, 'getStaff').mockResolvedValue([{
+      id: 7,
+      name: '角色未知人员',
+      empNo: 'EMP007',
+      joinDate: '2026-07-01',
+      groupName: '功能测试组',
+      testType: '功能测试',
+      initialCoefficient: 0.3,
+      currentCoefficient: 0.3,
+      status: 'active',
+      familiarModules: [],
+    }]);
+    vi.spyOn(api, 'getStaffRolesByEmpNo').mockRejectedValue(new Error('角色服务不可用'));
+    const updateStaff = vi.spyOn(api, 'updateStaff').mockResolvedValue({});
+    const showError = vi.spyOn(message, 'error');
+    render(<StaffManagement />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText('编辑'));
+
+    await waitFor(() => expect(showError).toHaveBeenCalledWith('人员角色加载失败，请重试'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(updateStaff).not.toHaveBeenCalled();
+  });
+
   it('preserves disabled historical modules and submits cross-group structured module ids', async () => {
     const updateStaff = vi.spyOn(api, 'updateStaff').mockResolvedValue({});
     render(<StaffManagement />);
