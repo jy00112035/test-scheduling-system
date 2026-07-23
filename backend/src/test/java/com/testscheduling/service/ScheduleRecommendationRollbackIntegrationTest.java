@@ -87,6 +87,7 @@ class ScheduleRecommendationRollbackIntegrationTest {
         demand.setSubmittedBy("manager");
         demand.setStartDate(LocalDateTime.of(2026, 7, 22, 0, 0));
         demand.setEndDate(LocalDateTime.of(2026, 7, 22, 23, 59));
+        demand.setStatus(TestDemand.DemandStatus.pending);
         return demandRepository.saveAndFlush(demand);
     }
 

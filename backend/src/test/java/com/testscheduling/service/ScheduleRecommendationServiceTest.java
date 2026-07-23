@@ -302,6 +302,25 @@ class ScheduleRecommendationServiceTest {
     }
 
     @Test
+    void invalidDemandStatusIsRejectedBeforeExistingDraftReplacement() {
+        TestDemand demand = demand();
+        demand.setStatus(TestDemand.DemandStatus.rejected);
+        demandRepository.saveAndFlush(demand);
+        DemandManpowerDetail detail = detail(demand.getId(), "状态拒绝 Task7", "1.0");
+        TestStaff staff = staff("状态拒绝人员 Task7", "状态拒绝 Task7");
+        Schedule draft = persistedSchedule(demand, detail, staff, 50, false);
+        draft = scheduleRepository.saveAndFlush(draft);
+        ScheduleRecommendationRequest request = request(demand.getId());
+        request.setReplaceExistingDrafts(true);
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service.recommend(request));
+
+        assertEquals("DEMAND_NOT_SCHEDULABLE", error.getErrorCode());
+        assertTrue(scheduleRepository.existsById(draft.getId()));
+    }
+
+    @Test
     void rejectsSpecialStructureBeforeAllocation() {
         TestModuleConfig module = module("结构模块 Task7", "结构组 Task7");
         TestDemand demand = demand();

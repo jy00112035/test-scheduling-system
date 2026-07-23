@@ -27,6 +27,7 @@ import jakarta.persistence.PessimisticLockException;
 import org.hibernate.exception.LockAcquisitionException;
 import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.stereotype.Service;
 
@@ -96,6 +97,7 @@ public class ScheduleRecommendationService {
         this.eligibilityService = eligibilityService;
         this.fulfillmentService = fulfillmentService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.transactionTemplate.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     }
 
     public ScheduleRecommendationResponse recommend(ScheduleRecommendationRequest request) {
@@ -129,6 +131,7 @@ public class ScheduleRecommendationService {
         List<TestDemand> lockedDemands = demandRepository.findAllByIdInForUpdate(ids);
         requireAllRows(ids, lockedDemands.stream().map(TestDemand::getId).toList(),
                 "DEMAND_NOT_FOUND", "测试需求不存在");
+        lockedDemands.forEach(eligibilityService::requireSchedulable);
         Map<Long, TestDemand> demandsById = lockedDemands.stream()
                 .collect(Collectors.toMap(TestDemand::getId, Function.identity(), (left, right) -> left,
                         LinkedHashMap::new));

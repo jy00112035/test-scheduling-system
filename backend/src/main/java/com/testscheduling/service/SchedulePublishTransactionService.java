@@ -11,6 +11,7 @@ import com.testscheduling.repository.TestStaffRepository;
 import com.testscheduling.dto.DemandFulfillmentResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -52,10 +53,13 @@ public class SchedulePublishTransactionService {
         this.auditLogService = auditLogService;
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(
+        propagation = Propagation.REQUIRES_NEW,
+        isolation = Isolation.READ_COMMITTED)
     public int publishInNewTransaction(Long demandId) {
         TestDemand demand = demandRepository.findByIdForUpdate(demandId)
             .orElseThrow(() -> error("DEMAND_NOT_FOUND", "测试需求不存在"));
+        eligibilityService.requireSchedulable(demand);
 
         List<Schedule> snapshot = scheduleRepository.findByDemandId(demandId);
         if (snapshot.isEmpty()) {

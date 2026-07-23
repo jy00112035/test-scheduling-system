@@ -118,6 +118,7 @@ class ScheduleRecommendationPublicOrderingIntegrationTest {
         demand.setSubmittedBy("manager");
         demand.setStartDate(DATE.atStartOfDay());
         demand.setEndDate(DATE.atTime(23, 59));
+        demand.setStatus(TestDemand.DemandStatus.pending);
         return demandRepository.saveAndFlush(demand);
     }
 

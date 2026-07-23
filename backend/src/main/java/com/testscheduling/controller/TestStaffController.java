@@ -6,6 +6,7 @@ import com.testscheduling.dto.StaffCreateResponse;
 import com.testscheduling.dto.StaffRequest;
 import com.testscheduling.entity.TestStaff;
 import com.testscheduling.entity.User;
+import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.UserRepository;
 import com.testscheduling.security.RequestRoleGuard;
 import com.testscheduling.service.TestStaffService;
@@ -31,10 +32,12 @@ public class TestStaffController {
     @Autowired
     private RequestRoleGuard roleGuard;
 
-    private boolean isOnlyTestLead() {
+    private boolean isRestrictedTestLead() {
         Object rolesObj = request.getAttribute("roles");
         if (rolesObj instanceof List<?> list) {
-            return list.contains("testLead") && list.size() == 1;
+            return list.contains("testLead")
+                && list.stream().noneMatch(role -> List.of(
+                    "admin", "resourceManager", "projectManager", "fieldAdmin").contains(role));
         }
         return false;
     }
@@ -93,6 +96,8 @@ public class TestStaffController {
 
     @PostMapping
     public ApiResponse<StaffCreateResponse> createStaff(@RequestBody StaffRequest request) {
+        requireStaffMutationRole();
+        enforceTestLeadScope(request.getTestType());
         try {
             return ApiResponse.success("创建成功", testStaffService.create(request));
         } catch (Exception e) {
@@ -102,14 +107,13 @@ public class TestStaffController {
 
     @PutMapping("/{id}")
     public ApiResponse<TestStaff> updateStaff(@PathVariable Long id, @RequestBody StaffRequest request) {
+        requireStaffMutationRole();
+        if (isRestrictedTestLead()) {
+            TestStaff staff = testStaffService.findById(id);
+            enforceTestLeadScope(staff.getTestType());
+            enforceTestLeadScope(request.getTestType());
+        }
         try {
-            if (isOnlyTestLead()) {
-                TestStaff staff = testStaffService.findById(id);
-                String currentUserTestType = getCurrentUserTestType();
-                if (currentUserTestType != null && !currentUserTestType.equals(staff.getTestType())) {
-                    return ApiResponse.error("无权编辑其他小组的人员");
-                }
-            }
             return ApiResponse.success("更新成功", testStaffService.update(id, request));
         } catch (Exception e) {
             return ApiResponse.error(e.getMessage());
@@ -118,10 +122,9 @@ public class TestStaffController {
 
     @DeleteMapping("/batch")
     public ApiResponse<Void> deleteStaffsBatch(@RequestBody List<Long> ids) {
+        requireStaffMutationRole();
+        denyTestLeadDelete();
         try {
-            if (isOnlyTestLead()) {
-                return ApiResponse.error("无权删除人员");
-            }
             testStaffService.deleteBatch(ids);
             return ApiResponse.success("批量删除成功", null);
         } catch (Exception e) {
@@ -131,14 +134,38 @@ public class TestStaffController {
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteStaff(@PathVariable Long id) {
+        requireStaffMutationRole();
+        denyTestLeadDelete();
         try {
-            if (isOnlyTestLead()) {
-                return ApiResponse.error("无权删除人员");
-            }
             testStaffService.delete(id);
             return ApiResponse.success("删除成功", null);
         } catch (Exception e) {
             return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    private void requireStaffMutationRole() {
+        roleGuard.requireAny("resourceManager", "projectManager", "fieldAdmin", "testLead");
+    }
+
+    private void enforceTestLeadScope(String staffTestType) {
+        if (!isRestrictedTestLead()) {
+            return;
+        }
+        String currentUserTestType = getCurrentUserTestType();
+        if (currentUserTestType == null || currentUserTestType.isBlank()) {
+            throw new BusinessException(
+                "TEST_LEAD_SCOPE_UNVERIFIED", "无法确认测试组长负责的测试类型");
+        }
+        if (staffTestType == null || !currentUserTestType.equals(staffTestType)) {
+            throw new BusinessException(
+                "TEST_LEAD_SCOPE_FORBIDDEN", "无权管理其他测试类型的人员");
+        }
+    }
+
+    private void denyTestLeadDelete() {
+        if (isRestrictedTestLead()) {
+            throw new BusinessException("TEST_LEAD_SCOPE_FORBIDDEN", "测试组长无权删除人员");
         }
     }
 }

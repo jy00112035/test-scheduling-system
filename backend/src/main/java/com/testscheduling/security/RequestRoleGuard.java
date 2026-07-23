@@ -29,7 +29,8 @@ public class RequestRoleGuard {
         }
 
         boolean permitted = Arrays.stream(requiredRoles)
-            .anyMatch(required -> roles.stream().anyMatch(required::equals));
+            .anyMatch(required -> roles.stream().anyMatch(required::equals))
+            || roles.stream().anyMatch("admin"::equals);
         if (!permitted) {
             throw forbidden();
         }

@@ -102,6 +102,7 @@ class ScheduleRecommendationBulkLockIntegrationTest {
         demand.setSubmittedBy("manager");
         demand.setStartDate(LocalDate.of(2026, 7, 22).atStartOfDay());
         demand.setEndDate(LocalDate.of(2026, 7, 22).atTime(23, 59));
+        demand.setStatus(TestDemand.DemandStatus.pending);
         return demandRepository.saveAndFlush(demand);
     }
 

@@ -4,6 +4,7 @@ import com.testscheduling.config.GlobalExceptionHandler;
 import com.testscheduling.entity.DemandSpecialModule;
 import com.testscheduling.entity.TestDemand;
 import com.testscheduling.exception.BusinessException;
+import com.testscheduling.security.RequestRoleGuard;
 import com.testscheduling.service.TestDemandService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,7 @@ class TestDemandControllerTest {
     void setUp() {
         TestDemandController controller = new TestDemandController();
         ReflectionTestUtils.setField(controller, "testDemandService", service);
+        ReflectionTestUtils.setField(controller, "roleGuard", mock(RequestRoleGuard.class));
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new GlobalExceptionHandler())
             .build();

@@ -332,6 +332,7 @@ class SchedulePublishIntegrationTest {
         demand.setManpowerDemand(BigDecimal.valueOf(manpower));
         demand.setTestDeviceCount(10);
         demand.setConfidential(false);
+        demand.setStatus(TestDemand.DemandStatus.pending);
         return demandRepository.saveAndFlush(demand);
     }
 

@@ -77,6 +77,22 @@ class SchedulePublishTransactionServiceTest {
     }
 
     @Test
+    void invalidDemandStatusIsRejectedBeforeScheduleOrFulfillmentReads() {
+        TestDemand demand = demand(10L);
+        demand.setStatus(TestDemand.DemandStatus.rejected);
+        when(demandRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(demand));
+        org.mockito.Mockito.doCallRealMethod().when(eligibilityService)
+            .requireSchedulable(any(TestDemand.class));
+
+        BusinessException error = assertThrows(BusinessException.class,
+            () -> service().publishInNewTransaction(10L));
+
+        assertEquals("DEMAND_NOT_SCHEDULABLE", error.getErrorCode());
+        verify(scheduleRepository, never()).findByDemandId(any());
+        verify(fulfillmentService, never()).calculate(any(Long.class));
+    }
+
+    @Test
     void lateValidationFailurePublishesNoRows() {
         TestDemand demand = demand(10L);
         Schedule first = schedule(1L, 10L, 20L);
@@ -176,6 +192,7 @@ class SchedulePublishTransactionServiceTest {
     private TestDemand demand(Long id) {
         TestDemand demand = new TestDemand();
         demand.setId(id);
+        demand.setStatus(TestDemand.DemandStatus.pending);
         return demand;
     }
 

@@ -70,6 +70,28 @@ class ScheduleEligibilityServiceTest {
     }
 
     @Test
+    void permitsOnlyPendingAndScheduledDemandStatuses() {
+        Schedule schedule = generalSchedule();
+        TestDemand demand = stubBaseEligibility("功能测试");
+
+        for (TestDemand.DemandStatus allowed : List.of(
+                TestDemand.DemandStatus.pending, TestDemand.DemandStatus.scheduled)) {
+            demand.setStatus(allowed);
+            assertDoesNotThrow(() -> service.validate(schedule, null), allowed.name());
+        }
+
+        for (TestDemand.DemandStatus denied : List.of(
+                TestDemand.DemandStatus.submitted,
+                TestDemand.DemandStatus.completed,
+                TestDemand.DemandStatus.rejected)) {
+            demand.setStatus(denied);
+            BusinessException error = assertThrows(BusinessException.class,
+                () -> service.validate(schedule, null), denied.name());
+            assertEquals("DEMAND_NOT_SCHEDULABLE", error.getErrorCode());
+        }
+    }
+
+    @Test
     void allowsCrossGroupStaffWhoKnowsModule() {
         Schedule schedule = specialSchedule();
         stubBaseEligibility("自动化测试");
@@ -314,6 +336,7 @@ class ScheduleEligibilityServiceTest {
         demand.setStartDate(LocalDateTime.of(2026, 7, 20, 0, 0));
         demand.setEndDate(LocalDateTime.of(2026, 7, 31, 0, 0));
         demand.setConfidential(false);
+        demand.setStatus(TestDemand.DemandStatus.pending);
 
         DemandManpowerDetail detail = new DemandManpowerDetail();
         detail.setId(301L);

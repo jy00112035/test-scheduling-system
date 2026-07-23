@@ -2,6 +2,7 @@ package com.testscheduling.controller;
 
 import com.testscheduling.dto.ApiResponse;
 import com.testscheduling.entity.TestDemand;
+import com.testscheduling.security.RequestRoleGuard;
 import com.testscheduling.service.TestDemandService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -15,6 +16,9 @@ public class TestDemandController {
 
     @Autowired
     private TestDemandService testDemandService;
+
+    @Autowired
+    private RequestRoleGuard roleGuard;
 
     @GetMapping
     public ApiResponse<List<TestDemand>> getAllDemands() {
@@ -37,22 +41,26 @@ public class TestDemandController {
 
     @PostMapping
     public ApiResponse<TestDemand> createDemand(@RequestBody TestDemand demand) {
+        requireDemandEditor();
         return ApiResponse.success("创建成功", testDemandService.create(demand));
     }
 
     @PutMapping("/{id}")
     public ApiResponse<TestDemand> updateDemand(@PathVariable Long id, @RequestBody TestDemand demand) {
+        requireDemandEditor();
         return ApiResponse.success("更新成功", testDemandService.update(id, demand));
     }
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteDemand(@PathVariable Long id) {
+        requireDemandEditor();
         testDemandService.delete(id);
         return ApiResponse.success("删除成功", null);
     }
 
     @PostMapping("/{id}/close")
     public ApiResponse<TestDemand> closeDemand(@PathVariable Long id) {
+        requireDemandEditor();
         try {
             return ApiResponse.success("关闭成功", testDemandService.close(id));
         } catch (Exception e) {
@@ -67,6 +75,7 @@ public class TestDemandController {
 
     @PutMapping("/{id}/approve")
     public ApiResponse<TestDemand> approveDemand(@PathVariable Long id) {
+        requireDemandApprover();
         try {
             return ApiResponse.success("已批准", testDemandService.approveDemand(id));
         } catch (Exception e) {
@@ -76,6 +85,7 @@ public class TestDemandController {
 
     @PutMapping("/{id}/reject")
     public ApiResponse<Void> rejectDemand(@PathVariable Long id) {
+        requireDemandApprover();
         try {
             testDemandService.rejectDemand(id);
             return ApiResponse.success("已退回", null);
@@ -86,11 +96,13 @@ public class TestDemandController {
 
     @PutMapping("/{id}/approve-with-changes")
     public ApiResponse<TestDemand> approveWithChanges(@PathVariable Long id, @RequestBody TestDemand demand) {
+        requireDemandApprover();
         return ApiResponse.success("修改并批准成功", testDemandService.approveWithChanges(id, demand));
     }
 
     @PutMapping("/{id}/priority")
     public ApiResponse<TestDemand> updatePriority(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        requireDemandEditor();
         try {
             String priority = body.get("priority");
             return ApiResponse.success("优先级更新成功", testDemandService.updatePriority(id, priority));
@@ -101,6 +113,7 @@ public class TestDemandController {
 
     @PutMapping("/batch-approve")
     public ApiResponse<Void> batchApproveDemands(@RequestBody List<Long> ids) {
+        requireDemandApprover();
         try {
             testDemandService.batchApproveDemands(ids);
             return ApiResponse.success("批量批准成功", null);
@@ -111,11 +124,21 @@ public class TestDemandController {
 
     @PutMapping("/batch-reject")
     public ApiResponse<Void> batchRejectDemands(@RequestBody List<Long> ids) {
+        requireDemandApprover();
         try {
             testDemandService.batchRejectDemands(ids);
             return ApiResponse.success("批量退回成功", null);
         } catch (Exception e) {
             return ApiResponse.error(e.getMessage());
         }
+    }
+
+    private void requireDemandEditor() {
+        roleGuard.requireAny(
+            "testManager", "resourceManager", "projectManager", "fieldAdmin", "testLead");
+    }
+
+    private void requireDemandApprover() {
+        roleGuard.requireAny("projectManager", "fieldAdmin");
     }
 }

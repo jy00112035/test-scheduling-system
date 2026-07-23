@@ -27,6 +27,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -42,6 +43,8 @@ public class ScheduleEligibilityService {
 
     private static final BigDecimal ONE_HUNDRED = new BigDecimal("100");
     private static final int BULK_QUERY_CHUNK_SIZE = 500;
+    private static final Set<TestDemand.DemandStatus> SCHEDULABLE_STATUSES = EnumSet.of(
+        TestDemand.DemandStatus.pending, TestDemand.DemandStatus.scheduled);
 
     private final TestDemandRepository demandRepository;
     private final DemandManpowerDetailRepository detailRepository;
@@ -86,6 +89,7 @@ public class ScheduleEligibilityService {
         if (demand == null) {
             throw error("DEMAND_NOT_FOUND", "测试需求不存在");
         }
+        requireSchedulable(demand);
         TestStaff staff = context.staff.get(schedule.getStaffId());
         if (staff == null) {
             throw error("STAFF_NOT_FOUND", "测试人员不存在");
@@ -139,6 +143,12 @@ public class ScheduleEligibilityService {
     public void validateForPublish(
             Schedule schedule, ValidationContext context) {
         validate(schedule, schedule.getId(), context);
+    }
+
+    public void requireSchedulable(TestDemand demand) {
+        if (demand == null || !SCHEDULABLE_STATUSES.contains(demand.getStatus())) {
+            throw error("DEMAND_NOT_SCHEDULABLE", "当前需求状态不允许排班或发布");
+        }
     }
 
     public ValidationContext prepareContext(List<Schedule> input) {

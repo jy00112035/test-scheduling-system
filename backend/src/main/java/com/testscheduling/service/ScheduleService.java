@@ -13,6 +13,7 @@ import com.testscheduling.repository.TestStaffRepository;
 import com.testscheduling.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
@@ -78,14 +79,14 @@ public class ScheduleService {
         return scheduleRepository.findByStaffIdAndDateRange(staffId, startDate, endDate);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Schedule create(Schedule schedule) {
         lockScopes(Collections.singletonList(schedule));
         eligibilityService.validate(schedule, null);
         return scheduleRepository.save(schedule);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<Schedule> createBatch(List<Schedule> schedules) {
         if (schedules == null) {
             throw error("SCHEDULE_REQUIRED", "排班信息不能为空");
@@ -100,7 +101,7 @@ public class ScheduleService {
         return scheduleRepository.saveAll(schedules);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Schedule update(Long id, Schedule schedule) {
         Schedule existing = lockExisting(id, schedule.getStaffId());
         requireDraftMutable(existing);
@@ -123,7 +124,7 @@ public class ScheduleService {
         eligibilityService.validate(schedule, null);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Schedule move(Long id, Long staffId, LocalDate date, Integer percentage) {
         Schedule existing = lockExisting(id, staffId);
         requireDraftMutable(existing);
@@ -136,7 +137,7 @@ public class ScheduleService {
         return scheduleRepository.save(existing);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Schedule classifyHistorical(
             Long id, Long demandManpowerDetailId, Long demandSpecialModuleId) {
         // The locked schedule-scope query acquires the demand first. It is followed by
@@ -162,7 +163,7 @@ public class ScheduleService {
         return scheduleRepository.save(existing);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void delete(Long id) {
         Schedule snapshot = findById(id);
         lockDemandIds(List.of(snapshot.getDemandId()));
@@ -176,12 +177,12 @@ public class ScheduleService {
         scheduleRepository.delete(existing);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void deleteByDemandId(Long demandId) {
         deleteByDemandId(demandId, ScheduleDeleteScope.DRAFT_ONLY);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void deleteByDemandId(Long demandId, ScheduleDeleteScope scope) {
         lockDemandIds(List.of(demandId));
         scheduleRepository.findByDemandIdForUpdate(demandId);
@@ -293,7 +294,7 @@ public class ScheduleService {
         }
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void unpublishByDemandId(Long demandId) {
         demandRepository.findByIdForUpdate(demandId)
             .orElseThrow(() -> error("DEMAND_NOT_FOUND", "测试需求不存在"));

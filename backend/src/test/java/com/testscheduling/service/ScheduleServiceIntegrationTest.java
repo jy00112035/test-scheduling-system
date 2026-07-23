@@ -434,6 +434,7 @@ class ScheduleServiceIntegrationTest {
         demand.setManpowerDemand(BigDecimal.valueOf(manpower));
         demand.setConfidential(false);
         demand.setTestDeviceCount(devices);
+        demand.setStatus(TestDemand.DemandStatus.pending);
         return demandRepository.saveAndFlush(demand);
     }
 

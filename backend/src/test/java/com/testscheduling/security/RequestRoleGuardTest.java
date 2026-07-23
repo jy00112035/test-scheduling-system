@@ -80,6 +80,16 @@ class RequestRoleGuardTest {
         assertDoesNotThrow(() -> guard.requireAny("fieldAdmin"));
     }
 
+    @Test
+    void adminSupersedesEndpointSpecificRoles() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute("username", "admin");
+        request.setAttribute("roles", List.of("admin"));
+        bindRequest(request);
+
+        assertDoesNotThrow(() -> guard.requireAny("resourceManager", "fieldAdmin"));
+    }
+
     private static void bindRequest(MockHttpServletRequest request) {
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
     }

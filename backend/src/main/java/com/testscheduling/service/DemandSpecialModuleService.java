@@ -38,12 +38,14 @@ public class DemandSpecialModuleService {
         this.demandRepository = demandRepository;
     }
 
+    @Transactional
     public void validateNew(
             List<DemandManpowerDetail> manpowerDetails,
             List<DemandSpecialModule> specialModuleDemands) {
         validate(manpowerDetails, specialModuleDemands, Map.of());
     }
 
+    @Transactional
     void validateReplacement(
             Long demandId,
             List<DemandManpowerDetail> manpowerDetails,
@@ -151,8 +153,9 @@ public class DemandSpecialModuleService {
             return;
         }
 
+        List<Long> orderedModuleIds = moduleIds.stream().sorted().toList();
         List<TestModuleConfig> configurations = BulkQuerySupport.fetchChunks(
-            new ArrayList<>(moduleIds), moduleRepository::findAllById);
+            orderedModuleIds, moduleRepository::findAllByIdInForUpdate);
         Map<Long, TestModuleConfig> configurationById = configurations.stream()
             .collect(Collectors.toMap(TestModuleConfig::getId, Function.identity()));
         if (configurationById.size() != moduleIds.size()) {

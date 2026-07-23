@@ -57,7 +57,7 @@ class DemandSpecialModuleServiceTest {
         DemandSpecialModule message = special(12L, "1.5");
         TestModuleConfig paymentConfig = module(11L, "支付模块", "功能测试", true);
         TestModuleConfig messageConfig = module(12L, "消息模块", "功能测试", true);
-        when(moduleRepository.findAllById(List.of(11L, 12L)))
+        when(moduleRepository.findAllByIdInForUpdate(List.of(11L, 12L)))
             .thenReturn(List.of(paymentConfig, messageConfig));
 
         BusinessException error = assertThrows(BusinessException.class,
@@ -157,7 +157,7 @@ class DemandSpecialModuleServiceTest {
     @Test
     void rejectsDisabledModuleForNewDemand() {
         DemandManpowerDetail group = group("功能测试", "8.0");
-        when(moduleRepository.findAllById(List.of(11L)))
+        when(moduleRepository.findAllByIdInForUpdate(List.of(11L)))
             .thenReturn(List.of(module(11L, "支付模块", "功能测试", false)));
 
         BusinessException error = assertThrows(BusinessException.class,
@@ -171,7 +171,7 @@ class DemandSpecialModuleServiceTest {
         DemandManpowerDetail group = group("性能测试", "8.0");
         DemandSpecialModule request = special(11L, "2.0");
         request.setTestType("性能测试");
-        when(moduleRepository.findAllById(List.of(11L)))
+        when(moduleRepository.findAllByIdInForUpdate(List.of(11L)))
             .thenReturn(List.of(module(11L, "支付模块", "功能测试", true)));
 
         BusinessException error = assertThrows(BusinessException.class,
@@ -212,7 +212,7 @@ class DemandSpecialModuleServiceTest {
         DemandSpecialModule request = special(11L, "2.0");
         request.setId(999L);
         request.setDemandId(888L);
-        when(moduleRepository.findAllById(List.of(11L)))
+        when(moduleRepository.findAllByIdInForUpdate(List.of(11L)))
             .thenReturn(List.of(module(11L, "支付模块", "功能测试", true)));
         when(specialRepository.findByDemandIdOrderByIdAsc(77L)).thenReturn(List.of());
         when(specialRepository.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -227,6 +227,24 @@ class DemandSpecialModuleServiceTest {
         writes.verify(specialRepository).deleteByDemandId(77L);
         writes.verify(specialRepository).flush();
         writes.verify(specialRepository).saveAll(anyList());
+    }
+
+    @Test
+    void validationLocksDistinctModuleIdsInDeterministicOrderAndUsesAuthoritativeIdentity() {
+        DemandManpowerDetail group = group("功能测试", "8.0");
+        DemandSpecialModule second = special(12L, "1.0");
+        second.setTestType("伪造分组");
+        DemandSpecialModule first = special(11L, "1.0");
+        first.setTestType("伪造分组");
+        when(moduleRepository.findAllByIdInForUpdate(List.of(11L, 12L))).thenReturn(List.of(
+            module(11L, "支付模块", "功能测试", true),
+            module(12L, "消息模块", "功能测试", true)));
+
+        service.validateNew(List.of(group), List.of(second, first));
+
+        verify(moduleRepository).findAllByIdInForUpdate(List.of(11L, 12L));
+        assertEquals("功能测试", first.getTestType());
+        assertEquals("功能测试", second.getTestType());
     }
 
     @Test
