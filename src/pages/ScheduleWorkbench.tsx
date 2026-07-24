@@ -1234,7 +1234,7 @@ const ScheduleWorkbench: React.FC = () => {
   const renderDemandSelectionList = () => {
     const eligibleDemands = demands.filter(d =>
       (d.manpowerFullySatisfied !== true || d.requiresHistoricalClassification === true)
-      && (d.status === 'pending' || d.status === 'scheduled'));
+      && (d.status === 'pending' || d.status === 'scheduled' || d.status === 'revision_pending'));
     const allEligibleIds = eligibleDemands.map(d => d.id);
     const allSelected = allEligibleIds.length > 0 && allEligibleIds.every(id => selectedDemandIds.has(id));
 
@@ -1305,7 +1305,7 @@ const ScheduleWorkbench: React.FC = () => {
   const getRecommendationEligibleDemandIds = () => demands
     .filter(demand => (demand.manpowerFullySatisfied !== true
       || demand.requiresHistoricalClassification === true)
-      && (demand.status === 'pending' || demand.status === 'scheduled'))
+      && (demand.status === 'pending' || demand.status === 'scheduled' || demand.status === 'revision_pending'))
     .map(demand => demand.id);
 
   const handleDateRecommend = () => {
@@ -1941,11 +1941,11 @@ const ScheduleWorkbench: React.FC = () => {
             <Descriptions.Item label="样机数量">{detailDemand.testDeviceCount != null ? `${detailDemand.testDeviceCount} 台` : '-'}</Descriptions.Item>
             <Descriptions.Item label="需求状态" span={2}>
               <Tag color={(() => {
-                const sm: Record<string, string> = { submitted: 'purple', pending: 'orange', scheduled: 'blue', completed: 'green', rejected: 'red' };
+                const sm: Record<string, string> = { submitted: 'purple', pending: 'orange', scheduled: 'blue', completed: 'green', rejected: 'red', revision_pending: 'cyan' };
                 return sm[detailDemand.status] || 'default';
               })()}>
                 {(() => {
-                  const sl: Record<string, string> = { submitted: '待审批', pending: '待排期', scheduled: '已排期', completed: '已完成', rejected: '已退回' };
+                  const sl: Record<string, string> = { submitted: '待审批', pending: '待排期', scheduled: '已排期', completed: '已完成', rejected: '已退回', revision_pending: '变更待审批' };
                   return sl[detailDemand.status] || detailDemand.status;
                 })()}
               </Tag>

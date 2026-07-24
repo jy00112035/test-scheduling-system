@@ -1,5 +1,8 @@
 package com.testscheduling.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.testscheduling.dto.DemandFulfillmentResponse;
 import com.testscheduling.dto.RevisionDiffResponse;
 import com.testscheduling.dto.RevisionRequest;
@@ -11,6 +14,7 @@ import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.DemandManpowerDetailRepository;
 import com.testscheduling.repository.ScheduleRepository;
 import com.testscheduling.repository.TestDemandRepository;
+import com.testscheduling.repository.TestStaffRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,6 +27,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -38,6 +43,8 @@ public class TestDemandService {
     private final AuditLogService auditLogService;
     private final DemandFulfillmentService fulfillmentService;
     private final FieldConfigService fieldConfigService;
+    private final ObjectMapper objectMapper;
+    private final TestStaffRepository testStaffRepository;
 
     public TestDemandService(
             TestDemandRepository testDemandRepository,
@@ -46,7 +53,9 @@ public class TestDemandService {
             ScheduleRepository scheduleRepository,
             AuditLogService auditLogService,
             DemandFulfillmentService fulfillmentService,
-            FieldConfigService fieldConfigService) {
+            FieldConfigService fieldConfigService,
+            ObjectMapper objectMapper,
+            TestStaffRepository testStaffRepository) {
         this.testDemandRepository = testDemandRepository;
         this.detailRepository = detailRepository;
         this.specialModuleService = specialModuleService;
@@ -54,6 +63,8 @@ public class TestDemandService {
         this.auditLogService = auditLogService;
         this.fulfillmentService = fulfillmentService;
         this.fieldConfigService = fieldConfigService;
+        this.objectMapper = objectMapper;
+        this.testStaffRepository = testStaffRepository;
     }
 
     @Transactional(readOnly = true)
@@ -76,7 +87,8 @@ public class TestDemandService {
     @Transactional(readOnly = true)
     public List<TestDemand> findPendingAndScheduled() {
         return enrichWithDetails(testDemandRepository.findByStatusIn(
-            List.of(TestDemand.DemandStatus.pending, TestDemand.DemandStatus.scheduled)));
+            List.of(TestDemand.DemandStatus.pending, TestDemand.DemandStatus.scheduled,
+                TestDemand.DemandStatus.revision_pending)));
     }
 
     @Transactional
@@ -272,6 +284,14 @@ public class TestDemandService {
         TestDemand demand = lockedDemand(id);
 
         // 1. 验证状态：只能编辑 pending 或 scheduled 状态
+        if (demand.getStatus() == TestDemand.DemandStatus.completed) {
+            throw new BusinessException("DEMAND_STATUS_TRANSITION_INVALID",
+                "已完成的需求不能提交变更");
+        }
+        if (demand.getStatus() == TestDemand.DemandStatus.revision_pending) {
+            throw new BusinessException("DEMAND_STATUS_TRANSITION_INVALID",
+                "需求已在变更审批中，请勿重复提交");
+        }
         if (demand.getStatus() != TestDemand.DemandStatus.pending
                 && demand.getStatus() != TestDemand.DemandStatus.scheduled) {
             throw new BusinessException("DEMAND_STATUS_TRANSITION_INVALID",
@@ -319,7 +339,15 @@ public class TestDemandService {
             }
         }
 
-        // 4. 自动删除周期外和超额排班
+        // 4. 保存变更前的原始快照
+        RevisionDiffResponse.DemandSnapshot originalSnapshot = new RevisionDiffResponse.DemandSnapshot();
+        originalSnapshot.setStartDate(demand.getStartDate());
+        originalSnapshot.setEndDate(demand.getEndDate());
+        originalSnapshot.setManpowerDemand(demand.getManpowerDemand());
+        originalSnapshot.setManpowerDetails(new ArrayList<>(demand.getManpowerDetails()));
+        originalSnapshot.setSpecialModuleDemands(new ArrayList<>(demand.getSpecialModuleDemands()));
+
+        // 5. 自动删除周期外和超额排班
         List<Schedule> deletedSchedules = deleteExcessSchedules(
             id, request.getStartDate(), request.getEndDate(),
             requestedDetails, requestedSpecials, allSchedules);
@@ -336,6 +364,10 @@ public class TestDemandService {
         // 7. 状态变更为 revision_pending
         demand.setStatus(TestDemand.DemandStatus.revision_pending);
         demand.setSubmittedBy(requireSubmitter(submittedBy));
+
+        // 7.1 保存原始快照和删除的排班信息到数据库
+        demand.setRevisionOriginalSnapshot(serializeSnapshot(originalSnapshot));
+        demand.setRevisionDeletedSchedules(serializeDeletedSchedules(deletedSchedules));
 
         TestDemand saved = testDemandRepository.save(demand);
 
@@ -474,9 +506,6 @@ public class TestDemandService {
                 "需求不在变更审批状态");
         }
 
-        // 获取当前排班（用于显示已删除的排班）
-        List<Schedule> currentSchedules = scheduleRepository.findByDemandId(id);
-
         // 构建变更对比响应
         RevisionDiffResponse response = new RevisionDiffResponse();
         response.setDemandId(id);
@@ -484,7 +513,12 @@ public class TestDemandService {
         response.setSubmittedBy(demand.getSubmittedBy());
         response.setSubmittedAt(demand.getUpdatedAt());
 
-        // 原始快照（从审计日志或数据库历史中获取，这里简化处理）
+        // 原始快照（从数据库存储的 JSON 反序列化）
+        RevisionDiffResponse.DemandSnapshot original =
+            deserializeSnapshot(demand.getRevisionOriginalSnapshot());
+        response.setOriginal(original);
+
+        // 当前（修改后的）快照
         RevisionDiffResponse.DemandSnapshot modified = new RevisionDiffResponse.DemandSnapshot();
         modified.setStartDate(demand.getStartDate());
         modified.setEndDate(demand.getEndDate());
@@ -492,6 +526,13 @@ public class TestDemandService {
         modified.setManpowerDetails(demand.getManpowerDetails());
         modified.setSpecialModuleDemands(demand.getSpecialModuleDemands());
         response.setModified(modified);
+
+        // 计算变更字段差异
+        response.setChanges(computeChanges(original, modified));
+
+        // 反序列化被删除的排班信息
+        response.setDeletedSchedules(
+            deserializeDeletedSchedules(demand.getRevisionDeletedSchedules()));
 
         return response;
     }
@@ -767,4 +808,155 @@ public class TestDemandService {
 
     private record SpecialModuleAuditValue(Long moduleId, BigDecimal manpowerDemand) {
     }
+
+    // ========== 变更快照序列化/反序列化 ==========
+
+    private String serializeSnapshot(RevisionDiffResponse.DemandSnapshot snapshot) {
+        try {
+            return objectMapper.writeValueAsString(snapshot);
+        } catch (JsonProcessingException e) {
+            throw new BusinessException("SERIALIZATION_ERROR", "保存变更快照失败");
+        }
+    }
+
+    private RevisionDiffResponse.DemandSnapshot deserializeSnapshot(String json) {
+        if (json == null || json.isBlank()) {
+            return new RevisionDiffResponse.DemandSnapshot();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<>() {});
+        } catch (JsonProcessingException e) {
+            return new RevisionDiffResponse.DemandSnapshot();
+        }
+    }
+
+    private String serializeDeletedSchedules(List<Schedule> deleted) {
+        try {
+            List<Map<String, Object>> infoList = deleted.stream().map(s -> {
+                Map<String, Object> info = new LinkedHashMap<>();
+                info.put("id", s.getId());
+                info.put("staffId", s.getStaffId());
+                info.put("date", s.getDate() != null ? s.getDate().toString() : null);
+                info.put("percentage", s.getPercentage());
+                info.put("demandManpowerDetailId", s.getDemandManpowerDetailId());
+                info.put("demandSpecialModuleId", s.getDemandSpecialModuleId());
+                return info;
+            }).toList();
+            return objectMapper.writeValueAsString(infoList);
+        } catch (JsonProcessingException e) {
+            return "[]";
+        }
+    }
+
+    private List<RevisionDiffResponse.DeletedScheduleInfo> deserializeDeletedSchedules(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            List<Map<String, Object>> rawList = objectMapper.readValue(
+                json, new TypeReference<>() {});
+            return rawList.stream().map(m -> {
+                RevisionDiffResponse.DeletedScheduleInfo info = new RevisionDiffResponse.DeletedScheduleInfo();
+                info.setId(toLong(m.get("id")));
+                // 通过 staffId 查询人员名称
+                Long staffId = toLong(m.get("staffId"));
+                if (staffId != null) {
+                    try {
+                        var staff = testStaffRepository.findById(staffId);
+                        info.setStaffName(staff.map(s -> s.getName()).orElse("未知"));
+                    } catch (Exception e) {
+                        info.setStaffName("未知");
+                    }
+                }
+                String dateStr = (String) m.get("date");
+                if (dateStr != null) {
+                    info.setDate(java.time.LocalDate.parse(dateStr).atStartOfDay());
+                }
+                info.setPercentage(toInt(m.get("percentage")));
+                info.setReason("变更导致排班超出范围或配额");
+                return info;
+            }).toList();
+        } catch (JsonProcessingException e) {
+            return List.of();
+        }
+    }
+
+    private Long toLong(Object value) {
+        if (value instanceof Number n) return n.longValue();
+        if (value instanceof String s && !s.isBlank()) {
+            try { return Long.parseLong(s); } catch (NumberFormatException e) { return null; }
+        }
+        return null;
+    }
+
+    private Integer toInt(Object value) {
+        if (value instanceof Number n) return n.intValue();
+        if (value instanceof String s && !s.isBlank()) {
+            try { return Integer.parseInt(s); } catch (NumberFormatException e) { return null; }
+        }
+        return null;
+    }
+
+    private List<RevisionDiffResponse.FieldChange> computeChanges(
+            RevisionDiffResponse.DemandSnapshot original,
+            RevisionDiffResponse.DemandSnapshot modified) {
+        List<RevisionDiffResponse.FieldChange> changes = new ArrayList<>();
+
+        if (original == null || modified == null) {
+            return changes;
+        }
+
+        // 比较测试周期
+        if (!Objects.equals(original.getStartDate(), modified.getStartDate())) {
+            changes.add(new RevisionDiffResponse.FieldChange(
+                "测试开始日期",
+                original.getStartDate() != null ? original.getStartDate().toLocalDate().toString() : null,
+                modified.getStartDate() != null ? modified.getStartDate().toLocalDate().toString() : null));
+        }
+        if (!Objects.equals(original.getEndDate(), modified.getEndDate())) {
+            changes.add(new RevisionDiffResponse.FieldChange(
+                "测试结束日期",
+                original.getEndDate() != null ? original.getEndDate().toLocalDate().toString() : null,
+                modified.getEndDate() != null ? modified.getEndDate().toLocalDate().toString() : null));
+        }
+
+        // 比较总人力需求
+        if (!Objects.equals(
+                normalized(original.getManpowerDemand()),
+                normalized(modified.getManpowerDemand()))) {
+            changes.add(new RevisionDiffResponse.FieldChange(
+                "总人力需求",
+                original.getManpowerDemand() + " 人天",
+                modified.getManpowerDemand() + " 人天"));
+        }
+
+        // 比较各测试类型的人力配额
+        Map<String, BigDecimal> originalQuotas = new LinkedHashMap<>();
+        if (original.getManpowerDetails() != null) {
+            for (DemandManpowerDetail d : original.getManpowerDetails()) {
+                originalQuotas.put(d.getTestType(), d.getManpowerDemand());
+            }
+        }
+        Map<String, BigDecimal> modifiedQuotas = new LinkedHashMap<>();
+        if (modified.getManpowerDetails() != null) {
+            for (DemandManpowerDetail d : modified.getManpowerDetails()) {
+                modifiedQuotas.put(d.getTestType(), d.getManpowerDemand());
+            }
+        }
+        java.util.Set<String> allTestTypes = new java.util.LinkedHashSet<>(originalQuotas.keySet());
+        allTestTypes.addAll(modifiedQuotas.keySet());
+        for (String testType : allTestTypes) {
+            BigDecimal oldVal = originalQuotas.get(testType);
+            BigDecimal newVal = modifiedQuotas.get(testType);
+            if (!Objects.equals(normalized(oldVal), normalized(newVal))) {
+                changes.add(new RevisionDiffResponse.FieldChange(
+                    testType + " 人力配额",
+                    (oldVal != null ? oldVal + " 人天" : "无"),
+                    (newVal != null ? newVal + " 人天" : "无")));
+            }
+        }
+
+        return changes;
+    }
+
 }

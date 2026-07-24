@@ -4,6 +4,7 @@ import com.testscheduling.dto.ApiResponse;
 import com.testscheduling.dto.ErrorData;
 import com.testscheduling.exception.BusinessException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -15,9 +16,13 @@ import jakarta.servlet.http.HttpServletRequest;
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public ApiResponse<ErrorData> handleBusinessException(BusinessException e) {
-        return new ApiResponse<>(400, e.getMessage(), new ErrorData(e.getErrorCode()));
+    public ResponseEntity<ApiResponse<ErrorData>> handleBusinessException(BusinessException e) {
+        if ("FORBIDDEN".equals(e.getErrorCode())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(new ApiResponse<>(403, e.getMessage(), new ErrorData(e.getErrorCode())));
+        }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(new ApiResponse<>(400, e.getMessage(), new ErrorData(e.getErrorCode())));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

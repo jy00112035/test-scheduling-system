@@ -69,6 +69,12 @@ public class TestDemand {
     @Transient
     private Boolean requiresHistoricalClassification;
 
+    @Column(columnDefinition = "TEXT", name = "revision_original_snapshot")
+    private String revisionOriginalSnapshot;
+
+    @Column(columnDefinition = "TEXT", name = "revision_deleted_schedules")
+    private String revisionDeletedSchedules;
+
     @Version
     @Column(name = "lock_version")
     private Long lockVersion;

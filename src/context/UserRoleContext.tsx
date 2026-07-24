@@ -66,6 +66,9 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
       'viewBaseConfig',
       'manageStaff',
       'viewReports',
+      'scheduleManpower',
+      'aiRecommendSchedule',
+      'manageDailyAvailability',
       'personalCenter',
     ],
     testManager: [
