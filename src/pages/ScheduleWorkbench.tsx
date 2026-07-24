@@ -170,19 +170,22 @@ const ScheduleWorkbench: React.FC = () => {
     setAssignDays(1);
   }, []);
 
-  useEffect(() => () => {
-    mountedRef.current = false;
-    const unmountSession = ++operationGenerationRef.current;
-    scheduleMutationGenerationRef.current = unmountSession;
-    fetchGenerationRef.current += 1;
-    recommendationRunRef.current = null;
-    publishRunRef.current = null;
-    scheduleMutationIdsRef.current.clear();
-    classificationIdsRef.current.clear();
-    manualCreateRef.current = false;
-    dropValidationRef.current = null;
-    allocationPhaseRef.current = 'idle';
-    refreshRetryRef.current = false;
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      const unmountSession = ++operationGenerationRef.current;
+      scheduleMutationGenerationRef.current = unmountSession;
+      fetchGenerationRef.current += 1;
+      recommendationRunRef.current = null;
+      publishRunRef.current = null;
+      scheduleMutationIdsRef.current.clear();
+      classificationIdsRef.current.clear();
+      manualCreateRef.current = false;
+      dropValidationRef.current = null;
+      allocationPhaseRef.current = 'idle';
+      refreshRetryRef.current = false;
+    };
   }, []);
 
   // ---- 页面初始化 ----
@@ -1305,7 +1308,7 @@ const ScheduleWorkbench: React.FC = () => {
   const getRecommendationEligibleDemandIds = () => demands
     .filter(demand => (demand.manpowerFullySatisfied !== true
       || demand.requiresHistoricalClassification === true)
-      && (demand.status === 'pending' || demand.status === 'scheduled' || demand.status === 'revision_pending'))
+      && (demand.status === 'pending' || demand.status === 'scheduled'))
     .map(demand => demand.id);
 
   const handleDateRecommend = () => {

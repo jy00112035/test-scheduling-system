@@ -257,7 +257,9 @@ const DemandQueue: React.FC<DemandQueueProps> = ({
               const label = target.kind === 'special'
                 ? `分配${target.moduleName}，剩余 ${target.remainingManpower} 人天`
                 : `分配${target.testType}通用人力，剩余 ${target.remainingManpower} 人天`;
-              const status = target.remainingManpower > 0 ? '待分配' : '已满足';
+              const status = demand.status === 'revision_pending'
+                ? '待审批'
+                : target.remainingManpower > 0 ? '待分配' : '已满足';
               return (
                 <div
                   key={target.kind === 'special'
@@ -300,7 +302,7 @@ const DemandQueue: React.FC<DemandQueueProps> = ({
                   <span style={{ color: '#fa8c16', whiteSpace: 'nowrap' }}>
                     {target.remainingManpower} 人天
                   </span>
-                  <Tag color="orange" style={{ margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 3px' }}>
+                  <Tag color={status === '待审批' ? 'cyan' : 'orange'} style={{ margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 3px' }}>
                     {status}
                   </Tag>
                 </div>

@@ -95,7 +95,7 @@ describe('workbench demand fulfillment classification', () => {
 });
 
 describe('DemandQueue allocation targets', () => {
-  it('matches general targets by test group', () => {
+  it('allows all staff for general allocation targets', () => {
     const target = {
       kind: 'general' as const,
       demandId: 1001,
@@ -113,8 +113,9 @@ describe('DemandQueue allocation targets', () => {
       familiarModules: [],
     };
 
+    // 通用人力目标：staff.testType 为组织架构组名，target.testType 为测试类别，不严格匹配
     expect(isStaffEligibleForAllocationTarget({ ...baseStaff, testType: '功能测试' }, target)).toBe(true);
-    expect(isStaffEligibleForAllocationTarget({ ...baseStaff, testType: '性能测试' }, target)).toBe(false);
+    expect(isStaffEligibleForAllocationTarget({ ...baseStaff, testType: '性能测试' }, target)).toBe(true);
   });
 
   it('renders and drags special and general buckets independently', () => {

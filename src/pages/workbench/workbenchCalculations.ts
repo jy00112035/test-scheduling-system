@@ -358,7 +358,9 @@ export function isStaffEligibleForAllocationTarget(
   if (target.kind === 'special') {
     return staff.familiarModules?.some(module => module.id === target.moduleId) === true;
   }
-  return staff.testType === target.testType;
+  // 通用人力目标：允许分配给任意人员（staff.testType 为组织架构组名，
+  // target.testType 为测试类别，两者命名体系不同，无需严格匹配）
+  return true;
 }
 
 // ---- 冲突检测 ----

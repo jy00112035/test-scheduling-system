@@ -13,16 +13,29 @@ import {
   Table,
   Tag,
   Tooltip,
+  Upload,
   message,
 } from 'antd';
 import {
   DeleteOutlined,
+  DownloadOutlined,
   EditOutlined,
   PlusOutlined,
   SaveOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
+import * as XLSX from 'xlsx';
 import api from '../services/api';
 import type { TestModule, TestModuleWriteRequest } from '../types';
+import {
+  MODULE_IMPORT_MAX_FILE_SIZE,
+  MODULE_IMPORT_MAX_ROWS,
+  MODULE_IMPORT_TEMPLATE_FILENAME,
+  type ModuleImportRow,
+  classifyModuleImportLimits,
+  createModuleImportTemplateWorkbook,
+  parseModuleImportRows,
+} from '../utils/moduleSpreadsheet';
 
 interface TestModuleConfigPanelProps {
   testTypes: string[];
@@ -43,6 +56,19 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
   const pendingMutationRef = useRef(new Set<number>());
   const savePendingRef = useRef(false);
   const modalSessionRef = useRef(0);
+
+  // ---- import state ----
+  const [importModalVisible, setImportModalVisible] = useState(false);
+  const [importStep, setImportStep] = useState<1 | 2>(1);
+  const [importData, setImportData] = useState<ModuleImportRow[]>([]);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importSaving, setImportSaving] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [importUploadKey, setImportUploadKey] = useState(0);
+  const importGenerationRef = useRef(0);
+  const importReaderRef = useRef<FileReader | null>(null);
+  const importSaveGenerationRef = useRef(0);
+  const importSaveSessionRef = useRef<number | null>(null);
 
   const loadModules = useCallback(async () => {
     const generation = ++loadGenerationRef.current;
@@ -169,6 +195,185 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
     }
   };
 
+  // ---- import handlers ----
+  const resetImportPreview = () => {
+    const reader = importReaderRef.current;
+    if (reader && reader.readyState !== FileReader.DONE) {
+      reader.abort();
+    }
+    importReaderRef.current = null;
+    importGenerationRef.current += 1;
+    setImportData([]);
+    setSelectedFile(null);
+    setImportUploadKey(k => k + 1);
+    setImportLoading(false);
+  };
+
+  const openImportModal = () => {
+    if (savePendingRef.current) return;
+    resetImportPreview();
+    setImportStep(1);
+    setImportModalVisible(true);
+  };
+
+  const downloadTemplate = () => {
+    const workbook = createModuleImportTemplateWorkbook(testTypes);
+    XLSX.writeFile(workbook, MODULE_IMPORT_TEMPLATE_FILENAME);
+  };
+
+  const handleFileChange = (info: any) => {
+    if (importSaveSessionRef.current !== null) return;
+    if (!info.fileList?.length) {
+      resetImportPreview();
+      return;
+    }
+    const file = info.file.originFileObj || info.file;
+    if (file) {
+      resetImportPreview();
+      setSelectedFile(file);
+    }
+  };
+
+  const processImport = () => {
+    if (!selectedFile) return;
+    const limitError = classifyModuleImportLimits(selectedFile.size);
+    if (limitError === 'fileTooLarge') {
+      message.error(`文件过大，最大支持 ${MODULE_IMPORT_MAX_FILE_SIZE / 1024 / 1024}MB`);
+      return;
+    }
+
+    const generation = ++importGenerationRef.current;
+    setImportLoading(true);
+
+    const reader = new FileReader();
+    importReaderRef.current = reader;
+
+    reader.onload = (e) => {
+      if (generation !== importGenerationRef.current || !mountedRef.current) return;
+      try {
+        const data = new Uint8Array(e.target!.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array', sheetRows: MODULE_IMPORT_MAX_ROWS + 2 });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonRows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+        if (jsonRows.length === 0) {
+          message.error('文件中没有数据行');
+          setImportLoading(false);
+          return;
+        }
+        if (jsonRows.length > MODULE_IMPORT_MAX_ROWS) {
+          message.error(`数据行数超过限制（最多 ${MODULE_IMPORT_MAX_ROWS} 行）`);
+          setImportLoading(false);
+          return;
+        }
+
+        const existingNameTypePairs = new Set(
+          modules.map(m => `${m.moduleName}|${m.testType}`),
+        );
+        const rows = parseModuleImportRows(jsonRows, testTypes, existingNameTypePairs);
+        setImportData(rows);
+        setImportStep(2);
+      } catch (err) {
+        if (generation === importGenerationRef.current && mountedRef.current) {
+          message.error(err instanceof Error ? err.message : '文件解析失败');
+        }
+      } finally {
+        if (generation === importGenerationRef.current && mountedRef.current) {
+          setImportLoading(false);
+        }
+      }
+    };
+
+    reader.onerror = () => {
+      if (generation === importGenerationRef.current && mountedRef.current) {
+        message.error('文件读取失败');
+        setImportLoading(false);
+      }
+    };
+
+    reader.readAsArrayBuffer(selectedFile);
+  };
+
+  const handleImportConfirm = async () => {
+    if (importSaveSessionRef.current !== null || !mountedRef.current) return;
+    const validRows = importData.filter(row => row.rowErrors.length === 0);
+    if (validRows.length === 0) return;
+
+    const session = ++importSaveGenerationRef.current;
+    importSaveSessionRef.current = session;
+    setImportSaving(true);
+
+    const modulesToCreate = validRows.map(row => ({
+      moduleName: row.moduleName,
+      testType: row.testType,
+      sortOrder: row.sortOrder,
+    }));
+
+    try {
+      if (session !== importSaveSessionRef.current || !mountedRef.current) return;
+      await api.batchCreateTestModules(modulesToCreate);
+      if (mountedRef.current) {
+        message.success(`成功导入 ${validRows.length} 个模块`);
+        setImportModalVisible(false);
+        await loadModules();
+      }
+    } catch (error) {
+      if (session === importSaveSessionRef.current && mountedRef.current) {
+        const errorMessage = error instanceof Error ? error.message : '批量导入失败';
+        message.error(errorMessage);
+      }
+    } finally {
+      if (mountedRef.current && session === importSaveSessionRef.current) {
+        importSaveSessionRef.current = null;
+        setImportSaving(false);
+      }
+    }
+  };
+
+  const handleImportCancel = () => {
+    if (importSaveSessionRef.current !== null) return;
+    resetImportPreview();
+    setImportModalVisible(false);
+  };
+
+  const removeImportRow = (index: number) => {
+    setImportData(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const hasImportErrors = importData.some(row => row.rowErrors.length > 0);
+
+  // ---- import columns ----
+  const importColumns = [
+    { title: '序号', key: 'index', width: 60, render: (_: unknown, __: unknown, index: number) => index + 1 },
+    { title: '模块名称', dataIndex: 'moduleName', key: 'moduleName' },
+    { title: '所属小组', dataIndex: 'testType', key: 'testType' },
+    { title: '排序', dataIndex: 'sortOrder', key: 'sortOrder' },
+    {
+      title: '错误信息', key: 'errors',
+      render: (_: unknown, row: ModuleImportRow) => (
+        <span style={{ color: '#ff4d4f', fontSize: 12 }}>
+          {row.rowErrors.join('；')}
+        </span>
+      ),
+    },
+    {
+      title: '操作', key: 'action',
+      render: (_: unknown, __: ModuleImportRow, index: number) => (
+        <Button
+          type="link"
+          danger
+          size="small"
+          disabled={importSaving}
+          onClick={() => removeImportRow(index)}
+        >
+          移除
+        </Button>
+      ),
+    },
+  ];
+
+  // ---- existing columns ----
   const columns = [
     { title: '模块名称', dataIndex: 'moduleName', key: 'moduleName' },
     { title: '所属小组', dataIndex: 'testType', key: 'testType' },
@@ -232,7 +437,10 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16, gap: 8 }}>
+        <Button icon={<UploadOutlined />} onClick={openImportModal} disabled={savePending}>
+          导入模块
+        </Button>
         <Button type="primary" icon={<PlusOutlined />} onClick={openAdd} disabled={savePending}>
           新增特殊模块
         </Button>
@@ -279,6 +487,115 @@ const TestModuleConfigPanel: React.FC<TestModuleConfigPanelProps> = ({ testTypes
             </Space>
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* ---- 导入特殊模块 Modal ---- */}
+      <Modal
+        title="导入特殊模块"
+        open={importModalVisible}
+        onCancel={handleImportCancel}
+        maskClosable={!importSaving}
+        keyboard={!importSaving}
+        closable={!importSaving}
+        width={importStep === 2 ? 800 : 480}
+        footer={
+          importStep === 1
+            ? [
+                <Button key="cancel" onClick={handleImportCancel} disabled={importLoading}>
+                  取消
+                </Button>,
+                <Button
+                  key="next"
+                  type="primary"
+                  loading={importLoading}
+                  disabled={!selectedFile || importLoading}
+                  onClick={processImport}
+                >
+                  下一步
+                </Button>,
+              ]
+            : [
+                <Button
+                  key="back"
+                  onClick={() => { setImportStep(1); resetImportPreview(); }}
+                  disabled={importSaving}
+                >
+                  返回重新选择
+                </Button>,
+                <Button key="cancel" onClick={handleImportCancel} disabled={importSaving}>
+                  取消
+                </Button>,
+                <Button
+                  key="confirm"
+                  type="primary"
+                  loading={importSaving}
+                  disabled={importSaving || importData.length === 0 || hasImportErrors}
+                  onClick={handleImportConfirm}
+                >
+                  确认导入 ({importData.filter(r => r.rowErrors.length === 0).length})
+                </Button>,
+              ]
+        }
+      >
+        {importStep === 1 ? (
+          <div>
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={
+                <span>
+                  请先下载模板，按格式填写后上传文件。支持 .xlsx / .xls 格式，
+                  最大 {MODULE_IMPORT_MAX_FILE_SIZE / 1024 / 1024}MB，
+                  最多 {MODULE_IMPORT_MAX_ROWS} 行。
+                </span>
+              }
+            />
+            <div style={{ marginBottom: 16 }}>
+              <Button icon={<DownloadOutlined />} onClick={downloadTemplate}>
+                下载导入模板
+              </Button>
+            </div>
+            <Upload
+              key={importUploadKey}
+              accept=".xlsx,.xls"
+              maxCount={1}
+              beforeUpload={() => false}
+              onChange={handleFileChange}
+              fileList={selectedFile ? [{ uid: '-1', name: selectedFile.name } as any] : []}
+              onRemove={() => { resetImportPreview(); }}
+            >
+              <Button icon={<UploadOutlined />} loading={importLoading}>选择文件</Button>
+            </Upload>
+            {selectedFile && (
+              <div style={{ marginTop: 8, color: '#888' }}>
+                已选择：{selectedFile.name}（{(selectedFile.size / 1024).toFixed(1)} KB）
+              </div>
+            )}
+          </div>
+        ) : (
+          <div>
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message={`共解析 ${importData.length} 行数据，其中 ${importData.filter(r => r.rowErrors.length > 0).length} 行有错误。请修正或移除错误行后确认导入。`}
+            />
+            <Table
+              columns={importColumns}
+              dataSource={importData}
+              rowKey={(_, index) => String(index)}
+              size="small"
+              bordered
+              scroll={{ x: 700, y: 300 }}
+              rowClassName={(row: ModuleImportRow) =>
+                row.rowErrors.length > 0 ? 'module-import-error-row' : ''
+              }
+              pagination={false}
+            />
+            <style>{'.module-import-error-row { background-color: #fff1f0; } .module-import-error-row:hover > td { background-color: #ffe7e7 !important; }'}</style>
+          </div>
+        )}
       </Modal>
     </div>
   );

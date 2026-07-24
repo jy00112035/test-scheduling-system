@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import type { FamiliarModule } from '../types';
+import { createModuleSheetForStaffTemplate } from './moduleSpreadsheet';
 
 export interface StaffSpreadsheetRecord {
   name: string;
@@ -82,8 +83,12 @@ export function createStaffImportTemplateWorkbook() {
     ['角色可使用英文角色代码或系统显示名称，以英文分号分隔。'],
     ['状态：填写 在职、休假、离职，或 active、leave、resigned；留空默认为在职。'],
     [`单个文件不超过 ${STAFF_IMPORT_MAX_FILE_SIZE / 1024 / 1024}MB，最多 ${STAFF_IMPORT_MAX_ROWS} 行数据。`],
+    [''],
+    ['提示：如需批量创建特殊模块定义，请在"特殊模块导入"工作表中填写，或使用字段配置页面的专用导入功能。'],
   ]);
+  const moduleSheet = createModuleSheetForStaffTemplate();
   XLSX.utils.book_append_sheet(workbook, dataSheet, '人员导入');
   XLSX.utils.book_append_sheet(workbook, guidanceSheet, '填写说明');
+  XLSX.utils.book_append_sheet(workbook, moduleSheet, '特殊模块导入');
   return workbook;
 }

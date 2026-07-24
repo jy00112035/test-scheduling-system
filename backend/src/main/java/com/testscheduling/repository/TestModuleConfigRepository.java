@@ -24,6 +24,8 @@ public interface TestModuleConfigRepository extends JpaRepository<TestModuleConf
 
     boolean existsByModuleName(String moduleName);
 
+    boolean existsByModuleNameAndTestType(String moduleName, String testType);
+
     List<TestModuleConfig> findAllByOrderByTestTypeAscSortOrderAscModuleNameAsc();
 
     List<TestModuleConfig> findByTestTypeAndEnabledOrderBySortOrderAscModuleNameAsc(

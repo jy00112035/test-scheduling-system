@@ -98,6 +98,17 @@ export interface TestModuleWriteRequest {
   sortOrder: number;
 }
 
+export interface BatchModuleError {
+  index: number;
+  moduleName: string;
+  error: string;
+}
+
+export interface BatchModuleResponse {
+  created: TestModule[];
+  errors: BatchModuleError[];
+}
+
 export interface DemandSpecialModule {
   id: number;
   demandId: number;

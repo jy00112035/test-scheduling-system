@@ -1,6 +1,8 @@
 package com.testscheduling.controller;
 
 import com.testscheduling.dto.ApiResponse;
+import com.testscheduling.dto.BatchModuleRequest;
+import com.testscheduling.dto.BatchModuleResponse;
 import com.testscheduling.dto.TestModuleRequest;
 import com.testscheduling.entity.TestModuleConfig;
 import com.testscheduling.exception.BusinessException;
@@ -60,6 +62,24 @@ public class TestModuleController {
             throw new BusinessException("MODULE_ENABLED_REQUIRED", "模块状态不能为空");
         }
         return ApiResponse.success("状态更新成功", service.setEnabled(id, enabled));
+    }
+
+    @PostMapping("/batch")
+    public ApiResponse<BatchModuleResponse> createBatch(@RequestBody BatchModuleRequest request) {
+        roleGuard.requireAny("fieldAdmin");
+        if (request.modules() == null || request.modules().isEmpty()) {
+            throw new BusinessException("MODULE_BATCH_EMPTY", "导入列表不能为空");
+        }
+        BatchModuleResponse result = service.batchCreate(request.modules());
+        int created = result.created().size();
+        int failed = result.errors().size();
+        String message;
+        if (failed == 0) {
+            message = "成功导入 " + created + " 个模块";
+        } else {
+            message = "成功导入 " + created + " 个模块，" + failed + " 条失败";
+        }
+        return ApiResponse.success(message, result);
     }
 
     @DeleteMapping("/{id}")

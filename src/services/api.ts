@@ -1,6 +1,7 @@
 const API_BASE_URL = '/api';
 
 import type {
+  BatchModuleResponse,
   BatchPublishResponse,
   BackendSchedule,
   ScheduleRecommendationRequest,
@@ -15,6 +16,7 @@ import type {
 } from '../types';
 
 export type {
+  BatchModuleResponse,
   BatchPublishResponse,
   BackendSchedule,
   DemandSpecialModule,
@@ -457,6 +459,13 @@ class ApiService {
 
   async deleteTestModule(id: number) {
     return this.request<void>(`/test-modules/${id}`, { method: 'DELETE' });
+  }
+
+  async batchCreateTestModules(modules: TestModuleWriteRequest[]) {
+    return this.request<BatchModuleResponse>('/test-modules/batch', {
+      method: 'POST',
+      body: JSON.stringify({ modules }),
+    });
   }
 
   async migrateLegacyStaffModules() {

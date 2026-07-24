@@ -1,5 +1,7 @@
 package com.testscheduling.service;
 
+import com.testscheduling.dto.BatchModuleError;
+import com.testscheduling.dto.BatchModuleResponse;
 import com.testscheduling.dto.TestModuleRequest;
 import com.testscheduling.entity.TestModuleConfig;
 import com.testscheduling.exception.BusinessException;
@@ -8,6 +10,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -59,8 +62,30 @@ public class TestModuleService {
 
     @Transactional
     public TestModuleConfig create(TestModuleRequest request) {
+        return doCreate(request);
+    }
+
+    public BatchModuleResponse batchCreate(List<TestModuleRequest> requests) {
+        List<TestModuleConfig> created = new ArrayList<>();
+        List<BatchModuleError> errors = new ArrayList<>();
+
+        for (int i = 0; i < requests.size(); i++) {
+            TestModuleRequest request = requests.get(i);
+            try {
+                created.add(doCreate(request));
+            } catch (BusinessException e) {
+                errors.add(new BatchModuleError(i,
+                    request.moduleName() != null ? request.moduleName() : "",
+                    e.getMessage()));
+            }
+        }
+
+        return new BatchModuleResponse(created, errors);
+    }
+
+    private TestModuleConfig doCreate(TestModuleRequest request) {
         TestModuleRequest normalized = normalizeAndValidate(request);
-        if (moduleRepository.existsByModuleName(normalized.moduleName())) {
+        if (moduleRepository.existsByModuleNameAndTestType(normalized.moduleName(), normalized.testType())) {
             throw duplicateName();
         }
 
@@ -86,8 +111,11 @@ public class TestModuleService {
             throw new BusinessException(
                 "MODULE_REFERENCED_IMMUTABLE", "模块已被引用，只能修改状态或排序");
         }
-        if (!Objects.equals(existing.getModuleName(), normalized.moduleName())
-                && moduleRepository.existsByModuleName(normalized.moduleName())) {
+        boolean nameChanged = !Objects.equals(existing.getModuleName(), normalized.moduleName());
+        boolean typeChanged = !Objects.equals(existing.getTestType(), normalized.testType());
+        if ((nameChanged || typeChanged)
+                && moduleRepository.existsByModuleNameAndTestType(
+                    normalized.moduleName(), normalized.testType())) {
             throw duplicateName();
         }
 
@@ -146,7 +174,7 @@ public class TestModuleService {
         try {
             return moduleRepository.saveAndFlush(module);
         } catch (DataIntegrityViolationException e) {
-            if (hasNamedConstraint(e, "uk_test_module_name")) {
+            if (hasNamedConstraint(e, "uk_test_module_name", "uk_test_module_name_type")) {
                 throw duplicateName();
             }
             throw e;
