@@ -14,13 +14,13 @@ import {
   Switch,
   Modal,
 } from 'antd';
-import { SaveOutlined, ArrowLeftOutlined } from '@ant-design/icons';
+import { SaveOutlined, ArrowLeftOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
 import { saveDraft, getDraft, clearDraft, formatDraftTime, getDraftTimestamp } from '../utils/draftStorage';
 import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
 import { TestDemand, DemandManpowerDetail, SpecialModuleDemandInput, TestModule } from '../types';
 import { api } from '../services/api';
-import SpecialModuleDemandEditor from '../components/SpecialModuleDemandEditor';
+import GroupSpecialModuleRows from '../components/GroupSpecialModuleRows';
 import { calculateManpowerSummary, validateSpecialModuleRows } from '../utils/specialModuleCalculations';
 import { mergeEditDraftSpecialRows } from '../utils/specialModuleDraftContext';
 import { buildSpecialModuleWriteRequests } from '../utils/specialModuleWriteRequest';
@@ -59,9 +59,10 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
   const [manpowerInputs, setManpowerInputs] = useState<Record<string, number>>({});
   const [manpowerRemarks, setManpowerRemarks] = useState<Record<string, string>>({});
   const [specialModuleRows, setSpecialModuleRows] = useState<SpecialModuleDemandInput[]>([]);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [modules, setModules] = useState<TestModule[]>([]);
   const [modulesAvailable, setModulesAvailable] = useState(true);
-  const specialModuleSectionRef = useRef<HTMLDivElement>(null);
+  const manpowerSectionRef = useRef<HTMLDivElement>(null);
   const draftId = useRef(isEdit ? `edit_${initialValues?.id}` : 'new').current;
   const hasShownDraftPrompt = useRef(false);
   const submitSessionRef = useRef(0);
@@ -184,12 +185,16 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
       sortOrder: 0, lockVersion: 0, createdAt: row.createdAt, updatedAt: row.updatedAt, referenced: true,
     }));
     if (enrichedModules.length > 0) setModules((current) => [...current, ...enrichedModules.filter((item) => !current.some((module) => module.id === item.id))]);
-    setSpecialModuleRows((demand.specialModuleDemands ?? []).map((row) => ({
+    const specialRows = (demand.specialModuleDemands ?? []).map((row) => ({
       moduleId: row.moduleId,
       testType: row.testType,
       manpowerDemand: row.manpowerDemand,
       historicalManpowerDemand: row.manpowerDemand,
-    })));
+    }));
+    setSpecialModuleRows(specialRows);
+    // Auto-expand groups that have special modules
+    const groupsWithSpecials = new Set(specialRows.map((r) => r.testType));
+    setExpandedGroups(groupsWithSpecials);
   }, [form]);
 
   useEffect(() => {
@@ -222,11 +227,13 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
         ? `${specialValidation.testType}小组的特殊模块人力超过总人力`
         : '请完善特殊模块人力需求');
       if (specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && specialValidation.testType) {
+        setExpandedGroups(prev => new Set([...prev, specialValidation.testType!]));
         document.getElementById(`demand-manpower-${specialValidation.testType}`)?.focus();
       } else {
-        (specialModuleSectionRef.current?.querySelector('[aria-invalid="true"][role="combobox"], [aria-invalid="true"][role="spinbutton"]') as HTMLElement | null)?.focus();
+        const firstInvalid = manpowerSectionRef.current?.querySelector('[aria-invalid="true"]') as HTMLElement | null;
+        firstInvalid?.focus();
       }
-      specialModuleSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      manpowerSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
 
@@ -361,46 +368,115 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
           </Form.Item>
 
           <Form.Item label="人力需求（按测试类型）" required>
-            <div style={{ background: '#fafafa', padding: 16, borderRadius: 8 }}>
+            <div ref={manpowerSectionRef} style={{ background: '#fafafa', padding: 16, borderRadius: 8 }}>
               <div style={{ marginBottom: 8, color: '#666', fontSize: 12 }}>
-                针对每个测试小组填写所需人力（人/天），不需要的小组填 0
+                针对每个测试小组填写所需人力（人/天），不需要的小组填 0。点击展开可配置特殊模块人力。
               </div>
-              {displayedTestTypes.map(testType => (
-                <div key={testType} style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  marginBottom: 10,
-                  padding: '8px 12px',
-                  background: '#fff',
-                  borderRadius: 6,
-                  border: '1px solid #f0f0f0',
-                }}>
-                  <Tag color="blue" style={{ minWidth: 80, textAlign: 'center' }}>
-                    {testType}
-                  </Tag>
-                  {!getSelectOptions('testType').includes(testType) && <Tag>历史小组</Tag>}
-                  <InputNumber
-                    id={`demand-manpower-${testType}`}
-                    aria-label={`${testType}小组总人力`}
-                    status={specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && specialValidation.testType === testType ? 'error' : undefined}
-                    aria-invalid={specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && specialValidation.testType === testType}
-                    aria-describedby={specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && specialValidation.testType === testType ? `demand-overflow-${testType}` : undefined}
-                    min={0}
-                    step={0.1}
-                    precision={1}
-                    style={{ width: 120, marginLeft: 12 }}
-                    placeholder="0"
-                    addonAfter="人/天"
-                    value={manpowerInputs[testType] ?? 0}
-                    onChange={(val) => setManpowerInputs(prev => ({
-                      ...prev,
-                      [testType]: val ?? 0,
-                    }))}
-                  />
-                  {manpowerRemarks[testType] && <span style={{ marginLeft: 8, color: '#666', fontSize: 12 }}>备注：{manpowerRemarks[testType]}</span>}
-                </div>
-              ))}
-              {specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP' && <span id={`demand-overflow-${specialValidation.testType}`} role="alert" style={{ color: '#cf1322' }}>特殊模块人力不能超过小组总人力</span>}
+              {displayedTestTypes.map(testType => {
+                const isExpanded = expandedGroups.has(testType);
+                const groupManpower = manpowerInputs[testType] ?? 0;
+                const groupSpecialRows = specialModuleRows.filter(row => {
+                  const mod = modules.find(m => m.id === row.moduleId);
+                  return (mod?.testType ?? row.testType) === testType;
+                });
+                const groupSummary = calculateManpowerSummary(
+                  { [testType]: groupManpower },
+                  specialModuleRows,
+                  modules,
+                )[0];
+                const hasOverflow = specialValidation.errorCode === 'SPECIAL_MODULE_EXCEEDS_GROUP'
+                  && specialValidation.testType === testType;
+
+                return (
+                  <div key={testType} style={{
+                    marginBottom: 10,
+                    padding: '8px 12px',
+                    background: '#fff',
+                    borderRadius: 6,
+                    border: '1px solid #f0f0f0',
+                  }}>
+                    {/* Header row: tag + manpower + expand toggle */}
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                      <Tag color="blue" style={{ minWidth: 80, textAlign: 'center' }}>
+                        {testType}
+                      </Tag>
+                      {!getSelectOptions('testType').includes(testType) && <Tag>历史小组</Tag>}
+                      <InputNumber
+                        id={`demand-manpower-${testType}`}
+                        aria-label={`${testType}小组总人力`}
+                        status={hasOverflow ? 'error' : undefined}
+                        aria-invalid={hasOverflow}
+                        aria-describedby={hasOverflow ? `demand-overflow-${testType}` : undefined}
+                        min={0}
+                        step={0.1}
+                        precision={1}
+                        style={{ width: 120 }}
+                        placeholder="0"
+                        addonAfter="人/天"
+                        value={groupManpower}
+                        onChange={(val) => setManpowerInputs(prev => ({
+                          ...prev,
+                          [testType]: val ?? 0,
+                        }))}
+                      />
+                      {manpowerRemarks[testType] && (
+                        <span style={{ color: '#666', fontSize: 12 }}>备注：{manpowerRemarks[testType]}</span>
+                      )}
+                      {groupManpower > 0 && (
+                        <Button
+                          type="link"
+                          size="small"
+                          icon={isExpanded ? <DownOutlined /> : <RightOutlined />}
+                          onClick={() => setExpandedGroups(prev => {
+                            const next = new Set(prev);
+                            if (next.has(testType)) next.delete(testType);
+                            else next.add(testType);
+                            return next;
+                          })}
+                        >
+                          {isExpanded ? '收起特殊模块' : '展开特殊模块'}
+                        </Button>
+                      )}
+                    </div>
+
+                    {/* Expanded special module section */}
+                    {isExpanded && groupManpower > 0 && (
+                      <div style={{ marginTop: 8, padding: '8px 12px', background: '#f9f9f9', borderRadius: 4 }}>
+                        <GroupSpecialModuleRows
+                          testType={testType}
+                          rows={groupSpecialRows}
+                          allRows={specialModuleRows}
+                          modules={modules}
+                          manpowerByTestType={manpowerInputs}
+                          disabled={!modulesAvailable && groupSpecialRows.length === 0}
+                          canEditModules={modulesAvailable}
+                          onChange={(allRows) => {
+                            setSpecialModuleRows(allRows);
+                            onDirtyChange?.(true);
+                          }}
+                        />
+                        {groupSummary && groupSpecialRows.length > 0 && (
+                          <div style={{ marginTop: 4, fontSize: 12, color: '#666' }}>
+                            特殊模块 {groupSummary.specialManpower.toFixed(1)} / 通用人力 {groupSummary.generalManpower.toFixed(1)} 人/天
+                          </div>
+                        )}
+                        {hasOverflow && (
+                          <span id={`demand-overflow-${testType}`} role="alert" style={{ color: '#cf1322' }}>
+                            特殊模块人力不能超过小组总人力
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Collapsed summary: show hint if special modules exist */}
+                    {!isExpanded && groupSpecialRows.length > 0 && groupSummary && (
+                      <div style={{ marginTop: 2, fontSize: 12, color: '#999' }}>
+                        特殊模块 {groupSummary.specialManpower.toFixed(1)} / 通用人力 {groupSummary.generalManpower.toFixed(1)} 人/天
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               <Divider style={{ margin: '8px 0' }} />
               <div style={{ textAlign: 'right', fontSize: 14, fontWeight: 500 }}>
                 总计：
@@ -411,27 +487,6 @@ const TestDemandSubmit: React.FC<TestDemandSubmitProps> = ({
                   })()}
                 </span> 人/天
               </div>
-            </div>
-          </Form.Item>
-
-          <Form.Item label="特殊模块人力需求">
-            <div ref={specialModuleSectionRef}>
-              <SpecialModuleDemandEditor
-                rows={specialModuleRows}
-                modules={modules}
-                manpowerByTestType={manpowerInputs}
-                disabled={!modulesAvailable && specialModuleRows.length === 0}
-                canEditModules={modulesAvailable}
-                onChange={(rows) => {
-                  setSpecialModuleRows(rows);
-                  onDirtyChange?.(true);
-                }}
-              />
-              {calculateManpowerSummary(manpowerInputs, specialModuleRows, modules).map((summary) => (
-                <div key={summary.testType} style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
-                  {summary.testType}：总人力 {summary.totalManpower.toFixed(1)}，特殊模块 {summary.specialManpower.toFixed(1)}，通用人力 {summary.generalManpower.toFixed(1)} 人/天
-                </div>
-              ))}
             </div>
           </Form.Item>
 

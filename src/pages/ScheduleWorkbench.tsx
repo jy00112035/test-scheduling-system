@@ -172,15 +172,18 @@ const ScheduleWorkbench: React.FC = () => {
 
   useEffect(() => {
     mountedRef.current = true;
+    const opGenRef = operationGenerationRef;
+    const scheduleMutIdsRef = scheduleMutationIdsRef;
+    const classIdsRef = classificationIdsRef;
     return () => {
       mountedRef.current = false;
-      const unmountSession = ++operationGenerationRef.current;
+      const unmountSession = ++opGenRef.current;
       scheduleMutationGenerationRef.current = unmountSession;
       fetchGenerationRef.current += 1;
       recommendationRunRef.current = null;
       publishRunRef.current = null;
-      scheduleMutationIdsRef.current.clear();
-      classificationIdsRef.current.clear();
+      scheduleMutIdsRef.current.clear();
+      classIdsRef.current.clear();
       manualCreateRef.current = false;
       dropValidationRef.current = null;
       allocationPhaseRef.current = 'idle';
@@ -1386,10 +1389,12 @@ const ScheduleWorkbench: React.FC = () => {
             totalPercent: c.totalPercent,
             maxCapacityPercent: c.maxCapacityPercent,
           }))}
-          onDismissConflicts={() => {}}
+          onDismissConflicts={() => setConflictDetails([])}
           fulfillment={recommendationFulfillment}
           demands={demands}
           publishFailures={publishFailures}
+          onDismissFulfillment={() => setRecommendationFulfillment([])}
+          onDismissPublishFailures={() => setPublishFailures([])}
         />
       </div>
 

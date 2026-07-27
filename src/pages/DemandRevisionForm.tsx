@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Form,
   DatePicker,
@@ -37,11 +37,7 @@ const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
     totalSchedules: number;
   }>({ pastSchedules: [], totalSchedules: 0 });
 
-  useEffect(() => {
-    loadDemandDetails();
-  }, [demand.id]);
-
-  const loadDemandDetails = async () => {
+  const loadDemandDetails = useCallback(async () => {
     try {
       const demandDetail = await api.getDemand(Number(demand.id));
       setManpowerDetails(demandDetail.manpowerDetails || []);
@@ -82,7 +78,11 @@ const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
     } catch (error: any) {
       message.error(error.message || '获取需求详情失败');
     }
-  };
+  }, [demand.id, form]);
+
+  useEffect(() => {
+    loadDemandDetails();
+  }, [loadDemandDetails]);
 
   const getUsedManpower = (testType: string): number => {
     const found = scheduleInfo.pastSchedules.find(s => s.testType === testType);

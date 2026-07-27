@@ -9,12 +9,14 @@ import com.testscheduling.entity.User;
 import com.testscheduling.exception.BusinessException;
 import com.testscheduling.repository.UserRepository;
 import com.testscheduling.security.RequestRoleGuard;
+import com.testscheduling.service.StaffModuleService;
 import com.testscheduling.service.TestStaffService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/staff")
@@ -22,6 +24,9 @@ public class TestStaffController {
 
     @Autowired
     private TestStaffService testStaffService;
+
+    @Autowired
+    private StaffModuleService staffModuleService;
 
     @Autowired
     private UserRepository userRepository;
@@ -126,6 +131,15 @@ public class TestStaffController {
         denyTestLeadDelete();
         testStaffService.delete(id, currentUsername());
         return ApiResponse.success("删除成功", null);
+    }
+
+    @PostMapping("/modules/resolve-names")
+    public ApiResponse<Map<String, Long>> resolveModuleNames(@RequestBody Map<String, Map<String, String>> body) {
+        Map<String, String> nameToTestType = body.get("items");
+        if (nameToTestType == null || nameToTestType.isEmpty()) {
+            return ApiResponse.success(Map.of());
+        }
+        return ApiResponse.success(staffModuleService.ensureModulesExist(nameToTestType));
     }
 
     private void requireStaffMutationRole() {

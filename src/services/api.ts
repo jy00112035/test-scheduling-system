@@ -364,6 +364,13 @@ class ApiService {
     });
   }
 
+  async resolveModuleNames(items: Record<string, string>) {
+    return this.request<Record<string, number>>('/staff/modules/resolve-names', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    });
+  }
+
   async getStaffRoleByEmpNo(empNo: string) {
     return this.request<string>(`/staff/role/${empNo}`);
   }

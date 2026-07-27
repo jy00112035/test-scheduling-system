@@ -15,6 +15,8 @@ interface IssuePublishPanelProps {
   fulfillment: ScheduleRecommendationResponse['fulfillment'];
   demands: DemandItem[];
   publishFailures: Array<{ demandId: number; reasonCode: string; reason: string }>;
+  onDismissFulfillment?: () => void;
+  onDismissPublishFailures?: () => void;
 }
 
 const IssuePublishPanel: React.FC<IssuePublishPanelProps> = ({
@@ -23,6 +25,8 @@ const IssuePublishPanel: React.FC<IssuePublishPanelProps> = ({
   fulfillment,
   demands,
   publishFailures,
+  onDismissFulfillment,
+  onDismissPublishFailures,
 }) => {
   if (conflicts.length === 0 && fulfillment.length === 0
       && publishFailures.length === 0) {
@@ -115,6 +119,8 @@ const IssuePublishPanel: React.FC<IssuePublishPanelProps> = ({
           type="warning"
           showIcon
           style={{ marginBottom: 8 }}
+          closable
+          onClose={onDismissFulfillment}
         />
       )}
       {publishFailures.length > 0 && (
@@ -131,6 +137,8 @@ const IssuePublishPanel: React.FC<IssuePublishPanelProps> = ({
           )}
           type="error"
           showIcon
+          closable
+          onClose={onDismissPublishFailures}
         />
       )}
     </div>

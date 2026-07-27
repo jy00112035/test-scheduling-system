@@ -501,8 +501,7 @@ const StaffManagement: React.FC = () => {
   };
 
   const hasImportErrors = duplicateEmps.length > 0 || importData.some(row => (
-    row.unmatchedModules.length > 0
-    || row.unavailableModules.length > 0
+    row.unavailableModules.length > 0
     || row.rowErrors.length > 0
   ));
 
@@ -527,6 +526,37 @@ const StaffManagement: React.FC = () => {
     setImportSaving(true);
     setImportLoading(true);
     try {
+      // Auto-resolve unmatched module names before creating staff
+      const nameToTestType: Record<string, string> = {};
+      for (const row of importData) {
+        for (const name of row.unmatchedModules) {
+          if (!(name in nameToTestType)) {
+            nameToTestType[name] = row.testType || '';
+          }
+        }
+      }
+      const unmatchedNames = Object.keys(nameToTestType);
+      if (unmatchedNames.length > 0) {
+        try {
+          const resolved = await api.resolveModuleNames(nameToTestType);
+          for (const row of importData) {
+            if (row.unmatchedModules.length > 0) {
+              for (const name of row.unmatchedModules) {
+                const id = resolved[name];
+                if (id) {
+                  row.familiarModuleIds.push(id);
+                }
+              }
+              row.unmatchedModules = [];
+            }
+          }
+        } catch (resolveError: any) {
+          message.error('自动创建熟悉模块失败：' + (resolveError.message || '未知错误'));
+          return;
+        }
+        if (!ownsImportSave()) return;
+      }
+
       const retryableRows: ImportRow[] = [];
       const committedRows: ImportRow[] = [];
       let successCount = 0;
@@ -1341,7 +1371,7 @@ const StaffManagement: React.FC = () => {
                   render: (text: string, row: ImportRow) => (
                     <Space direction="vertical" size={0}>
                       <span>{text || '-'}</span>
-                      {row.unmatchedModules.length > 0 && <Typography.Text type="danger">未知：{row.unmatchedModules.join('、')}</Typography.Text>}
+                      {row.unmatchedModules.length > 0 && <Typography.Text type="warning">新增：{row.unmatchedModules.join('、')}</Typography.Text>}
                       {row.unavailableModules.length > 0 && <Typography.Text type="danger">不可用（已停用）：{row.unavailableModules.join('、')}</Typography.Text>}
                       {row.rowErrors.map(error => <Typography.Text key={error} type="danger">{error}</Typography.Text>)}
                       {row.retryError && <Typography.Text type="danger">导入失败：{row.retryError}</Typography.Text>}

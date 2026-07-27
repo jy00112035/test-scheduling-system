@@ -233,6 +233,53 @@ public class StaffModuleService {
             additions.size(), duplicateNames, unmatched, missingStaffAccounts);
     }
 
+    @Transactional
+    public Map<String, Long> ensureModulesExist(Map<String, String> nameToTestType) {
+        if (nameToTestType == null || nameToTestType.isEmpty()) {
+            return Map.of();
+        }
+        List<String> distinctNames = nameToTestType.keySet().stream()
+            .filter(name -> name != null && !name.isBlank())
+            .distinct()
+            .toList();
+        if (distinctNames.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, TestModuleConfig> existingModules = moduleRepository.findAll().stream()
+            .filter(m -> distinctNames.contains(m.getModuleName()))
+            .collect(Collectors.toMap(
+                TestModuleConfig::getModuleName,
+                Function.identity(),
+                (first, ignored) -> first));
+        List<TestModuleConfig> newModules = new ArrayList<>();
+        for (String name : distinctNames) {
+            if (!existingModules.containsKey(name)) {
+                TestModuleConfig module = new TestModuleConfig();
+                module.setModuleName(name);
+                String testType = nameToTestType.getOrDefault(name, "");
+                module.setTestType(testType != null ? testType : "");
+                module.setEnabled(true);
+                module.setSortOrder(9999);
+                newModules.add(module);
+            }
+        }
+        if (!newModules.isEmpty()) {
+            moduleRepository.saveAll(newModules);
+            moduleRepository.flush();
+            for (TestModuleConfig module : newModules) {
+                existingModules.put(module.getModuleName(), module);
+            }
+        }
+        Map<String, Long> result = new LinkedHashMap<>();
+        for (String name : distinctNames) {
+            TestModuleConfig module = existingModules.get(name);
+            if (module != null) {
+                result.put(name, module.getId());
+            }
+        }
+        return result;
+    }
+
     private Long requireStaffId(TestStaff staff) {
         if (staff == null || staff.getId() == null) {
             throw new BusinessException("STAFF_REQUIRED", "人员必须先保存");

@@ -205,71 +205,13 @@ public class DataInitializer implements CommandLineRunner {
     }
 
     private void initFieldConfigs() {
-        if (fieldConfigRepository.count() == 0) {
-            FieldConfig f1 = new FieldConfig();
-            f1.setFieldName("versionType");
-            f1.setFieldType("select");
-            f1.setOptions("维护,在研,升级");
-            f1.setDescription("版本类型");
-            f1.setRequired(true);
-            f1.setSortOrder(1);
-            fieldConfigRepository.save(f1);
-
-            FieldConfig f2 = new FieldConfig();
-            f2.setFieldName("versionPhase");
-            f2.setFieldType("select");
-            f2.setOptions("月度维护,紧急版本,第一版,第二版,第三版,第四版,第五版,Tag线版本,合格版本,合同期维护版本");
-            f2.setDescription("版本所处阶段");
-            f2.setRequired(true);
-            f2.setSortOrder(2);
-            fieldConfigRepository.save(f2);
-
-            FieldConfig f3 = new FieldConfig();
-            f3.setFieldName("productName");
-            f3.setFieldType("input");
-            f3.setOptions("");
-            f3.setDescription("产品名称");
-            f3.setRequired(true);
-            f3.setSortOrder(3);
-            fieldConfigRepository.save(f3);
-
-            FieldConfig f4 = new FieldConfig();
-            f4.setFieldName("testType");
-            f4.setFieldType("select");
-            f4.setOptions("功能测试,自动化测试,性能测试,安全测试,兼容性测试");
-            f4.setDescription("测试类型");
-            f4.setRequired(false);
-            f4.setSortOrder(4);
-            fieldConfigRepository.save(f4);
-
-            FieldConfig f5 = new FieldConfig();
-            f5.setFieldName("groupName");
-            f5.setFieldType("select");
-            f5.setOptions("功能测试组,自动化测试组,性能测试组");
-            f5.setDescription("所属组");
-            f5.setRequired(true);
-            f5.setSortOrder(5);
-            fieldConfigRepository.save(f5);
-
-            FieldConfig f6 = new FieldConfig();
-            f6.setFieldName("priority");
-            f6.setFieldType("select");
-            f6.setOptions("高,中,低");
-            f6.setDescription("需求优先级");
-            f6.setRequired(true);
-            f6.setSortOrder(6);
-            fieldConfigRepository.save(f6);
-
-            FieldConfig f7 = new FieldConfig();
-            f7.setFieldName("officeLocation");
-            f7.setFieldType("select");
-            f7.setOptions("");
-            f7.setDescription("办公地点");
-            f7.setRequired(true);
-            f7.setSortOrder(7);
-            fieldConfigRepository.save(f7);
-        }
-        // 对已有数据库，确保关键配置存在（防止被误删后无法恢复）
+        // 使用 ensureFieldConfig 逐个创建，兼容 Flyway 迁移已部分插入的场景
+        ensureFieldConfig("versionType", "select", "维护,在研,升级", "版本类型", true, 1);
+        ensureFieldConfig("versionPhase", "select", "月度维护,紧急版本,第一版,第二版,第三版,第四版,第五版,Tag线版本,合格版本,合同期维护版本", "版本所处阶段", true, 2);
+        ensureFieldConfig("productName", "input", "", "产品名称", true, 3);
+        ensureFieldConfig("testType", "select", "功能测试,自动化测试,性能测试,安全测试,兼容性测试", "测试类型", false, 4);
+        ensureFieldConfig("groupName", "select", "功能测试组,自动化测试组,性能测试组", "所属组", true, 5);
+        ensureFieldConfig("priority", "select", "高,中,低", "需求优先级", true, 6);
         ensureFieldConfig("officeLocation", "select", "", "办公地点", true, 7);
     }
 
