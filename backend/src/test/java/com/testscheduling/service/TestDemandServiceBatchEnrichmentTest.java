@@ -1,5 +1,6 @@
 package com.testscheduling.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.testscheduling.dto.DemandFulfillmentResponse;
 import com.testscheduling.dto.ManpowerSummary;
 import com.testscheduling.entity.DemandManpowerDetail;
@@ -9,6 +10,7 @@ import com.testscheduling.repository.AuditLogRepository;
 import com.testscheduling.repository.DemandManpowerDetailRepository;
 import com.testscheduling.repository.ScheduleRepository;
 import com.testscheduling.repository.TestDemandRepository;
+import com.testscheduling.repository.TestStaffRepository;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -56,7 +58,8 @@ class TestDemandServiceBatchEnrichmentTest {
             });
         TestDemandService service = new TestDemandService(
             demandRepository, detailRepository, specialService, mock(ScheduleRepository.class),
-            mock(AuditLogService.class), fulfillmentService, mock(FieldConfigService.class));
+            mock(AuditLogService.class), fulfillmentService, mock(FieldConfigService.class),
+            mock(ObjectMapper.class), mock(TestStaffRepository.class));
 
         List<TestDemand> result = service.findPendingAndScheduled();
 
@@ -97,7 +100,8 @@ class TestDemandServiceBatchEnrichmentTest {
 
         TestDemandService service = new TestDemandService(
             demandRepository, detailRepository, specialService, mock(ScheduleRepository.class),
-            mock(AuditLogService.class), fulfillmentService, mock(FieldConfigService.class));
+            mock(AuditLogService.class), fulfillmentService, mock(FieldConfigService.class),
+            mock(ObjectMapper.class), mock(TestStaffRepository.class));
 
         List<TestDemand> result = service.findPendingAndScheduled();
 
@@ -142,7 +146,8 @@ class TestDemandServiceBatchEnrichmentTest {
 
         TestDemandService service = new TestDemandService(
             demandRepository, detailRepository, specialService, mock(ScheduleRepository.class),
-            mock(AuditLogService.class), fulfillmentService, mock(FieldConfigService.class));
+            mock(AuditLogService.class), fulfillmentService, mock(FieldConfigService.class),
+            mock(ObjectMapper.class), mock(TestStaffRepository.class));
 
         List<TestDemand> result = service.findPendingAndScheduled();
 

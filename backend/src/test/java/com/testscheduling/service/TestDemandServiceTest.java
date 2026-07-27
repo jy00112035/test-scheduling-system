@@ -132,8 +132,8 @@ class TestDemandServiceTest {
         TestDemand persisted = demandRepository.findById(created.getId()).orElseThrow();
         persisted.setStatus(TestDemand.DemandStatus.scheduled);
         demandRepository.saveAndFlush(persisted);
-        assertEquals(TestDemand.DemandStatus.completed, service.close(created.getId()).getStatus());
-        assertEquals(TestDemand.DemandStatus.completed, service.close(created.getId()).getStatus());
+        assertEquals(TestDemand.DemandStatus.completed, service.close(created.getId()).demand().getStatus());
+        assertEquals(TestDemand.DemandStatus.completed, service.close(created.getId()).demand().getStatus());
     }
 
     @Test
