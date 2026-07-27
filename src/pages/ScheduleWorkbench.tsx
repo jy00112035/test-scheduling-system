@@ -51,6 +51,7 @@ import type {
   UnfulfilledDetail,
   BatchMetrics,
   AllocationTarget,
+  DemandOfficePreferences,
 } from './workbench/workbenchTypes';
 
 const { confirm } = Modal;
@@ -120,6 +121,7 @@ const ScheduleWorkbench: React.FC = () => {
   const [fullIncludeSaturdays, setFullIncludeSaturdays] = useState(false);
   const [fullIncludeSundays, setFullIncludeSundays] = useState(false);
   const [selectedDemandIds, setSelectedDemandIds] = useState<Set<number>>(new Set());
+  const [demandOfficePreferences, setDemandOfficePreferences] = useState<DemandOfficePreferences>({});
   const [fixedStaffIds, setFixedStaffIds] = useState<Set<number>>(new Set());
   const [excludedStaffIds, setExcludedStaffIds] = useState<Set<number>>(new Set());
   const [unfulfilledDemands, setUnfulfilledDemands] = useState<Set<number>>(new Set());
@@ -398,6 +400,12 @@ const ScheduleWorkbench: React.FC = () => {
     }
   };
 
+  // ---- 办公场地选项（派生） ----
+  const officeLocationOptions = useMemo(() => {
+    const locations = new Set(staffs.map(s => s.officeLocation).filter(Boolean));
+    return Array.from(locations).sort() as string[];
+  }, [staffs]);
+
   // ---- 批次指标（派生） ----
   const staffIds = useMemo(() => staffs.map(s => s.id), [staffs]);
 
@@ -486,6 +494,8 @@ const ScheduleWorkbench: React.FC = () => {
         includeSundays: mode === 'FIXED_RANGE'
           ? fixedIncludeSundays : fullIncludeSundays,
         replaceExistingDrafts: true,
+        demandOfficePreferences: Object.keys(demandOfficePreferences).length > 0
+          ? demandOfficePreferences : undefined,
       });
       if (!mountedRef.current) return;
       const mutationCurrent = completeScheduleMutation(session);
@@ -1276,10 +1286,22 @@ const ScheduleWorkbench: React.FC = () => {
                     }}
                   />
                   <div style={{ marginLeft: 8, flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500 }}>
-                      {d.product}
+                    <div style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{ flex: 1 }}>{d.product}</span>
+                      {officeLocationOptions.length > 0 && (
+                        <Select
+                          size="small"
+                          placeholder="不限场地"
+                          allowClear
+                          value={demandOfficePreferences[d.id]}
+                          onChange={(val) => handleOfficePreferenceChange(d.id, val)}
+                          style={{ width: 90, fontSize: 10 }}
+                          options={officeLocationOptions.map(loc => ({ value: loc, label: loc }))}
+                          onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                        />
+                      )}
                       {d.priority && (
-                        <Tag color={getPriorityColor(d.priority, priorityOptions)} style={{ marginLeft: 4, fontSize: 10, lineHeight: '16px' }}>
+                        <Tag color={getPriorityColor(d.priority, priorityOptions)} style={{ marginLeft: 0, fontSize: 10, lineHeight: '16px', flexShrink: 0 }}>
                           {d.priority}
                         </Tag>
                       )}
@@ -1322,6 +1344,7 @@ const ScheduleWorkbench: React.FC = () => {
     setFixedIncludeSundays(false);
     setFixedStaffIds(new Set());
     setExcludedStaffIds(new Set());
+    setDemandOfficePreferences({});
     setDateRecModalOpen(true);
   };
 
@@ -1332,8 +1355,22 @@ const ScheduleWorkbench: React.FC = () => {
     setFullIncludeSundays(false);
     setFixedStaffIds(new Set());
     setExcludedStaffIds(new Set());
+    setDemandOfficePreferences({});
     setFullAllocModalOpen(true);
   };
+
+  // ---- 办公场地偏好 ----
+  const handleOfficePreferenceChange = useCallback((demandId: number, officeLocation: string | undefined) => {
+    setDemandOfficePreferences(prev => {
+      const next = { ...prev };
+      if (officeLocation) {
+        next[demandId] = officeLocation;
+      } else {
+        delete next[demandId];
+      }
+      return next;
+    });
+  }, []);
 
   // ---- 优先级 ----
   const handlePriorityChange = async (demandId: number, val: string) => {

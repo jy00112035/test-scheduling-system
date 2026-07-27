@@ -2,6 +2,7 @@ package com.testscheduling.dto;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 public class ScheduleRecommendationRequest {
     public enum Mode { FIXED_RANGE, FULL_DEMAND }
@@ -14,6 +15,7 @@ public class ScheduleRecommendationRequest {
     private Boolean includeSaturdays = true;
     private Boolean includeSundays = true;
     private Boolean replaceExistingDrafts = false;
+    private Map<Long, String> demandOfficePreferences;
 
     public Mode getMode() { return mode; }
     public void setMode(Mode mode) { this.mode = mode; }
@@ -31,6 +33,8 @@ public class ScheduleRecommendationRequest {
     public void setIncludeSundays(Boolean includeSundays) { this.includeSundays = includeSundays; }
     public Boolean getReplaceExistingDrafts() { return replaceExistingDrafts; }
     public void setReplaceExistingDrafts(Boolean replaceExistingDrafts) { this.replaceExistingDrafts = replaceExistingDrafts; }
+    public Map<Long, String> getDemandOfficePreferences() { return demandOfficePreferences; }
+    public void setDemandOfficePreferences(Map<Long, String> demandOfficePreferences) { this.demandOfficePreferences = demandOfficePreferences; }
 
     public record DateRange(LocalDate startDate, LocalDate endDate) { }
 }

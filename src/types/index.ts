@@ -168,6 +168,7 @@ export interface ScheduleRecommendationRequest {
   includeSaturdays?: boolean;
   includeSundays?: boolean;
   replaceExistingDrafts?: boolean;
+  demandOfficePreferences?: Record<number, string>;
 }
 
 export interface ScheduleRecommendationResponse {

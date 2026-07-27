@@ -256,6 +256,8 @@ public class ScheduleRecommendationService {
         }
         boolean sawQualified = false;
         boolean sawDevice = false;
+        String preferredLocation = request.getDemandOfficePreferences() != null
+                ? request.getDemandOfficePreferences().get(demand.getId()) : null;
         List<LocalDate> allocationDates = dates(demand, request);
         for (LocalDate date : allocationDates) {
             while (remaining.compareTo(STEP) >= 0) {
@@ -263,7 +265,7 @@ public class ScheduleRecommendationService {
                         special == null ? Objects.equals(candidate.getTestType(), detail.getTestType())
                                 : familiar.contains(new TestStaffModuleId(candidate.getId(), special.getModuleId())))
                         .filter(candidate -> confidentiallyEligible(demand, candidate, users))
-                        .sorted(candidateComparator(fixed, allocationDates, date, allByStaff, statuses))
+                        .sorted(candidateComparator(fixed, allocationDates, date, allByStaff, statuses, preferredLocation))
                         .toList();
                 sawQualified |= !candidates.isEmpty();
                 TestStaff chosen = null;
@@ -289,10 +291,14 @@ public class ScheduleRecommendationService {
         return new GapDraft(detail == null ? null : detail.getId(), special == null ? null : special.getId(), remaining, code);
     }
 
-    /** Fixed staff IDs affect priority only after all eligibility filters pass. */
+    /** Fixed staff IDs affect priority only after all eligibility filters pass.
+     *  Office location preference: staff with same office location get priority. */
     private Comparator<TestStaff> candidateComparator(Set<Long> fixed, List<LocalDate> dates,
-            LocalDate date, Map<Long, List<Schedule>> schedules, Map<String, StaffDailyStatus> statuses) {
+            LocalDate date, Map<Long, List<Schedule>> schedules, Map<String, StaffDailyStatus> statuses,
+            String preferredLocation) {
         return Comparator.comparing((TestStaff staff) -> !fixed.contains(staff.getId()))
+                .thenComparing((TestStaff staff) -> preferredLocation != null
+                        && !Objects.equals(staff.getOfficeLocation(), preferredLocation))
                 .thenComparing((left, right) -> Integer.compare(
                         periodRemaining(right, dates, schedules, statuses),
                         periodRemaining(left, dates, schedules, statuses)))

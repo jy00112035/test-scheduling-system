@@ -153,6 +153,9 @@ export interface WorkbenchDraft {
   lastSavedAt: string;
 }
 
+/** 需求办公场地偏好映射：demandId → officeLocation */
+export type DemandOfficePreferences = Record<number, string>;
+
 // ---- UI 状态枚举 ----
 
 /** 需求在排布工作台中的 UI 状态 */
