@@ -195,6 +195,15 @@ class ApiService {
     });
   }
 
+  async previewCloseDemand(id: string) {
+    return this.request<{
+      futureScheduleCount: number;
+      pastScheduledManpower: number;
+      demandManpower: number;
+      manpowerSatisfied: boolean;
+    }>(`/demands/${id}/closePreview`);
+  }
+
   async closeDemand(id: string) {
     return this.request<any>(`/demands/${id}/close`, {
       method: 'POST',

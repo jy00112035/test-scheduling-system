@@ -30,6 +30,9 @@ public class TestStaff {
 
     private String groupName;
 
+    @Column(name = "office_location")
+    private String officeLocation;
+
     private String testType;
 
     @Column(precision = 3, scale = 2)

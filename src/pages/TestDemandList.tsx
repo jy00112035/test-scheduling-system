@@ -49,6 +49,15 @@ const TestDemandList: React.FC = () => {
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [showRevisionModal, setShowRevisionModal] = useState(false);
   const [revisingDemand, setRevisingDemand] = useState<TestDemand | null>(null);
+  const [closeModalVisible, setCloseModalVisible] = useState(false);
+  const [closingDemand, setClosingDemand] = useState<TestDemand | null>(null);
+  const [closeLoading, setCloseLoading] = useState(false);
+  const [closeInfo, setCloseInfo] = useState<{
+    pastScheduledManpower: number;
+    manpowerSatisfied: boolean;
+    deletedScheduleCount: number;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     fetchDemands();
@@ -132,15 +141,43 @@ const TestDemandList: React.FC = () => {
     }
   };
 
-  const handleClose = async (id: string) => {
+  const handleCloseClick = async (demand: TestDemand) => {
+    setClosingDemand(demand);
+    setCloseLoading(true);
+    setCloseModalVisible(true);
     try {
-      await api.closeDemand(id);
+      const res = await api.previewCloseDemand(demand.id);
+      setCloseInfo({
+        pastScheduledManpower: res.pastScheduledManpower ?? 0,
+        manpowerSatisfied: res.manpowerSatisfied ?? true,
+        deletedScheduleCount: res.futureScheduleCount ?? 0,
+        message: '',
+      });
+    } catch (error: any) {
+      message.error(error.message || '获取关闭信息失败');
+      setCloseModalVisible(false);
+      setClosingDemand(null);
+    } finally {
+      setCloseLoading(false);
+    }
+  };
+
+  const handleCloseConfirm = async () => {
+    if (!closingDemand) return;
+    setCloseLoading(true);
+    try {
+      const res = await api.closeDemand(closingDemand.id);
       setDemands(demands.map(d =>
-        d.id === id ? { ...d, status: 'completed' as const } : d
+        d.id === closingDemand.id ? { ...d, status: 'completed' as const } : d
       ));
-      message.success('测试需求已关闭');
+      message.success(res?.message || '测试需求已关闭');
     } catch (error: any) {
       message.error(error.message || '关闭失败');
+    } finally {
+      setCloseLoading(false);
+      setCloseModalVisible(false);
+      setClosingDemand(null);
+      setCloseInfo(null);
     }
   };
 
@@ -362,7 +399,7 @@ const TestDemandList: React.FC = () => {
         const isRevisionPending = record.status === 'revision_pending';
         const canEdit = isRejected;
         const canRevise = isPending || isScheduled;
-        const canClose = isScheduled;
+        const canClose = isScheduled || isPending;
         const canDelete = isSubmitted || isRejected;
 
         if (isCompleted) return null;
@@ -390,20 +427,14 @@ const TestDemandList: React.FC = () => {
               </Button>
             )}
             {canClose && (
-              <Popconfirm
-                title="确定关闭此需求？"
-                onConfirm={() => handleClose(record.id)}
-                okText="确定"
-                cancelText="取消"
+              <Button
+                type="link"
+                size="small"
+                icon={<CheckCircleOutlined />}
+                onClick={() => handleCloseClick(record)}
               >
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<CheckCircleOutlined />}
-                >
-                  关闭
-                </Button>
-              </Popconfirm>
+                关闭
+              </Button>
             )}
             {canDelete && (
               <Popconfirm
@@ -597,6 +628,63 @@ const TestDemandList: React.FC = () => {
             onCancel={() => setShowRevisionModal(false)}
           />
         )}
+      </Modal>
+
+      <Modal
+        title="关闭测试需求"
+        open={closeModalVisible}
+        onCancel={() => { setCloseModalVisible(false); setClosingDemand(null); setCloseInfo(null); }}
+        footer={null}
+        width={480}
+        destroyOnClose
+      >
+        {closeLoading ? (
+          <div style={{ textAlign: 'center', padding: '24px 0' }}>加载中...</div>
+        ) : closeInfo ? (
+          <div>
+            {!closeInfo.manpowerSatisfied && (
+              <div style={{
+                backgroundColor: '#fff2f0',
+                border: '1px solid #ffccc7',
+                borderRadius: 6,
+                padding: '12px 16px',
+                marginBottom: 16,
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+              }}>
+                <ExclamationCircleOutlined style={{ color: '#ff4d4f', fontSize: 16, marginTop: 2 }} />
+                <div>
+                  <div style={{ fontWeight: 500, marginBottom: 4 }}>人力未全部满足</div>
+                  <div style={{ color: '#666' }}>
+                    截止今日已排班人力（{closeInfo.pastScheduledManpower}人天）不足需求人力（{closingDemand?.manpowerDemand}人天）。
+                    关闭后将清理未来排班，是否确认？
+                  </div>
+                </div>
+              </div>
+            )}
+            {closeInfo.manpowerSatisfied && closeInfo.deletedScheduleCount > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                将清理 {closeInfo.deletedScheduleCount} 条排班记录，是否确认关闭？
+              </div>
+            )}
+            {closeInfo.manpowerSatisfied && closeInfo.deletedScheduleCount === 0 && (
+              <div style={{ marginBottom: 16 }}>
+                确定关闭此需求？
+              </div>
+            )}
+            <div style={{ textAlign: 'right' }}>
+              <Space>
+                <Button onClick={() => { setCloseModalVisible(false); setClosingDemand(null); setCloseInfo(null); }}>
+                  取消
+                </Button>
+                <Button type="primary" danger onClick={handleCloseConfirm}>
+                  确认关闭
+                </Button>
+              </Space>
+            </div>
+          </div>
+        ) : null}
       </Modal>
     </div>
   );

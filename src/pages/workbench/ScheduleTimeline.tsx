@@ -118,6 +118,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
   const [coefficientFilter, setCoefficientFilter] = useState<string[]>([]);
   const [clearanceFilter, setClearanceFilter] = useState<string[]>([]); // 'confidential' | 'normal'
   const [headerTestTypeFilter, setHeaderTestTypeFilter] = useState<string[]>([]);
+  const [officeLocationFilter, setOfficeLocationFilter] = useState<string[]>([]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(excludedTestTypes));
@@ -138,6 +139,7 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
   const activeStaffs = staffs.filter(s => s.status === 'active');
   const allCoefficients = [...new Set(activeStaffs.map(s => s.currentCoefficient?.toFixed(1) || '1.0'))].sort();
   const allHeaderTestTypes = [...new Set(activeStaffs.map(s => s.testType).filter(Boolean))] as string[];
+  const allOfficeLocations = [...new Set(activeStaffs.map(s => s.officeLocation).filter(Boolean))] as string[];
 
   // 基础员工列表（仅测试组长权限限制，用于空闲工作量计算）
   const baseStaffs = staffs.filter(s => {
@@ -171,6 +173,8 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
     }
     // 表头：测试类型筛选
     if (headerTestTypeFilter.length > 0 && s.testType && !headerTestTypeFilter.includes(s.testType)) return false;
+    // 表头：办公地点筛选
+    if (officeLocationFilter.length > 0 && (!s.officeLocation || !officeLocationFilter.includes(s.officeLocation))) return false;
     return true;
   });
 
@@ -244,6 +248,46 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
             allowClear={false}
             style={{ width: 130 }}
           />
+          {allOfficeLocations.length > 0 && (
+            <Dropdown
+              trigger={['click']}
+              popupRender={() => (
+                <div style={{ padding: 8, background: '#fff', borderRadius: 4, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+                  <div style={{ marginBottom: 4 }}>
+                    <Checkbox
+                      checked={officeLocationFilter.length === allOfficeLocations.length}
+                      indeterminate={officeLocationFilter.length > 0 && officeLocationFilter.length < allOfficeLocations.length}
+                      onChange={(e) => {
+                        setOfficeLocationFilter(e.target.checked ? [...allOfficeLocations] : []);
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: '#888' }}>全选</span>
+                    </Checkbox>
+                  </div>
+                  {allOfficeLocations.map(loc => (
+                    <div key={loc} style={{ padding: '2px 0' }}>
+                      <Checkbox
+                        checked={officeLocationFilter.includes(loc)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setOfficeLocationFilter(prev => [...prev, loc]);
+                          } else {
+                            setOfficeLocationFilter(prev => prev.filter(x => x !== loc));
+                          }
+                        }}
+                      >
+                        {loc}
+                      </Checkbox>
+                    </div>
+                  ))}
+                </div>
+              )}
+            >
+              <Button style={{ minWidth: 130, textAlign: 'left' }}>
+                {officeLocationFilter.length > 0 ? `办公地点 (${officeLocationFilter.length})` : '办公地点'} <DownOutlined style={{ fontSize: 10 }} />
+              </Button>
+            </Dropdown>
+          )}
           <Dropdown
             trigger={['click']}
             popupRender={() => (
@@ -374,24 +418,24 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
         <table className="kanban-table" style={{ minWidth: 1200 }}>
           <thead>
             <tr ref={headerRowRef} style={{ position: 'sticky', top: 0, zIndex: 5 }}>
-              {/* 姓名 */}
-              <th style={{ minWidth: 65, position: 'sticky', left: 0, background: '#fafafa', zIndex: 6 }}>
+              {/* 姓名+系数 */}
+              <th style={{ minWidth: 110, position: 'sticky', left: 0, background: '#fafafa', zIndex: 6 }}>
                 <span>姓名</span>
               </th>
-              {/* 系数 */}
-              <th style={{ minWidth: 50, position: 'sticky', left: 65, background: '#fafafa', zIndex: 6 }}>
-                <span>系数</span>
+              {/* 办公地点 */}
+              <th style={{ minWidth: 80, position: 'sticky', left: 110, background: '#fafafa', zIndex: 6 }}>
+                <span>办公地点</span>
               </th>
               {/* 保密权限 */}
-              <th style={{ minWidth: 60, position: 'sticky', left: 115, background: '#fafafa', zIndex: 6 }}>
+              <th style={{ minWidth: 60, position: 'sticky', left: 190, background: '#fafafa', zIndex: 6 }}>
                 <span>保密权限</span>
               </th>
               {/* 测试类型 */}
-              <th style={{ minWidth: 65, position: 'sticky', left: 175, background: '#fafafa', zIndex: 6 }}>
+              <th style={{ minWidth: 65, position: 'sticky', left: 250, background: '#fafafa', zIndex: 6 }}>
                 <span>测试类型</span>
               </th>
               {/* 熟悉模块 */}
-              <th style={{ minWidth: 140, position: 'sticky', left: 240, background: '#fafafa', zIndex: 6 }}>
+              <th style={{ minWidth: 140, position: 'sticky', left: 315, background: '#fafafa', zIndex: 6 }}>
                 <span>熟悉模块</span>
               </th>
               {weekDates.map((date) => {
@@ -494,23 +538,24 @@ const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({
                 {/* Sticky columns */}
                 <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 12, whiteSpace: 'nowrap' }}>
                   <strong>{staff.name}</strong>
-                </td>
-                <td style={{ position: 'sticky', left: 65, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, textAlign: 'center' }}>
-                  <Tag color={staff.currentCoefficient === 1.0 ? 'green' : 'orange'} style={{ fontSize: 10, padding: '0 2px' }}>
+                  <Tag color={staff.currentCoefficient === 1.0 ? 'green' : 'orange'} style={{ fontSize: 10, padding: '0 2px', marginLeft: 4 }}>
                     {staff.currentCoefficient?.toFixed(1) || '1.0'}
                   </Tag>
                 </td>
-                <td style={{ position: 'sticky', left: 115, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, textAlign: 'center' }}>
+                <td style={{ position: 'sticky', left: 110, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666', textAlign: 'center' }}>
+                  {staff.officeLocation || '-'}
+                </td>
+                <td style={{ position: 'sticky', left: 190, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, textAlign: 'center' }}>
                   {staff.confidentialClearance ? (
                     <Tag color="red" style={{ fontSize: 10, padding: '0 4px' }}>保密</Tag>
                   ) : (
                     <span style={{ color: '#ccc' }}>-</span>
                   )}
                 </td>
-                <td style={{ position: 'sticky', left: 175, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
+                <td style={{ position: 'sticky', left: 250, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
                   {staff.testType || '-'}
                 </td>
-                <td style={{ position: 'sticky', left: 240, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
+                <td style={{ position: 'sticky', left: 315, background: '#fff', zIndex: 1, padding: '4px 2px', fontSize: 11, color: '#666' }}>
                   {staff.familiarModules && staff.familiarModules.length > 0 ? (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, maxWidth: 130 }}>
                       {staff.familiarModules.map(module => (

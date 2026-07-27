@@ -63,9 +63,10 @@ public class FieldConfigService {
     }
 
     @Transactional
-    public void appendStaffOptions(String groupName, String testType) {
+    public void appendStaffOptions(String groupName, String testType, String officeLocation) {
         appendOption("groupName", groupName);
         appendOption("testType", testType);
+        appendOption("officeLocation", officeLocation);
     }
 
     @Transactional
@@ -135,7 +136,9 @@ public class FieldConfigService {
     }
 
     private boolean isStaffOptionField(String fieldName) {
-        return "groupName".equals(fieldName) || "testType".equals(fieldName);
+        return "groupName".equals(fieldName)
+            || "testType".equals(fieldName)
+            || "officeLocation".equals(fieldName);
     }
 
     private BusinessException systemFieldImmutable() {

@@ -11,6 +11,7 @@ public class StaffRequest {
     private String empNo;
     private LocalDate joinDate;
     private String groupName;
+    private String officeLocation;
     private String testType;
     private BigDecimal initialCoefficient;
     private BigDecimal currentCoefficient;

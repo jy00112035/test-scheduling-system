@@ -259,6 +259,31 @@ public class DataInitializer implements CommandLineRunner {
             f6.setRequired(true);
             f6.setSortOrder(6);
             fieldConfigRepository.save(f6);
+
+            FieldConfig f7 = new FieldConfig();
+            f7.setFieldName("officeLocation");
+            f7.setFieldType("select");
+            f7.setOptions("");
+            f7.setDescription("办公地点");
+            f7.setRequired(true);
+            f7.setSortOrder(7);
+            fieldConfigRepository.save(f7);
+        }
+        // 对已有数据库，确保关键配置存在（防止被误删后无法恢复）
+        ensureFieldConfig("officeLocation", "select", "", "办公地点", true, 7);
+    }
+
+    private void ensureFieldConfig(String fieldName, String fieldType,
+            String options, String description, boolean required, int sortOrder) {
+        if (fieldConfigRepository.findByFieldName(fieldName).isEmpty()) {
+            FieldConfig config = new FieldConfig();
+            config.setFieldName(fieldName);
+            config.setFieldType(fieldType);
+            config.setOptions(options);
+            config.setDescription(description);
+            config.setRequired(required);
+            config.setSortOrder(sortOrder);
+            fieldConfigRepository.save(config);
         }
     }
 }

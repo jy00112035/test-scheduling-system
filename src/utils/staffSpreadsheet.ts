@@ -7,6 +7,7 @@ export interface StaffSpreadsheetRecord {
   empNo: string;
   joinDate: string;
   groupName: string;
+  officeLocation?: string;
   testType?: string;
   initialCoefficient: number;
   currentCoefficient: number;
@@ -60,6 +61,7 @@ export function buildStaffExportRows(staffs: StaffSpreadsheetRecord[]) {
     姓名: staff.name,
     入职日期: staff.joinDate,
     所属项目: staff.groupName,
+    办公地点: staff.officeLocation || '',
     测试类型: staff.testType || '',
     初始系数: staff.initialCoefficient,
     当前系数: staff.currentCoefficient,
@@ -75,7 +77,7 @@ export function buildStaffExportRows(staffs: StaffSpreadsheetRecord[]) {
 export function createStaffImportTemplateWorkbook() {
   const workbook = XLSX.utils.book_new();
   const dataSheet = XLSX.utils.aoa_to_sheet([[
-    '工号', '姓名', '入职日期', '所属项目', '测试类型', '初始系数', '当前系数', '状态', '角色', '熟悉模块', '保密权限',
+    '工号', '姓名', '入职日期', '所属项目', '办公地点', '测试类型', '初始系数', '当前系数', '状态', '角色', '熟悉模块', '保密权限',
   ]]);
   const guidanceSheet = XLSX.utils.aoa_to_sheet([
     ['人员导入填写说明'],

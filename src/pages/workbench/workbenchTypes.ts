@@ -77,6 +77,7 @@ export interface StaffItem {
   empNo: string;
   joinDate?: string;
   groupName?: string;
+  officeLocation?: string;
   testType?: string;
   initialCoefficient: number;
   currentCoefficient: number;

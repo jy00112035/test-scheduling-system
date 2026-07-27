@@ -3,6 +3,8 @@ package com.testscheduling.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.testscheduling.dto.DemandCloseResponse;
+import com.testscheduling.dto.DemandClosePreviewResponse;
 import com.testscheduling.dto.DemandFulfillmentResponse;
 import com.testscheduling.dto.RevisionDiffResponse;
 import com.testscheduling.dto.RevisionRequest;
@@ -165,15 +167,83 @@ public class TestDemandService {
         testDemandRepository.deleteById(id);
     }
 
+    @Transactional(readOnly = true)
+    public DemandClosePreviewResponse previewClose(Long id) {
+        TestDemand demand = lockedDemand(id);
+        if (demand.getStatus() != TestDemand.DemandStatus.scheduled
+                && demand.getStatus() != TestDemand.DemandStatus.pending) {
+            throw invalidStatusTransition();
+        }
+
+        List<Schedule> allSchedules = scheduleRepository.findByDemandId(id);
+        LocalDate today = LocalDate.now();
+
+        BigDecimal pastScheduledManpower = allSchedules.stream()
+            .filter(s -> s.getDate() != null && !s.getDate().isAfter(today))
+            .map(s -> BigDecimal.valueOf(s.getPercentage() == null ? 0 : s.getPercentage())
+                .divide(BigDecimal.valueOf(100)))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        long futureScheduleCount = allSchedules.stream()
+            .filter(s -> s.getDate() != null && !s.getDate().isBefore(today))
+            .count();
+
+        BigDecimal demandManpower = demand.getManpowerDemand() != null
+            ? demand.getManpowerDemand() : BigDecimal.ZERO;
+        boolean manpowerSatisfied = pastScheduledManpower.compareTo(demandManpower) >= 0;
+
+        return new DemandClosePreviewResponse(
+            (int) futureScheduleCount, pastScheduledManpower, demandManpower, manpowerSatisfied);
+    }
+
     @Transactional
-    public TestDemand close(Long id) {
+    public DemandCloseResponse close(Long id) {
         TestDemand demand = lockedDemand(id);
         if (demand.getStatus() == TestDemand.DemandStatus.completed) {
-            return demand;
+            return new DemandCloseResponse(demand, 0, BigDecimal.ZERO, true, "需求已处于关闭状态");
         }
-        requireStatus(demand, TestDemand.DemandStatus.scheduled);
+        if (demand.getStatus() != TestDemand.DemandStatus.scheduled
+                && demand.getStatus() != TestDemand.DemandStatus.pending) {
+            throw invalidStatusTransition();
+        }
+
+        List<Schedule> allSchedules = scheduleRepository.findByDemandId(id);
+        LocalDate today = LocalDate.now();
+
+        BigDecimal pastScheduledManpower = allSchedules.stream()
+            .filter(s -> s.getDate() != null && !s.getDate().isAfter(today))
+            .map(s -> BigDecimal.valueOf(s.getPercentage() == null ? 0 : s.getPercentage())
+                .divide(BigDecimal.valueOf(100)))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal demandManpower = demand.getManpowerDemand() != null
+            ? demand.getManpowerDemand() : BigDecimal.ZERO;
+        boolean manpowerSatisfied = pastScheduledManpower.compareTo(demandManpower) >= 0;
+
+        List<Schedule> futureSchedules = allSchedules.stream()
+            .filter(s -> s.getDate() != null && !s.getDate().isBefore(today))
+            .toList();
+        for (Schedule s : futureSchedules) {
+            scheduleRepository.delete(s);
+        }
+
         demand.setStatus(TestDemand.DemandStatus.completed);
-        return testDemandRepository.save(demand);
+        TestDemand saved = testDemandRepository.save(demand);
+
+        String message;
+        if (futureSchedules.isEmpty()) {
+            message = "测试需求已关闭";
+        } else if (manpowerSatisfied) {
+            message = String.format("测试需求已关闭，已清理 %d 条排班", futureSchedules.size());
+        } else {
+            message = String.format("测试需求已关闭。注意：截止今日已排班人力(%s人天)不足需求人力(%s人天)，已清理 %d 条排班",
+                pastScheduledManpower.stripTrailingZeros().toPlainString(),
+                demandManpower.stripTrailingZeros().toPlainString(),
+                futureSchedules.size());
+        }
+
+        return new DemandCloseResponse(
+            saved, futureSchedules.size(), pastScheduledManpower, manpowerSatisfied, message);
     }
 
     @Transactional(readOnly = true)

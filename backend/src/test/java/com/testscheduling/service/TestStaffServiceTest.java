@@ -93,7 +93,7 @@ class TestStaffServiceTest {
         StaffCreateResponse response = service.create(request, "actor-admin");
 
         verify(staffModuleService, never()).replaceModulesWithLocksHeld(any(), any());
-        verify(fieldConfigService).appendStaffOptions(null, null);
+        verify(fieldConfigService).appendStaffOptions(null, null, null);
         assertEquals("支付模块", response.getStaff().getLegacyFamiliarModules());
         assertEquals(List.of(), response.getStaff().getFamiliarModules());
     }

@@ -1,6 +1,8 @@
 package com.testscheduling.controller;
 
 import com.testscheduling.dto.ApiResponse;
+import com.testscheduling.dto.DemandCloseResponse;
+import com.testscheduling.dto.DemandClosePreviewResponse;
 import com.testscheduling.dto.RevisionDiffResponse;
 import com.testscheduling.dto.RevisionRequest;
 import com.testscheduling.entity.TestDemand;
@@ -63,10 +65,17 @@ public class TestDemandController {
         return ApiResponse.success("删除成功", null);
     }
 
-    @PostMapping("/{id}/close")
-    public ApiResponse<TestDemand> closeDemand(@PathVariable Long id) {
+    @GetMapping("/{id}/closePreview")
+    public ApiResponse<DemandClosePreviewResponse> previewClose(@PathVariable Long id) {
         requireDemandEditor();
-        return ApiResponse.success("关闭成功", testDemandService.close(id));
+        return ApiResponse.success(testDemandService.previewClose(id));
+    }
+
+    @PostMapping("/{id}/close")
+    public ApiResponse<DemandCloseResponse> closeDemand(@PathVariable Long id) {
+        requireDemandEditor();
+        DemandCloseResponse response = testDemandService.close(id);
+        return ApiResponse.success(response.message(), response);
     }
 
     @GetMapping("/pending-approval")

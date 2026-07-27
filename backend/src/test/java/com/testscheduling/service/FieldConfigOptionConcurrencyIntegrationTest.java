@@ -73,10 +73,10 @@ class FieldConfigOptionConcurrencyIntegrationTest {
         }).when(repository).save(any(FieldConfig.class));
 
         Future<?> first = executor.submit(
-            () -> service.appendStaffOptions("并发项目甲", null));
+            () -> service.appendStaffOptions("并发项目甲", null, null));
         assertTrue(firstWriterAtSave.await(5, TimeUnit.SECONDS));
         Future<?> second = executor.submit(
-            () -> service.appendStaffOptions("并发项目乙", null));
+            () -> service.appendStaffOptions("并发项目乙", null, null));
 
         try {
             second.get(1, TimeUnit.SECONDS);

@@ -32,7 +32,7 @@ class FieldConfigServiceTest {
         when(repository.findByFieldNameForUpdate("groupName")).thenReturn(Optional.of(group));
         when(repository.findByFieldNameForUpdate("testType")).thenReturn(Optional.of(testType));
 
-        service.appendStaffOptions(" 新项目 ", " 自动化测试 ");
+        service.appendStaffOptions(" 新项目 ", " 自动化测试 ", null);
 
         assertEquals("已有项目,新项目", group.getOptions());
         assertEquals("功能测试,自动化测试", testType.getOptions());

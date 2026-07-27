@@ -62,6 +62,7 @@ interface Staff {
   empNo: string;
   joinDate: string;
   groupName: string;
+  officeLocation?: string;
   testType?: string;
   initialCoefficient: number;
   currentCoefficient: number;
@@ -88,6 +89,7 @@ interface ImportRow {
   empNo: string;
   joinDate: string;
   groupName: string;
+  officeLocation?: string;
   testType?: string;
   initialCoefficient: number;
   currentCoefficient: number;
@@ -369,6 +371,7 @@ const StaffManagement: React.FC = () => {
           const nameKey = headers.find(h => h === '姓名' || h === 'name');
           const joinDateKey = headers.find(h => h === '入职日期' || h === 'joinDate');
           const groupNameKey = headers.find(h => h === '所属项目' || h === 'groupName');
+          const officeLocationKey = headers.find(h => h === '办公地点' || h === 'officeLocation');
           const testTypeKey = headers.find(h => h === '测试类型' || h === 'testType');
           const initialCoefKey = headers.find(h => h === '初始系数' || h === 'initialCoefficient');
           const currentCoefKey = headers.find(h => h === '当前系数' || h === 'currentCoefficient');
@@ -410,11 +413,17 @@ const StaffManagement: React.FC = () => {
 
             // 处理日期格式
             let joinDate = joinDateKey ? rowObj[joinDateKey] : dayjs().format('YYYY-MM-DD');
-            if (typeof joinDate === 'number') {
+            if (joinDate instanceof Date) {
+              // Excel Date 对象直接转换
+              joinDate = dayjs(joinDate).format('YYYY-MM-DD');
+            } else if (typeof joinDate === 'number') {
               // Excel 日期序列号转换
               joinDate = dayjs((joinDate - 25569) * 86400 * 1000).format('YYYY-MM-DD');
             } else if (typeof joinDate === 'string') {
-              joinDate = dayjs(joinDate).format('YYYY-MM-DD') || dayjs().format('YYYY-MM-DD');
+              const parsed = dayjs(joinDate);
+              joinDate = parsed.isValid() ? parsed.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
+            } else if (joinDate == null) {
+              joinDate = dayjs().format('YYYY-MM-DD');
             }
 
             const parsedRoles = parseStaffRoles(roleKey ? rowObj[roleKey] : 'testExecutor');
@@ -433,6 +442,7 @@ const StaffManagement: React.FC = () => {
               empNo: empNo,
               joinDate: joinDate,
               groupName: groupNameKey ? String(rowObj[groupNameKey] || '').trim() : '',
+              officeLocation: officeLocationKey ? String(rowObj[officeLocationKey] || '').trim() || undefined : undefined,
               testType: testTypeKey ? String(rowObj[testTypeKey] || '').trim() || undefined : undefined,
               initialCoefficient: initialCoefKey ? parseImportCoefficient(rowObj[initialCoefKey]) : 0.3,
               currentCoefficient: currentCoefKey ? parseImportCoefficient(rowObj[currentCoefKey]) : 0.3,
@@ -804,6 +814,13 @@ const StaffManagement: React.FC = () => {
       width: 120,
     },
     {
+      title: '办公地点',
+      dataIndex: 'officeLocation',
+      key: 'officeLocation',
+      width: 120,
+      render: (value: string) => value || '-',
+    },
+    {
       title: '测试类型',
       dataIndex: 'testType',
       key: 'testType',
@@ -975,6 +992,7 @@ const StaffManagement: React.FC = () => {
           rowKey="id"
           bordered
           sticky={{ offsetHeader: 48 }}
+          scroll={{ x: 1600 }}
           loading={loading}
           rowSelection={canDeleteStaff(roles, { roles: ['testExecutor'] }) ? {
             selectedRowKeys,
@@ -1056,6 +1074,18 @@ const StaffManagement: React.FC = () => {
           >
             <Select placeholder="请选择所属项目">
               {getSelectOptions('groupName').map((option, index) => (
+                <Option key={index} value={option}>{option}</Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="officeLocation"
+            label="办公地点"
+            rules={[{ required: true, message: '请选择办公地点' }]}
+          >
+            <Select placeholder="请选择办公地点" allowClear>
+              {getSelectOptions('officeLocation').map((option, index) => (
                 <Option key={index} value={option}>{option}</Option>
               ))}
             </Select>
@@ -1295,6 +1325,9 @@ const StaffManagement: React.FC = () => {
                 { title: '工号', dataIndex: 'empNo', key: 'empNo', width: 100 },
                 { title: '姓名', dataIndex: 'name', key: 'name', width: 80 },
                 { title: '所属项目', dataIndex: 'groupName', key: 'groupName', width: 120 },
+                { title: '办公地点', dataIndex: 'officeLocation', key: 'officeLocation', width: 100,
+                  render: (text: string) => text || '-',
+                },
                 { title: '测试类型', dataIndex: 'testType', key: 'testType', width: 100 },
                 { title: '初始系数', dataIndex: 'initialCoefficient', key: 'initialCoefficient', width: 80 },
                 { title: '当前系数', dataIndex: 'currentCoefficient', key: 'currentCoefficient', width: 80 },

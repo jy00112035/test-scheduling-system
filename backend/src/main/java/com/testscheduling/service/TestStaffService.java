@@ -124,6 +124,7 @@ public class TestStaffService {
         staff.setEmpNo(request.getEmpNo());
         staff.setJoinDate(request.getJoinDate());
         staff.setGroupName(request.getGroupName());
+        staff.setOfficeLocation(request.getOfficeLocation());
         staff.setTestType(request.getTestType());
         staff.setInitialCoefficient(request.getInitialCoefficient());
         staff.setCurrentCoefficient(request.getCurrentCoefficient());
@@ -148,7 +149,7 @@ public class TestStaffService {
             staffModuleService.replaceModulesWithLocksHeld(
                 savedStaff, request.getFamiliarModuleIds());
         }
-        fieldConfigService.appendStaffOptions(request.getGroupName(), request.getTestType());
+        fieldConfigService.appendStaffOptions(request.getGroupName(), request.getTestType(), request.getOfficeLocation());
         enrichWithRole(savedStaff);
 
         return new StaffCreateResponse(savedStaff, plainPassword);
@@ -183,6 +184,7 @@ public class TestStaffService {
         existing.setEmpNo(request.getEmpNo());
         existing.setJoinDate(request.getJoinDate());
         existing.setGroupName(request.getGroupName());
+        existing.setOfficeLocation(request.getOfficeLocation());
         existing.setTestType(request.getTestType());
         existing.setInitialCoefficient(request.getInitialCoefficient());
         existing.setCurrentCoefficient(request.getCurrentCoefficient());
@@ -207,7 +209,7 @@ public class TestStaffService {
         }
         user.setConfidentialClearance(request.getConfidentialClearance() != null ? request.getConfidentialClearance() : false);
         userRepository.save(user);
-        fieldConfigService.appendStaffOptions(request.getGroupName(), request.getTestType());
+        fieldConfigService.appendStaffOptions(request.getGroupName(), request.getTestType(), request.getOfficeLocation());
 
         enrichWithRole(saved);
 
