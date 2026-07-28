@@ -26,6 +26,8 @@ import java.sql.Statement;
 import java.util.List;
 import java.util.UUID;
 
+import db.migration.V4__field_config_integrity;
+
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -60,7 +62,7 @@ class MigrationSmokeTest {
             () -> assertColumnExists("TEST_MODULE_CONFIG", "LOCK_VERSION")
         );
 
-        assertEquals(List.of("1:SQL", "2:SQL", "3:SQL", "3.1:JDBC", "4:SQL"),
+        assertEquals(List.of("1:SQL", "2:SQL", "3:SQL", "3.1:JDBC", "4:JDBC", "5:SQL", "6:SQL", "7:SQL"),
             successfulVersionedMigrations(jdbc));
         assertEquals(0, jdbc.queryForObject(
             "select count(*) from \"flyway_schema_history\" where \"type\" = 'BASELINE'",
@@ -96,7 +98,7 @@ class MigrationSmokeTest {
         assertAll(
             () -> assertThrows(DataIntegrityViolationException.class, () -> jdbc.update(
                 "insert into test_module_config (module_name, test_type, created_at, updated_at) "
-                    + "values (?, 'performance', current_timestamp, current_timestamp)",
+                    + "values (?, 'functional', current_timestamp, current_timestamp)",
                 moduleName)),
             () -> assertThrows(DataIntegrityViolationException.class, () -> jdbc.update(
                 "insert into demand_special_module "
@@ -144,7 +146,7 @@ class MigrationSmokeTest {
             assertAll(
                 () -> assertNotNull(context.getBean(EntityManagerFactory.class)),
                 () -> assertEquals(List.of(
-                    "1:BASELINE", "2:SQL", "3:SQL", "3.1:JDBC", "4:SQL"),
+                    "1:BASELINE", "2:SQL", "3:SQL", "3.1:JDBC", "4:JDBC", "5:SQL", "6:SQL", "7:SQL"),
                     successfulVersionedMigrations(migrated)),
                 () -> assertEquals(1, migrated.queryForObject(
                     "select count(*) from users where username = 'legacy-smoke-user'",
@@ -171,7 +173,7 @@ class MigrationSmokeTest {
             current.update(
                 "insert into test_demand (product, version_type, status, lock_version) "
                     + "values ('current-file-sentinel', '维护', 'pending', 0)");
-            assertEquals(List.of("1:SQL", "2:SQL", "3:SQL", "3.1:JDBC", "4:SQL"),
+            assertEquals(List.of("1:SQL", "2:SQL", "3:SQL", "3.1:JDBC", "4:JDBC", "5:SQL", "6:SQL", "7:SQL"),
                 successfulVersionedMigrations(current));
         }
 
@@ -180,9 +182,9 @@ class MigrationSmokeTest {
             assertAll(
                 () -> assertNotNull(restarted.getBean(EntityManagerFactory.class)),
                 () -> assertEquals(List.of(
-                    "1:SQL", "2:SQL", "3:SQL", "3.1:JDBC", "4:SQL"),
+                    "1:SQL", "2:SQL", "3:SQL", "3.1:JDBC", "4:JDBC", "5:SQL", "6:SQL", "7:SQL"),
                     successfulVersionedMigrations(current)),
-                () -> assertEquals(5, current.queryForObject(
+                () -> assertEquals(8, current.queryForObject(
                     "select count(*) from \"flyway_schema_history\" "
                         + "where \"success\" = true and \"version\" is not null",
                     Integer.class)),
@@ -199,7 +201,7 @@ class MigrationSmokeTest {
         Flyway.configure()
             .dataSource(databaseUrl, "sa", "")
             .locations("classpath:db/migration")
-            .javaMigrationClassProvider(List::of)
+            .javaMigrationClassProvider(() -> List.of(V4__field_config_integrity.class))
             .load()
             .migrate();
 
@@ -207,7 +209,7 @@ class MigrationSmokeTest {
             JdbcTemplate current = context.getBean(JdbcTemplate.class);
             assertAll(
                 () -> assertNotNull(context.getBean(EntityManagerFactory.class)),
-                () -> assertEquals(List.of("1:SQL", "2:SQL", "3:SQL", "4:SQL"),
+                () -> assertEquals(List.of("1:SQL", "2:SQL", "3:SQL", "4:JDBC", "5:SQL", "6:SQL", "7:SQL"),
                     successfulVersionedMigrations(current)),
                 () -> assertEquals(0, current.queryForObject(
                     "select count(*) from \"flyway_schema_history\" "

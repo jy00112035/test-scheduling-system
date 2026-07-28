@@ -15,6 +15,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
+import db.migration.V4__field_config_integrity;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -48,8 +50,8 @@ class ExistingSchemaMigrationTest {
                 .migrate()
                 .migrationsExecuted;
 
-            assertEquals(4, migrationsExecuted);
-            assertEquals(6, jdbc.queryForObject(
+            assertEquals(7, migrationsExecuted);
+            assertEquals(9, jdbc.queryForObject(
                 "select count(*) from \"flyway_schema_history\" where \"success\" = true",
                 Integer.class));
             assertEquals(1, jdbc.queryForObject(
@@ -57,7 +59,7 @@ class ExistingSchemaMigrationTest {
                     + "where \"version\" is null and \"type\" = 'TABLE'",
                 Integer.class));
             assertEquals(List.of(
-                "1:BASELINE", "2:SQL", "3:SQL", "3.1:JDBC", "4:SQL"), jdbc.query(
+                "1:BASELINE", "2:SQL", "3:SQL", "3.1:JDBC", "4:JDBC", "5:SQL", "6:SQL", "7:SQL"), jdbc.query(
                 "select \"version\", \"type\" from \"flyway_schema_history\" "
                     + "where \"success\" = true and \"version\" is not null "
                     + "order by \"installed_rank\"",
@@ -121,7 +123,7 @@ class ExistingSchemaMigrationTest {
             .migrate()
             .migrationsExecuted;
 
-        assertEquals(2, migrationsExecuted);
+        assertEquals(5, migrationsExecuted);
         assertEquals(1, jdbc.queryForObject(
             "select count(*) from field_config where field_name = 'testType'", Integer.class));
         assertEquals(survivorId, jdbc.queryForObject(
@@ -141,12 +143,12 @@ class ExistingSchemaMigrationTest {
         Flyway.configure()
             .dataSource(databaseUrl, "sa", "")
             .locations("classpath:db/migration")
-            .javaMigrationClassProvider(List::of)
+            .javaMigrationClassProvider(() -> List.of(V4__field_config_integrity.class))
             .load()
             .migrate();
 
         JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource(databaseUrl, "sa", ""));
-        assertEquals(List.of("1:SQL", "2:SQL", "3:SQL", "4:SQL"), jdbc.query(
+        assertEquals(List.of("1:SQL", "2:SQL", "3:SQL", "4:JDBC", "5:SQL", "6:SQL", "7:SQL"), jdbc.query(
             "select \"version\", \"type\" from \"flyway_schema_history\" "
                 + "where \"success\" = true and \"version\" is not null "
                 + "order by \"installed_rank\"",
