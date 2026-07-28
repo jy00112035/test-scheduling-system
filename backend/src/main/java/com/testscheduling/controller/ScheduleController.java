@@ -9,6 +9,8 @@ import com.testscheduling.dto.ScheduleDeleteScope;
 import com.testscheduling.dto.ScheduleMoveRequest;
 import com.testscheduling.dto.ScheduleRecommendationRequest;
 import com.testscheduling.dto.ScheduleRecommendationResponse;
+import com.testscheduling.dto.SchedulePreviewRequest;
+import com.testscheduling.dto.SchedulePreviewResponse;
 import com.testscheduling.dto.ScheduleValidationRequest;
 import com.testscheduling.dto.ScheduleValidationResponse;
 import com.testscheduling.entity.Schedule;
@@ -44,6 +46,13 @@ public class ScheduleController {
             @RequestBody ScheduleRecommendationRequest request) {
         roleGuard.requireAny("resourceManager", "projectManager", "fieldAdmin");
         return ApiResponse.success("推荐草稿已生成", recommendationService.recommend(request));
+    }
+
+    @PostMapping("/recommend/preview")
+    public ApiResponse<SchedulePreviewResponse> previewRecommendation(
+            @RequestBody SchedulePreviewRequest request) {
+        roleGuard.requireAny("resourceManager", "projectManager", "fieldAdmin");
+        return ApiResponse.success(recommendationService.preview(request));
     }
 
     @GetMapping

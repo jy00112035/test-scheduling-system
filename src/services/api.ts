@@ -157,8 +157,17 @@ class ApiService {
   }
 
   // Test Demands
-  async getDemands() {
-    return this.request<any[]>('/demands');
+  async getDemands(params?: { status?: string; product?: string; search?: string }) {
+    const query = new URLSearchParams();
+    if (params?.status) query.set('status', params.status);
+    if (params?.product) query.set('product', params.product);
+    if (params?.search) query.set('search', params.search);
+    const qs = query.toString();
+    return this.request<any[]>(`/demands${qs ? '?' + qs : ''}`);
+  }
+
+  async getDemandStatusCounts() {
+    return this.request<Record<string, number>>('/demands/status-counts');
   }
 
   async getPendingDemands() {
@@ -496,6 +505,13 @@ class ApiService {
   // Structured scheduling contracts
   async recommendScheduleDraft(request: ScheduleRecommendationRequest) {
     return this.request<ScheduleRecommendationResponse>('/schedules/recommend/draft', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async previewScheduleDraft(request: ScheduleRecommendationRequest & { demandOrder?: number[] }) {
+    return this.request<import('../types').SchedulePreviewResponse>('/schedules/recommend/preview', {
       method: 'POST',
       body: JSON.stringify(request),
     });

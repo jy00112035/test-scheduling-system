@@ -24,6 +24,19 @@ public interface TestDemandRepository extends JpaRepository<TestDemand, Long> {
 
     List<TestDemand> findByStatusIn(List<TestDemand.DemandStatus> statuses);
 
+    @Query("select d from TestDemand d where "
+        + "(:status is null or d.status = :status) "
+        + "and (:product is null or d.product = :product) "
+        + "and (:search is null or lower(d.product) like lower(concat('%', :search, '%')) "
+        + "  or lower(d.version) like lower(concat('%', :search, '%'))) "
+        + "and (:submittedBy is null or d.submittedBy = :submittedBy) "
+        + "order by d.createdAt desc")
+    List<TestDemand> findFiltered(
+        @Param("status") TestDemand.DemandStatus status,
+        @Param("product") String product,
+        @Param("search") String search,
+        @Param("submittedBy") String submittedBy);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select d from TestDemand d where d.id = :id")
     Optional<TestDemand> findByIdForUpdate(@Param("id") Long id);

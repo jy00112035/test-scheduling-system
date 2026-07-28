@@ -402,7 +402,7 @@ class ScheduleControllerTest {
             new ScheduleRecommendationResponse.Fulfillment(
                 1001L, false, true, List.of(gap), List.of(), List.of(special),
                 List.of(summary), new BigDecimal("5.0"), new BigDecimal("3.5"),
-                new BigDecimal("1.5"));
+                new BigDecimal("1.5"), 1, 1, null, List.of());
         when(recommendationService.recommend(any())).thenReturn(
             new ScheduleRecommendationResponse(List.of(), List.of(fulfillment)));
 

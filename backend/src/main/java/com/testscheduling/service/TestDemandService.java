@@ -74,6 +74,55 @@ public class TestDemandService {
         return enrichWithDetails(testDemandRepository.findAll());
     }
 
+    /**
+     * Returns demands filtered by optional criteria, with role-based visibility.
+     * <p>
+     * Users without a manager role (admin / projectManager / resourceManager /
+     * fieldAdmin) see only their own submitted demands. Users with any manager
+     * role see all demands.
+     */
+    @Transactional(readOnly = true)
+    public List<TestDemand> findFiltered(
+            List<String> roles, String username,
+            TestDemand.DemandStatus status, String product, String search) {
+        String submittedBy = shouldFilterByOwner(roles) ? username : null;
+        return enrichWithDetails(
+            testDemandRepository.findFiltered(status, product, search, submittedBy));
+    }
+
+    /**
+     * Returns demand counts grouped by status, respecting role-based visibility.
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Long> getStatusCounts(List<String> roles, String username) {
+        String submittedBy = shouldFilterByOwner(roles) ? username : null;
+        List<TestDemand> visible = submittedBy == null
+            ? testDemandRepository.findAll()
+            : testDemandRepository.findBySubmittedBy(submittedBy);
+        Map<String, Long> counts = new LinkedHashMap<>();
+        counts.put("all", (long) visible.size());
+        for (TestDemand.DemandStatus status : TestDemand.DemandStatus.values()) {
+            long count = visible.stream()
+                .filter(d -> d.getStatus() == status)
+                .count();
+            counts.put(status.name(), count);
+        }
+        return counts;
+    }
+
+    /**
+     * Returns true if the user should see only their own demands.
+     * Users with manager-level roles see all demands.
+     */
+    private boolean shouldFilterByOwner(List<String> roles) {
+        if (roles == null || roles.isEmpty()) {
+            return true;
+        }
+        return roles.stream().noneMatch(role ->
+            "admin".equals(role) || "projectManager".equals(role)
+                || "resourceManager".equals(role) || "fieldAdmin".equals(role));
+    }
+
     @Transactional(readOnly = true)
     public TestDemand findById(Long id) {
         TestDemand demand = testDemandRepository.findById(id)

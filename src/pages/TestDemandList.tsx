@@ -12,6 +12,8 @@ import {
   message,
   TagProps,
   DatePicker,
+  Tabs,
+  Statistic,
 } from 'antd';
 import {
   PlusOutlined,
@@ -36,8 +38,9 @@ const { RangePicker } = DatePicker;
 const TestDemandList: React.FC = () => {
   const [demands, setDemands] = useState<TestDemand[]>([]);
   const [searchText, setSearchText] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [activeTab, setActiveTab] = useState<string>('all');
   const [productFilter, setProductFilter] = useState<string>('all');
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [editingDemand, setEditingDemand] = useState<TestDemand | null>(null);
   const [loading, setLoading] = useState(false);
@@ -61,18 +64,50 @@ const TestDemandList: React.FC = () => {
 
   useEffect(() => {
     fetchDemands();
+    fetchStatusCounts();
   }, []);
 
-  const fetchDemands = async () => {
+  const fetchDemands = async (status?: string, product?: string, search?: string) => {
     setLoading(true);
     try {
-      const data = await api.getDemands();
+      const data = await api.getDemands({
+        status: status || (activeTab !== 'all' ? activeTab : undefined),
+        product: product || (productFilter !== 'all' ? productFilter : undefined),
+        search: search || (searchText || undefined),
+      });
       setDemands(data);
     } catch (error: any) {
       message.error(error.message || '获取需求列表失败');
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchStatusCounts = async () => {
+    try {
+      const counts = await api.getDemandStatusCounts();
+      setStatusCounts(counts);
+    } catch (error: any) {
+      // counts are non-critical, fail silently
+    }
+  };
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+    setPagination(prev => ({ ...prev, current: 1 }));
+    fetchDemands(key === 'all' ? undefined : key, productFilter !== 'all' ? productFilter : undefined, searchText || undefined);
+  };
+
+  const handleSearch = (value: string) => {
+    setSearchText(value);
+    setPagination(prev => ({ ...prev, current: 1 }));
+    fetchDemands(activeTab !== 'all' ? activeTab : undefined, productFilter !== 'all' ? productFilter : undefined, value || undefined);
+  };
+
+  const handleProductChange = (value: string) => {
+    setProductFilter(value);
+    setPagination(prev => ({ ...prev, current: 1 }));
+    fetchDemands(activeTab !== 'all' ? activeTab : undefined, value !== 'all' ? value : undefined, searchText || undefined);
   };
 
   const getStatusColor = (status: string): TagProps['color'] => {
@@ -121,15 +156,6 @@ const TestDemandList: React.FC = () => {
     };
     return colorMap[type] || '#1890ff';
   };
-
-  const filteredDemands = demands.filter(demand => {
-    const matchesSearch = !searchText ||
-      demand.product.toLowerCase().includes(searchText.toLowerCase()) ||
-      (demand.version && demand.version.toLowerCase().includes(searchText.toLowerCase()));
-    const matchesStatus = statusFilter === 'all' || demand.status === statusFilter;
-    const matchesProduct = productFilter === 'all' || demand.product === productFilter;
-    return matchesSearch && matchesStatus && matchesProduct;
-  });
 
   const handleDelete = async (id: string) => {
     try {
@@ -191,6 +217,7 @@ const TestDemandList: React.FC = () => {
     setEditingDemand(null);
     setFormDirty(false);
     fetchDemands();
+    fetchStatusCounts();
     message.success('操作成功！');
   };
 
@@ -203,6 +230,7 @@ const TestDemandList: React.FC = () => {
     setShowRevisionModal(false);
     setRevisingDemand(null);
     fetchDemands();
+    fetchStatusCounts();
     message.success('需求变更已提交审批');
   };
 
@@ -462,41 +490,82 @@ const TestDemandList: React.FC = () => {
     },
   ];
 
+  const STATUS_ITEMS = [
+    { key: 'submitted', label: '待审批', color: '#722ed1' },
+    { key: 'pending', label: '待排期', color: '#fa8c16' },
+    { key: 'scheduled', label: '已排期', color: '#1890ff' },
+    { key: 'completed', label: '已完成', color: '#52c41a' },
+    { key: 'rejected', label: '已退回', color: '#ff4d4f' },
+    { key: 'revision_pending', label: '变更待审批', color: '#13c2c2' },
+  ];
+
+  const products = [...new Set(demands.map(d => d.product))];
+
+  const tabItems = [
+    { key: 'all', label: `全部 (${statusCounts.all ?? 0})` },
+    ...STATUS_ITEMS.map(item => ({
+      key: item.key,
+      label: `${item.label} (${statusCounts[item.key] ?? 0})`,
+    })),
+  ];
+
   return (
     <div>
+      {/* Status cards */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(6, 1fr)',
+        gap: 12,
+        marginBottom: 16,
+      }}>
+        {STATUS_ITEMS.map(item => (
+          <Card
+            key={item.key}
+            size="small"
+            hoverable
+            style={{
+              cursor: 'pointer',
+              borderColor: activeTab === item.key ? item.color : undefined,
+              borderWidth: activeTab === item.key ? 2 : 1,
+            }}
+            onClick={() => handleTabChange(item.key)}
+          >
+            <Statistic
+              title={<span style={{ color: item.color, fontWeight: 500 }}>{item.label}</span>}
+              value={statusCounts[item.key] ?? 0}
+              valueStyle={{ color: item.color, fontSize: 28 }}
+            />
+          </Card>
+        ))}
+      </div>
+
       <Card style={{ marginBottom: 16 }}>
+        {/* Tabs */}
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={tabItems}
+          style={{ marginBottom: 8 }}
+        />
+
+        {/* Toolbar */}
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
           <Space wrap>
             <Search
               placeholder="搜索产品或版本"
-              onSearch={setSearchText}
+              onSearch={handleSearch}
               style={{ width: 200 }}
               allowClear
             />
             <Select
-              placeholder="筛选状态"
-              value={statusFilter}
-              onChange={setStatusFilter}
-              style={{ width: 120 }}
-              allowClear
-            >
-              <Option value="all">全部状态</Option>
-              <Option value="submitted">待审批</Option>
-              <Option value="pending">待排期</Option>
-              <Option value="scheduled">已排期</Option>
-              <Option value="completed">已完成</Option>
-              <Option value="rejected">已退回</Option>
-              <Option value="revision_pending">变更待审批</Option>
-            </Select>
-            <Select
               placeholder="筛选产品"
               value={productFilter}
-              onChange={setProductFilter}
+              onChange={handleProductChange}
               style={{ width: 150 }}
               allowClear
             >
               <Option value="all">全部产品</Option>
-              {demands.map(demand => demand.product).filter((product, index, self) => self.indexOf(product) === index).map(product => (
+              {products.map(product => (
                 <Option key={product} value={product}>
                   {product}
                 </Option>
@@ -525,11 +594,11 @@ const TestDemandList: React.FC = () => {
 
         <Table
           columns={columns}
-          dataSource={filteredDemands}
+          dataSource={demands}
           rowKey="id"
           bordered
           loading={loading}
-          scroll={{ x: 1200, y: 'calc(100vh - 360px)' }}
+          scroll={{ x: 1200, y: 'calc(100vh - 520px)' }}
           pagination={{
             current: pagination.current,
             pageSize: pagination.pageSize,

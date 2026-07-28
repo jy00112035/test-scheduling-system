@@ -169,6 +169,7 @@ export interface ScheduleRecommendationRequest {
   includeSundays?: boolean;
   replaceExistingDrafts?: boolean;
   demandOfficePreferences?: Record<number, string>;
+  demandOrder?: number[];
 }
 
 export interface ScheduleRecommendationResponse {
@@ -196,7 +197,70 @@ export interface ScheduleRecommendationResponse {
     totalRequired: number;
     totalAllocated: number;
     totalShortage: number;
+    processOrder: number;
+    totalDemands: number;
+    priority: string | null;
+    contestedResources: ContestedResource[];
   }>;
+}
+
+export interface ContestedResource {
+  contestedByDemandId: number;
+  contestedByProduct: string;
+  contestedByPriority: string;
+  contestedByOrder: number;
+  testType: string;
+  contestedManpower: number;
+}
+
+export interface SchedulePreviewRequest {
+  mode: 'FIXED_RANGE' | 'FULL_DEMAND';
+  demandIds: number[];
+  dateRange?: { startDate: string; endDate: string };
+  fixedStaffIds?: number[];
+  excludedStaffIds?: number[];
+  includeSaturdays?: boolean;
+  includeSundays?: boolean;
+  demandOfficePreferences?: Record<number, string>;
+  demandOrder?: number[];
+}
+
+export interface SchedulePreviewResponse {
+  demandPreviews: DemandPreview[];
+  globalWarnings: GlobalWarning[];
+  sortOrder: number[];
+  totalStaffCapacity: number;
+  totalDemandManpower: number;
+}
+
+export interface DemandPreview {
+  demandId: number;
+  product: string;
+  version: string;
+  priority: string;
+  endDate: string;
+  totalManpower: number;
+  estimatedAllocation: number;
+  estimatedShortage: number;
+  estimatedFulfilled: boolean;
+  competingDemands: CompetingDemandPreview[];
+}
+
+export interface CompetingDemandPreview {
+  demandId: number;
+  product: string;
+  priority: string;
+  testType: string;
+  contestedManpower: number;
+  reason: string;
+}
+
+export interface GlobalWarning {
+  testType: string;
+  totalRequired: number;
+  totalAvailable: number;
+  shortage: number;
+  affectedDemandIds: number[];
 }
 
 export interface SpecialModuleFulfillment {

@@ -5,9 +5,10 @@
 // ============================================================
 
 import React from 'react';
-import { Alert, Tag } from 'antd';
+import { Alert, Tag, Collapse } from 'antd';
 import type { ScheduleRecommendationResponse } from '../../types';
 import type { ConflictDetail, DemandItem } from './workbenchTypes';
+import { getPriorityColor } from './workbenchCalculations';
 
 interface IssuePublishPanelProps {
   conflicts: ConflictDetail[];
@@ -63,14 +64,23 @@ const IssuePublishPanel: React.FC<IssuePublishPanelProps> = ({
             <div style={{ maxHeight: 220, overflowY: 'auto', display: 'grid', gap: 8 }}>
               {fulfillment.map(item => {
                 const demand = demands.find(candidate => candidate.id === item.demandId);
+                const priorityColor = getPriorityColor(item.priority || '', []);
                 return (
                   <div key={item.demandId} style={{ borderBottom: '1px solid #f0f0f0', paddingBottom: 6 }}>
-                    <strong>{demand?.product || `需求 ${item.demandId}`}</strong>
-                    {item.requiresHistoricalClassification && (
-                      <Tag color="warning" style={{ marginLeft: 6 }}>
-                        历史排班尚未完成人力归属
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                      <Tag color="default" style={{ fontFamily: 'monospace', margin: 0 }}>
+                        #{item.processOrder}/{item.totalDemands}
                       </Tag>
-                    )}
+                      {item.priority && (
+                        <Tag color={priorityColor} style={{ margin: 0 }}>{item.priority}</Tag>
+                      )}
+                      <strong>{demand?.product || `需求 ${item.demandId}`}</strong>
+                      {item.requiresHistoricalClassification && (
+                        <Tag color="warning" style={{ marginLeft: 0 }}>
+                          历史排班尚未完成人力归属
+                        </Tag>
+                      )}
+                    </div>
                     <div style={{ marginTop: 4 }}>
                       总计：需求 {item.totalRequired} / 已分配 {item.totalAllocated} / 缺口 {item.totalShortage}
                     </div>
@@ -111,6 +121,31 @@ const IssuePublishPanel: React.FC<IssuePublishPanelProps> = ({
                         );
                       })}
                     </ul>
+                    {item.contestedResources && item.contestedResources.length > 0 && (
+                      <Collapse
+                        ghost
+                        size="small"
+                        items={[{
+                          key: 'contested',
+                          label: <span style={{ fontSize: 12, color: '#faad14' }}>
+                            ⚠️ 资源竞争追溯（{item.contestedResources.length} 项）
+                          </span>,
+                          children: (
+                            <ul style={{ margin: 0, paddingLeft: 20, fontSize: 12 }}>
+                              {item.contestedResources.map((cr, idx) => (
+                                <li key={idx}>
+                                  需求「{cr.contestedByProduct}」
+                                  <Tag color={getPriorityColor(cr.contestedByPriority, [])} style={{ margin: '0 4px', fontSize: 11 }}>
+                                    {cr.contestedByPriority}
+                                  </Tag>
+                                  (#{cr.contestedByOrder}) 优先处理，占用了 {cr.testType} 人员 {cr.contestedManpower} 人天
+                                </li>
+                              ))}
+                            </ul>
+                          ),
+                        }]}
+                      />
+                    )}
                   </div>
                 );
               })}

@@ -4,7 +4,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
-public class ScheduleRecommendationRequest {
+public class SchedulePreviewRequest {
     public enum Mode { FIXED_RANGE, FULL_DEMAND }
 
     private Mode mode;
@@ -14,7 +14,6 @@ public class ScheduleRecommendationRequest {
     private List<Long> excludedStaffIds;
     private Boolean includeSaturdays = true;
     private Boolean includeSundays = true;
-    private Boolean replaceExistingDrafts = false;
     private Map<Long, String> demandOfficePreferences;
     private List<Long> demandOrder;
 
@@ -32,8 +31,6 @@ public class ScheduleRecommendationRequest {
     public void setIncludeSaturdays(Boolean includeSaturdays) { this.includeSaturdays = includeSaturdays; }
     public Boolean getIncludeSundays() { return includeSundays; }
     public void setIncludeSundays(Boolean includeSundays) { this.includeSundays = includeSundays; }
-    public Boolean getReplaceExistingDrafts() { return replaceExistingDrafts; }
-    public void setReplaceExistingDrafts(Boolean replaceExistingDrafts) { this.replaceExistingDrafts = replaceExistingDrafts; }
     public Map<Long, String> getDemandOfficePreferences() { return demandOfficePreferences; }
     public void setDemandOfficePreferences(Map<Long, String> demandOfficePreferences) { this.demandOfficePreferences = demandOfficePreferences; }
     public List<Long> getDemandOrder() { return demandOrder; }

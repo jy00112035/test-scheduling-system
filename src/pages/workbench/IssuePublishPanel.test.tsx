@@ -50,6 +50,10 @@ describe('IssuePublishPanel backend fulfillment', () => {
         totalRequired: 5,
         totalAllocated: 2,
         totalShortage: 3,
+        processOrder: 1,
+        totalDemands: 1,
+        priority: '高',
+        contestedResources: [],
       }]}
       publishFailures={[{
         demandId: 1001,

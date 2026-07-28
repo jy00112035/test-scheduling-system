@@ -26,8 +26,27 @@ public class TestDemandController {
     private RequestRoleGuard roleGuard;
 
     @GetMapping
-    public ApiResponse<List<TestDemand>> getAllDemands() {
-        return ApiResponse.success(testDemandService.findAll());
+    public ApiResponse<List<TestDemand>> getAllDemands(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String product,
+            @RequestParam(required = false) String search,
+            HttpServletRequest request) {
+        TestDemand.DemandStatus statusEnum = null;
+        if (status != null && !status.isEmpty()) {
+            try {
+                statusEnum = TestDemand.DemandStatus.valueOf(status);
+            } catch (IllegalArgumentException e) {
+                return ApiResponse.error("无效的状态值: " + status);
+            }
+        }
+        return ApiResponse.success(testDemandService.findFiltered(
+            roles(request), username(request), statusEnum, product, search));
+    }
+
+    @GetMapping("/status-counts")
+    public ApiResponse<Map<String, Long>> getStatusCounts(HttpServletRequest request) {
+        return ApiResponse.success(testDemandService.getStatusCounts(
+            roles(request), username(request)));
     }
 
     @GetMapping("/{id}")
@@ -198,5 +217,10 @@ public class TestDemandController {
 
     private String username(HttpServletRequest request) {
         return (String) request.getAttribute("username");
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> roles(HttpServletRequest request) {
+        return (List<String>) request.getAttribute("roles");
     }
 }

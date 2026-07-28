@@ -18,11 +18,16 @@ public record ScheduleRecommendationResponse(
             List<DemandFulfillmentResponse.Summary> summary,
             BigDecimal totalRequired,
             BigDecimal totalAllocated,
-            BigDecimal totalShortage) {
+            BigDecimal totalShortage,
+            int processOrder,
+            int totalDemands,
+            String priority,
+            List<ContestedResource> contestedResources) {
         public Fulfillment(Long demandId, boolean fullySatisfied,
                 List<Gap> specialModuleGaps, List<Gap> generalGaps) {
             this(demandId, fullySatisfied, false, specialModuleGaps, generalGaps,
-                List.of(), List.of(), BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
+                List.of(), List.of(), BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                0, 0, null, List.of());
         }
 
         public Fulfillment(Long demandId, boolean fullySatisfied,
@@ -30,15 +35,25 @@ public record ScheduleRecommendationResponse(
                 List<Gap> specialModuleGaps, List<Gap> generalGaps) {
             this(demandId, fullySatisfied, requiresHistoricalClassification,
                 specialModuleGaps, generalGaps, List.of(), List.of(),
-                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                0, 0, null, List.of());
         }
 
         public Fulfillment(Long demandId, List<Gap> specialModuleGaps, List<Gap> generalGaps) {
             this(demandId, specialModuleGaps.isEmpty() && generalGaps.isEmpty(), false,
                 specialModuleGaps, generalGaps, List.of(), List.of(),
-                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                0, 0, null, List.of());
         }
     }
+
+    public record ContestedResource(
+            Long contestedByDemandId,
+            String contestedByProduct,
+            String contestedByPriority,
+            int contestedByOrder,
+            String testType,
+            BigDecimal contestedManpower) { }
 
     public record Gap(
             Long demandManpowerDetailId,

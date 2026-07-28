@@ -1,5 +1,7 @@
 package com.testscheduling.service;
 
+import com.testscheduling.dto.SchedulePreviewRequest;
+import com.testscheduling.dto.SchedulePreviewResponse;
 import com.testscheduling.dto.ScheduleRecommendationRequest;
 import com.testscheduling.dto.ScheduleRecommendationResponse;
 import com.testscheduling.entity.DemandManpowerDetail;
@@ -28,6 +30,7 @@ import org.hibernate.exception.LockAcquisitionException;
 import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.stereotype.Service;
 
@@ -126,6 +129,151 @@ public class ScheduleRecommendationService {
         }
     }
 
+    @Transactional(readOnly = true)
+    public SchedulePreviewResponse preview(SchedulePreviewRequest request) {
+        List<Long> ids = request.getDemandIds().stream().distinct().sorted().toList();
+        if (ids.isEmpty()) throw error("DEMAND_REQUIRED", "需求ID不能为空");
+        List<TestDemand> demands = demandRepository.findAllById(ids);
+        if (demands.size() != ids.size()) throw error("DEMAND_NOT_FOUND", "测试需求不存在");
+        demands.forEach(eligibilityService::requireSchedulable);
+        Map<Long, TestDemand> demandsById = demands.stream()
+                .collect(Collectors.toMap(TestDemand::getId, Function.identity(), (a, b) -> a, LinkedHashMap::new));
+        List<TestDemand> ordered = new ArrayList<>(demandsById.values());
+        if (request.getDemandOrder() != null && !request.getDemandOrder().isEmpty()) {
+            ordered.sort(demandOrderComparator(request.getDemandOrder()));
+        } else {
+            ordered.sort(demandComparator());
+        }
+        List<Long> sortOrder = ordered.stream().map(TestDemand::getId).toList();
+
+        // Build date bounds
+        LocalDate start, end;
+        if (request.getMode() == SchedulePreviewRequest.Mode.FIXED_RANGE
+                && request.getDateRange() != null) {
+            start = request.getDateRange().startDate();
+            end = request.getDateRange().endDate();
+        } else {
+            start = demands.stream()
+                    .filter(d -> d.getStartDate() != null)
+                    .map(d -> d.getStartDate().toLocalDate())
+                    .min(LocalDate::compareTo).orElse(LocalDate.now());
+            end = demands.stream()
+                    .filter(d -> d.getEndDate() != null)
+                    .map(d -> d.getEndDate().toLocalDate())
+                    .max(LocalDate::compareTo).orElse(LocalDate.now().plusDays(30));
+        }
+        List<LocalDate> workingDays = new ArrayList<>();
+        for (LocalDate d = start; !d.isAfter(end); d = d.plusDays(1)) {
+            int dow = d.getDayOfWeek().getValue();
+            if (dow == 6 && !Boolean.TRUE.equals(request.getIncludeSaturdays())) continue;
+            if (dow == 7 && !Boolean.TRUE.equals(request.getIncludeSundays())) continue;
+            workingDays.add(d);
+        }
+        int totalDays = workingDays.size();
+        if (totalDays == 0) {
+            return new SchedulePreviewResponse(
+                    ordered.stream().map(d -> new SchedulePreviewResponse.DemandPreview(
+                            d.getId(), d.getProduct(), d.getVersion(), d.getPriority(),
+                            d.getEndDate() != null ? d.getEndDate().toString() : null,
+                            d.getManpowerDemand() != null ? d.getManpowerDemand() : BigDecimal.ZERO,
+                            BigDecimal.ZERO, d.getManpowerDemand() != null ? d.getManpowerDemand() : BigDecimal.ZERO,
+                            false, List.of())).toList(),
+                    List.of(), sortOrder, BigDecimal.ZERO, BigDecimal.ZERO);
+        }
+
+        // Load staff and details
+        List<DemandManpowerDetail> details = detailRepository.findByDemandIdIn(ids);
+        Map<Long, List<DemandManpowerDetail>> detailsByDemand = details.stream()
+                .collect(Collectors.groupingBy(DemandManpowerDetail::getDemandId));
+        List<TestStaff> activeStaff = staffRepository.findByStatus(TestStaff.StaffStatus.active);
+        Set<Long> excluded = request.getExcludedStaffIds() == null ? Set.of()
+                : new HashSet<>(request.getExcludedStaffIds());
+        List<TestStaff> staff = activeStaff.stream()
+                .filter(s -> !excluded.contains(s.getId()))
+                .sorted(Comparator.comparing(TestStaff::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+
+        // Calculate total capacity by test type
+        Map<String, BigDecimal> poolByType = new HashMap<>();
+        Map<String, Integer> headcountByType = new HashMap<>();
+        for (TestStaff s : staff) {
+            String tt = s.getTestType();
+            if (tt == null || tt.isEmpty()) continue;
+            BigDecimal coeff = s.getCurrentCoefficient() != null ? s.getCurrentCoefficient() : BigDecimal.ONE;
+            poolByType.merge(tt, coeff.multiply(BigDecimal.valueOf(totalDays)), BigDecimal::add);
+            headcountByType.merge(tt, 1, Integer::sum);
+        }
+        BigDecimal totalStaffCapacity = poolByType.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        // Estimate per demand
+        List<SchedulePreviewResponse.DemandPreview> previews = new ArrayList<>();
+        BigDecimal totalDemandManpower = BigDecimal.ZERO;
+        for (int i = 0; i < ordered.size(); i++) {
+            TestDemand demand = ordered.get(i);
+            List<DemandManpowerDetail> demandDetails = detailsByDemand.getOrDefault(demand.getId(), List.of());
+            BigDecimal dmTotal = demand.getManpowerDemand() != null ? demand.getManpowerDemand() : BigDecimal.ZERO;
+            totalDemandManpower = totalDemandManpower.add(dmTotal);
+            BigDecimal estimatedAllocation = BigDecimal.ZERO;
+            BigDecimal estimatedShortage = BigDecimal.ZERO;
+            List<SchedulePreviewResponse.CompetingDemand> competing = new ArrayList<>();
+
+            for (DemandManpowerDetail detail : demandDetails) {
+                String tt = detail.getTestType();
+                BigDecimal needed = detail.getManpowerDemand() != null ? detail.getManpowerDemand() : BigDecimal.ZERO;
+                BigDecimal pool = poolByType.getOrDefault(tt, BigDecimal.ZERO);
+                BigDecimal taken = needed.min(pool);
+                estimatedAllocation = estimatedAllocation.add(taken);
+                poolByType.put(tt, pool.subtract(taken));
+                if (taken.compareTo(needed) < 0) {
+                    BigDecimal shortfall = needed.subtract(taken);
+                    estimatedShortage = estimatedShortage.add(shortfall);
+                    // Find earlier demands that consumed this test type
+                    for (int j = 0; j < i; j++) {
+                        TestDemand earlier = ordered.get(j);
+                        List<DemandManpowerDetail> earlierDetails = detailsByDemand.getOrDefault(earlier.getId(), List.of());
+                        BigDecimal earlierTook = earlierDetails.stream()
+                                .filter(ed -> tt.equals(ed.getTestType()))
+                                .map(ed -> ed.getManpowerDemand() != null ? ed.getManpowerDemand() : BigDecimal.ZERO)
+                                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                                .min(shortfall);
+                        if (earlierTook.signum() > 0) {
+                            competing.add(new SchedulePreviewResponse.CompetingDemand(
+                                    earlier.getId(), earlier.getProduct(), earlier.getPriority(),
+                                    tt, earlierTook,
+                                    earlier.getProduct() + "(#" + (j + 1) + "，"+ earlier.getPriority() +"优先级)优先处理，占用了" + tt + "人员" + earlierTook + "人天"));
+                        }
+                    }
+                }
+            }
+            boolean fulfilled = estimatedShortage.signum() <= 0;
+            previews.add(new SchedulePreviewResponse.DemandPreview(
+                    demand.getId(), demand.getProduct(), demand.getVersion(),
+                    demand.getPriority(),
+                    demand.getEndDate() != null ? demand.getEndDate().toString() : null,
+                    dmTotal, estimatedAllocation, estimatedShortage, fulfilled, competing));
+        }
+
+        // Global warnings: test types with total shortage
+        List<SchedulePreviewResponse.GlobalWarning> warnings = new ArrayList<>();
+        for (String tt : headcountByType.keySet()) {
+            BigDecimal total = details.stream()
+                    .filter(d -> tt.equals(d.getTestType()))
+                    .map(d -> d.getManpowerDemand() != null ? d.getManpowerDemand() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal avail = BigDecimal.valueOf(headcountByType.getOrDefault(tt, 0))
+                    .multiply(BigDecimal.valueOf(totalDays));
+            if (total.compareTo(avail) > 0) {
+                warnings.add(new SchedulePreviewResponse.GlobalWarning(
+                        tt, total, avail, total.subtract(avail),
+                        ordered.stream().filter(d -> detailsByDemand.getOrDefault(d.getId(), List.of())
+                                .stream().anyMatch(dt -> tt.equals(dt.getTestType())))
+                                .map(TestDemand::getId).toList()));
+            }
+        }
+
+        return new SchedulePreviewResponse(previews, warnings, sortOrder, totalStaffCapacity, totalDemandManpower);
+    }
+
     private ScheduleRecommendationResponse recommendInTransaction(ScheduleRecommendationRequest request) {
         List<Long> ids = request.getDemandIds().stream().distinct().sorted().toList();
         List<TestDemand> lockedDemands = demandRepository.findAllByIdInForUpdate(ids);
@@ -139,7 +287,11 @@ public class ScheduleRecommendationService {
             scheduleRepository.deleteDraftsByDemandIdIn(ids);
         }
         List<TestDemand> demands = new ArrayList<>(demandsById.values());
-        demands.sort(demandComparator());
+        if (request.getDemandOrder() != null && !request.getDemandOrder().isEmpty()) {
+            demands.sort(demandOrderComparator(request.getDemandOrder()));
+        } else {
+            demands.sort(demandComparator());
+        }
         // Demand-scoped reads are bounded by MAX_RECOMMENDATION_DEMANDS.
         List<DemandManpowerDetail> details = detailRepository.findByDemandIdIn(ids);
         List<DemandSpecialModule> specials = specialRepository.findByDemandIdInOrderByDemandIdAscIdAsc(ids);
@@ -231,16 +383,30 @@ public class ScheduleRecommendationService {
         List<Schedule> persisted = generated.isEmpty() ? List.of() : scheduleRepository.saveAllAndFlush(generated);
         Map<Long, com.testscheduling.dto.DemandFulfillmentResponse> authoritative =
                 fulfillmentService.calculateBatch(demands, detailsByDemand, specialsByDemand);
-        List<ScheduleRecommendationResponse.Fulfillment> fulfillment = demands.stream().map(demand -> {
+        // Build per-demand per-testType allocation map from generated schedules
+        Map<Long, Map<String, BigDecimal>> allocatedByType = buildAllocatedByType(
+                generated, detailsByDemand);
+        int totalDemands = demands.size();
+        List<ScheduleRecommendationResponse.Fulfillment> fulfillment = new ArrayList<>();
+        for (int i = 0; i < demands.size(); i++) {
+            TestDemand demand = demands.get(i);
+            int processOrder = i + 1;
             List<GapDraft> specialGaps = specialGapsByDemand.getOrDefault(demand.getId(), List.of());
             List<GapDraft> generalGaps = generalGapsByDemand.getOrDefault(demand.getId(), List.of());
             com.testscheduling.dto.DemandFulfillmentResponse calculated = authoritative.get(demand.getId());
-            return new ScheduleRecommendationResponse.Fulfillment(demand.getId(), calculated.fullySatisfied(),
+            List<ScheduleRecommendationResponse.ContestedResource> contestedResources = List.of();
+            if (!calculated.fullySatisfied()) {
+                contestedResources = computeContestedResources(
+                        demand, i, demands, detailsByDemand, allocatedByType);
+            }
+            fulfillment.add(new ScheduleRecommendationResponse.Fulfillment(
+                    demand.getId(), calculated.fullySatisfied(),
                     calculated.requiresHistoricalClassification(),
                     toGaps(specialGaps), toGaps(generalGaps),
                     calculated.specialModules(), calculated.summary(),
-                    calculated.totalRequired(), calculated.totalAllocated(), calculated.totalShortage());
-        }).toList();
+                    calculated.totalRequired(), calculated.totalAllocated(), calculated.totalShortage(),
+                    processOrder, totalDemands, demand.getPriority(), contestedResources));
+        }
         return new ScheduleRecommendationResponse(persisted, fulfillment);
     }
 
@@ -492,6 +658,59 @@ public class ScheduleRecommendationService {
                 .thenComparing(TestDemand::getEndDate, Comparator.nullsLast(Comparator.naturalOrder()))
                 .thenComparing(TestDemand::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
                 .thenComparing(TestDemand::getId);
+    }
+
+    private Comparator<TestDemand> demandOrderComparator(List<Long> order) {
+        Map<Long, Integer> rank = new HashMap<>();
+        for (int i = 0; i < order.size(); i++) rank.put(order.get(i), i);
+        return (a, b) -> {
+            int ra = rank.getOrDefault(a.getId(), Integer.MAX_VALUE);
+            int rb = rank.getOrDefault(b.getId(), Integer.MAX_VALUE);
+            return Integer.compare(ra, rb);
+        };
+    }
+
+    private Map<Long, Map<String, BigDecimal>> buildAllocatedByType(
+            List<Schedule> schedules,
+            Map<Long, List<DemandManpowerDetail>> detailsByDemand) {
+        Map<Long, Map<String, BigDecimal>> result = new HashMap<>();
+        for (Schedule s : schedules) {
+            if (s.getPercentage() == null || s.getPercentage() <= 0) continue;
+            Long demandId = s.getDemandId();
+            List<DemandManpowerDetail> details = detailsByDemand.getOrDefault(demandId, List.of());
+            String testType = details.stream()
+                    .filter(d -> Objects.equals(d.getId(), s.getDemandManpowerDetailId()))
+                    .findFirst().map(DemandManpowerDetail::getTestType).orElse(null);
+            if (testType == null) continue;
+            BigDecimal amount = BigDecimal.valueOf(s.getPercentage())
+                    .divide(BigDecimal.valueOf(100), 2, RoundingMode.UNNECESSARY);
+            result.computeIfAbsent(demandId, ignored -> new HashMap<>())
+                    .merge(testType, amount, BigDecimal::add);
+        }
+        return result;
+    }
+
+    private List<ScheduleRecommendationResponse.ContestedResource> computeContestedResources(
+            TestDemand demand, int index, List<TestDemand> allDemands,
+            Map<Long, List<DemandManpowerDetail>> detailsByDemand,
+            Map<Long, Map<String, BigDecimal>> allocatedByType) {
+        List<ScheduleRecommendationResponse.ContestedResource> contested = new ArrayList<>();
+        List<DemandManpowerDetail> myDetails = detailsByDemand.getOrDefault(demand.getId(), List.of());
+        Set<String> myTypes = myDetails.stream().map(DemandManpowerDetail::getTestType)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        for (int j = 0; j < index; j++) {
+            TestDemand earlier = allDemands.get(j);
+            Map<String, BigDecimal> earlierAlloc = allocatedByType.getOrDefault(earlier.getId(), Map.of());
+            for (String testType : myTypes) {
+                BigDecimal taken = earlierAlloc.getOrDefault(testType, BigDecimal.ZERO);
+                if (taken.signum() > 0) {
+                    contested.add(new ScheduleRecommendationResponse.ContestedResource(
+                            earlier.getId(), earlier.getProduct(), earlier.getPriority(),
+                            j + 1, testType, taken));
+                }
+            }
+        }
+        return contested;
     }
 
     private int priority(String priority) {

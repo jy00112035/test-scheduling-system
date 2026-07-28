@@ -6,15 +6,30 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Button, Tag, Space, Modal, message, InputNumber, Descriptions, Divider,
-  DatePicker, Checkbox, Card, Select, Alert,
+  DatePicker, Checkbox, Card, Select, Alert, Spin,
 } from 'antd';
-import { CheckOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import {
+  CheckOutlined, ExclamationCircleOutlined,
+  HolderOutlined,
+} from '@ant-design/icons';
+import {
+  DndContext, closestCenter, PointerSensor, useSensor, useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext, useSortable, verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import dayjs from 'dayjs';
 import { api } from '../services/api';
 import { useUserRole } from '../context/UserRoleContext';
 import { useAuth } from '../context/AuthContext';
 import { DailyAvailabilityStatus, DailyStatusLabels } from '../types';
-import type { ScheduleRecommendationResponse } from '../types';
+import type {
+  ScheduleRecommendationResponse,
+  SchedulePreviewResponse,
+  DemandPreview,
+} from '../types';
 
 // 子组件
 import WorkbenchSummaryBar from './workbench/WorkbenchSummaryBar';
@@ -128,6 +143,12 @@ const ScheduleWorkbench: React.FC = () => {
   const [unfulfilledDetails, setUnfulfilledDetails] = useState<UnfulfilledDetail[]>([]);
   const [recommendationFulfillment, setRecommendationFulfillment] = useState<ScheduleRecommendationResponse['fulfillment']>([]);
   const [publishFailures, setPublishFailures] = useState<Array<{ demandId: number; reasonCode: string; reason: string }>>([]);
+
+  // 排班预览（两步流程）
+  const [recommendStep, setRecommendStep] = useState<1 | 2>(1);
+  const [previewData, setPreviewData] = useState<SchedulePreviewResponse | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [adjustedOrder, setAdjustedOrder] = useState<number[]>([]);
   const [refreshFailure, setRefreshFailure] = useState<string | null>(null);
   const [refreshRetryLoading, setRefreshRetryLoading] = useState(false);
 
@@ -451,9 +472,8 @@ const ScheduleWorkbench: React.FC = () => {
     }
   };
 
-  // ---- 推荐排班 ----
-  const runRecommendation = async (mode: 'FIXED_RANGE' | 'FULL_DEMAND') => {
-    if (recommendationRunRef.current !== null) return;
+  // ---- 排班预览（两步流程）----
+  const handleGoToPreview = async (mode: 'FIXED_RANGE' | 'FULL_DEMAND') => {
     const demandIds = Array.from(selectedDemandIds).sort((a, b) => a - b);
     if (demandIds.length === 0) {
       message.warning('没有待排期的需求');
@@ -463,6 +483,46 @@ const ScheduleWorkbench: React.FC = () => {
       message.warning('请选择连续排班日期范围');
       return;
     }
+    setPreviewLoading(true);
+    try {
+      const result = await api.previewScheduleDraft({
+        mode,
+        demandIds,
+        ...(mode === 'FIXED_RANGE' ? {
+          dateRange: {
+            startDate: fixedDateRange![0].format('YYYY-MM-DD'),
+            endDate: fixedDateRange![1].format('YYYY-MM-DD'),
+          },
+        } : {}),
+        fixedStaffIds: Array.from(fixedStaffIds).sort((a, b) => a - b),
+        excludedStaffIds: Array.from(excludedStaffIds).sort((a, b) => a - b),
+        includeSaturdays: mode === 'FIXED_RANGE'
+          ? fixedIncludeSaturdays : fullIncludeSaturdays,
+        includeSundays: mode === 'FIXED_RANGE'
+          ? fixedIncludeSundays : fullIncludeSundays,
+        demandOfficePreferences: Object.keys(demandOfficePreferences).length > 0
+          ? demandOfficePreferences : undefined,
+      });
+      if (!mountedRef.current) return;
+      setPreviewData(result);
+      setAdjustedOrder(result.sortOrder);
+      setRecommendStep(2);
+    } catch (error: any) {
+      message.error(error?.message || '预览排班失败');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleConfirmWithOrder = (mode: 'FIXED_RANGE' | 'FULL_DEMAND') => {
+    setRecommendStep(1);
+    runRecommendationWithOrder(mode, adjustedOrder);
+  };
+
+  const runRecommendationWithOrder = async (mode: 'FIXED_RANGE' | 'FULL_DEMAND', order: number[]) => {
+    if (recommendationRunRef.current !== null) return;
+    const demandIds = Array.from(selectedDemandIds).sort((a, b) => a - b);
+    if (demandIds.length === 0) return;
 
     const session = beginScheduleMutation();
     recommendationRunRef.current = session;
@@ -471,6 +531,7 @@ const ScheduleWorkbench: React.FC = () => {
     } else {
       setFullAllocModalOpen(false);
     }
+    setPreviewData(null);
     const stopLoading = message.loading({
       content: '正在生成推荐方案...',
       key: mode === 'FIXED_RANGE' ? 'date-rec' : 'full-alloc',
@@ -496,6 +557,7 @@ const ScheduleWorkbench: React.FC = () => {
         replaceExistingDrafts: true,
         demandOfficePreferences: Object.keys(demandOfficePreferences).length > 0
           ? demandOfficePreferences : undefined,
+        demandOrder: order,
       });
       if (!mountedRef.current) return;
       const mutationCurrent = completeScheduleMutation(session);
@@ -552,8 +614,52 @@ const ScheduleWorkbench: React.FC = () => {
     }
   };
 
-  const runDateRecommendation = () => runRecommendation('FIXED_RANGE');
-  const runFullAllocateRecommendation = () => runRecommendation('FULL_DEMAND');
+  // Sortable item component for preview step
+  const SortableDemandItem: React.FC<{
+    preview: DemandPreview;
+    index: number;
+  }> = ({ preview, index }) => {
+    const {
+      attributes, listeners, setNodeRef, transform, transition, isDragging,
+    } = useSortable({ id: preview.demandId });
+    const style: React.CSSProperties = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      padding: '8px 12px',
+      marginBottom: 6,
+      background: isDragging ? '#e6f7ff' : '#fafafa',
+      border: isDragging ? '1px solid #1890ff' : '1px solid #e8e8e8',
+      borderRadius: 6,
+      opacity: isDragging ? 0.9 : 1,
+      zIndex: isDragging ? 1000 : undefined,
+    };
+    const priorityColor = getPriorityColor(preview.priority, priorityOptions);
+    return (
+      <div ref={setNodeRef} style={style}>
+        <span {...attributes} {...listeners} style={{ cursor: 'grab', color: '#999', fontSize: 16 }}>
+          <HolderOutlined />
+        </span>
+        <Tag color="default" style={{ fontFamily: 'monospace', margin: 0 }}>
+          #{index + 1}
+        </Tag>
+        <Tag color={priorityColor} style={{ margin: 0 }}>{preview.priority || '未知'}</Tag>
+        <span style={{ fontWeight: 500, flex: 1 }}>{preview.product}</span>
+        <span style={{ color: '#888', fontSize: 12 }}>{preview.version}</span>
+        <span style={{ color: '#888', fontSize: 12 }}>
+          截止 {preview.endDate || '-'}
+        </span>
+        <span style={{ fontSize: 12 }}>
+          人力 {preview.totalManpower} 人天
+        </span>
+        {preview.estimatedFulfilled
+          ? <Tag color="success" style={{ margin: 0 }}>✅ 预计可满足</Tag>
+          : <Tag color="warning" style={{ margin: 0 }}>⚠️ 预计缺口 {preview.estimatedShortage}</Tag>}
+      </div>
+    );
+  };
 
   // ---- 冲突检测 ----
   const handleConflictCheck = () => {
@@ -1329,6 +1435,100 @@ const ScheduleWorkbench: React.FC = () => {
     );
   };
 
+  // ---- 排班预览 Step 2：可拖拽排序列表 ----
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
+  const renderSortablePreview = (_mode: 'FIXED_RANGE' | 'FULL_DEMAND') => {
+    if (!previewData || previewData.demandPreviews.length === 0) {
+      return <div style={{ textAlign: 'center', color: '#999', padding: 24 }}>暂无预览数据</div>;
+    }
+
+    const handleDragEnd = (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (over && active.id !== over.id) {
+        const oldOrder = [...adjustedOrder];
+        const oldIndex = oldOrder.indexOf(Number(active.id));
+        const newIndex = oldOrder.indexOf(Number(over.id));
+        if (oldIndex !== -1 && newIndex !== -1) {
+          const [removed] = oldOrder.splice(oldIndex, 1);
+          oldOrder.splice(newIndex, 0, removed);
+          setAdjustedOrder(oldOrder);
+        }
+      }
+    };
+
+    const orderedPreviews = adjustedOrder
+      .map(id => previewData.demandPreviews.find(p => p.demandId === id))
+      .filter(Boolean) as DemandPreview[];
+
+    // Competition warnings
+    const warnings = previewData.globalWarnings.length > 0;
+
+    return (
+      <div>
+        {warnings && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="人力竞争预警"
+            description={
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {previewData.globalWarnings.map((w, i) => (
+                  <li key={i}>
+                    <strong>{w.testType}</strong>：总需求 {w.totalRequired} 人天，
+                    可用容量 {w.totalAvailable} 人天，缺口 {w.shortage} 人天
+                    （影响 {w.affectedDemandIds.length} 个需求）
+                  </li>
+                ))}
+              </ul>
+            }
+          />
+        )}
+        <div style={{ marginBottom: 8, color: '#666', fontSize: 13 }}>
+          总人力需求 {previewData.totalDemandManpower} 人天 / 总人员容量 {previewData.totalStaffCapacity} 人天
+          {' · '}拖拽调整处理顺序，排在前面的需求优先获得人力分配
+        </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={adjustedOrder} strategy={verticalListSortingStrategy}>
+            <div style={{ maxHeight: 420, overflowY: 'auto', padding: '4px 0' }}>
+              {orderedPreviews.map((preview, index) => {
+                const hasCompetition = preview.competingDemands.length > 0;
+                return (
+                  <div key={preview.demandId}>
+                    <SortableDemandItem preview={preview} index={index} />
+                    {hasCompetition && (
+                      <div style={{
+                        margin: '0 12px 8px 40px',
+                        padding: '4px 8px',
+                        background: '#fffbe6',
+                        border: '1px solid #ffe58f',
+                        borderRadius: 4,
+                        fontSize: 11,
+                        color: '#ad6800',
+                      }}>
+                        ⚠️ {preview.competingDemands.map((cd, ci) => (
+                          <span key={ci}>
+                            {ci > 0 && '；'}{cd.reason}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </SortableContext>
+        </DndContext>
+        <div style={{ marginTop: 12, color: '#888', fontSize: 12 }}>
+          拖拽调整仅影响本次排班顺序，不会修改需求的原始优先级。
+        </div>
+      </div>
+    );
+  };
+
   // ---- 推荐弹窗：打开 ----
   const getRecommendationEligibleDemandIds = () => demands
     .filter(demand => (demand.manpowerFullySatisfied !== true
@@ -1667,10 +1867,16 @@ const ScheduleWorkbench: React.FC = () => {
 
       {/* 按指定日期排班弹窗 */}
       <Modal
-        title="按指定日期排班"
+        title={recommendStep === 1 ? '按指定日期排班' : '排班顺序预览'}
         open={dateRecModalOpen}
-        onOk={runDateRecommendation}
+        onOk={recommendStep === 1
+          ? () => handleGoToPreview('FIXED_RANGE')
+          : () => handleConfirmWithOrder('FIXED_RANGE')}
         onCancel={() => {
+          if (recommendStep === 2) {
+            setRecommendStep(1);
+            return;
+          }
           setDateRecModalOpen(false);
           setFixedDateRange(null);
           setFixedIncludeSaturdays(false);
@@ -1678,145 +1884,193 @@ const ScheduleWorkbench: React.FC = () => {
           setSelectedDemandIds(new Set());
           setFixedStaffIds(new Set());
           setExcludedStaffIds(new Set());
+          setPreviewData(null);
+          setAdjustedOrder([]);
         }}
-        okText="开始排班" cancelText="取消"
-        okButtonProps={{ disabled: selectedDemandIds.size === 0 || !fixedDateRange }}
-        width={520}
+        okText={recommendStep === 1 ? '下一步' : '确认排班'}
+        cancelText={recommendStep === 1 ? '取消' : '上一步'}
+        okButtonProps={{
+          disabled: recommendStep === 1
+            ? (selectedDemandIds.size === 0 || !fixedDateRange)
+            : previewLoading,
+        }}
+        width={recommendStep === 1 ? 520 : 680}
+        footer={recommendStep === 1 ? undefined : (_, { OkBtn, CancelBtn }) => (
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <CancelBtn />
+            <OkBtn />
+          </div>
+        )}
       >
-        <Space direction="vertical" style={{ width: '100%', marginBottom: 12 }}>
-          <Select
-            mode="multiple"
-            aria-label="固定人员"
-            placeholder="固定人员"
-            value={Array.from(fixedStaffIds)}
-            onChange={(ids: number[]) => {
-              setFixedStaffIds(new Set(ids));
-              setExcludedStaffIds(previous => new Set(
-                Array.from(previous).filter(id => !ids.includes(id)),
-              ));
-            }}
-            options={staffs.map(staff => ({ value: staff.id, label: staff.name }))}
-            style={{ width: '100%' }}
-          />
-          <Select
-            mode="multiple"
-            aria-label="排除人员"
-            placeholder="排除人员"
-            value={Array.from(excludedStaffIds)}
-            onChange={(ids: number[]) => {
-              setExcludedStaffIds(new Set(ids));
-              setFixedStaffIds(previous => new Set(
-                Array.from(previous).filter(id => !ids.includes(id)),
-              ));
-            }}
-            options={staffs.map(staff => ({ value: staff.id, label: staff.name }))}
-            style={{ width: '100%' }}
-          />
-        </Space>
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontWeight: 500, marginBottom: 8 }}>选择连续排班日期范围</div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <DatePicker.RangePicker
-              aria-label="连续排班日期范围"
-              format="YYYY-MM-DD"
-              style={{ flex: 1 }}
-              value={fixedDateRange}
-              onChange={(range) => {
-                setFixedDateRange(range?.[0] && range[1]
-                  ? [range[0], range[1]] : null);
-              }}
-            />
-            <Button
-              aria-label="选择未来 8 天连续范围"
-              onClick={() => setFixedDateRange([dayjs(), dayjs().add(7, 'day')])}
-            >未来 8 天</Button>
-          </div>
-          <div style={{ marginBottom: 8, color: '#666' }}>
-            {fixedDateRange
-              ? `${fixedDateRange[0].format('YYYY-MM-DD')} 至 ${fixedDateRange[1].format('YYYY-MM-DD')}`
-              : '尚未选择连续日期范围'}
-          </div>
-          <Space direction="vertical">
-            <Checkbox checked={fixedIncludeSaturdays}
-              onChange={(event) => setFixedIncludeSaturdays(event.target.checked)}>
-              固定范围包含周六
-            </Checkbox>
-            <Checkbox checked={fixedIncludeSundays}
-              onChange={(event) => setFixedIncludeSundays(event.target.checked)}>
-              固定范围包含周日
-            </Checkbox>
-          </Space>
-        </div>
-        <Divider style={{ margin: '12px 0' }} />
-        <div style={{ fontWeight: 500, marginBottom: 8 }}>选择待排期需求（{selectedDemandIds.size} 个已选）</div>
-        {renderDemandSelectionList()}
-        <div style={{ marginTop: 16, color: '#666', fontSize: 13 }}>
-          仅对所选日期生成排班方案。已发布排班不受影响，新排班为草稿需手动发布。
-        </div>
+        {recommendStep === 1 ? (
+          <>
+            <Space direction="vertical" style={{ width: '100%', marginBottom: 12 }}>
+              <Select
+                mode="multiple"
+                aria-label="固定人员"
+                placeholder="固定人员"
+                value={Array.from(fixedStaffIds)}
+                onChange={(ids: number[]) => {
+                  setFixedStaffIds(new Set(ids));
+                  setExcludedStaffIds(previous => new Set(
+                    Array.from(previous).filter(id => !ids.includes(id)),
+                  ));
+                }}
+                options={staffs.map(staff => ({ value: staff.id, label: staff.name }))}
+                style={{ width: '100%' }}
+              />
+              <Select
+                mode="multiple"
+                aria-label="排除人员"
+                placeholder="排除人员"
+                value={Array.from(excludedStaffIds)}
+                onChange={(ids: number[]) => {
+                  setExcludedStaffIds(new Set(ids));
+                  setFixedStaffIds(previous => new Set(
+                    Array.from(previous).filter(id => !ids.includes(id)),
+                  ));
+                }}
+                options={staffs.map(staff => ({ value: staff.id, label: staff.name }))}
+                style={{ width: '100%' }}
+              />
+            </Space>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontWeight: 500, marginBottom: 8 }}>选择连续排班日期范围</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <DatePicker.RangePicker
+                  aria-label="连续排班日期范围"
+                  format="YYYY-MM-DD"
+                  style={{ flex: 1 }}
+                  value={fixedDateRange}
+                  onChange={(range) => {
+                    setFixedDateRange(range?.[0] && range[1]
+                      ? [range[0], range[1]] : null);
+                  }}
+                />
+                <Button
+                  aria-label="选择未来 8 天连续范围"
+                  onClick={() => setFixedDateRange([dayjs(), dayjs().add(7, 'day')])}
+                >未来 8 天</Button>
+              </div>
+              <div style={{ marginBottom: 8, color: '#666' }}>
+                {fixedDateRange
+                  ? `${fixedDateRange[0].format('YYYY-MM-DD')} 至 ${fixedDateRange[1].format('YYYY-MM-DD')}`
+                  : '尚未选择连续日期范围'}
+              </div>
+              <Space direction="vertical">
+                <Checkbox checked={fixedIncludeSaturdays}
+                  onChange={(event) => setFixedIncludeSaturdays(event.target.checked)}>
+                  固定范围包含周六
+                </Checkbox>
+                <Checkbox checked={fixedIncludeSundays}
+                  onChange={(event) => setFixedIncludeSundays(event.target.checked)}>
+                  固定范围包含周日
+                </Checkbox>
+              </Space>
+            </div>
+            <Divider style={{ margin: '12px 0' }} />
+            <div style={{ fontWeight: 500, marginBottom: 8 }}>选择待排期需求（{selectedDemandIds.size} 个已选）</div>
+            {renderDemandSelectionList()}
+            <div style={{ marginTop: 16, color: '#666', fontSize: 13 }}>
+              仅对所选日期生成排班方案。已发布排班不受影响，新排班为草稿需手动发布。
+            </div>
+          </>
+        ) : (
+          <Spin spinning={previewLoading}>
+            {previewData ? renderSortablePreview('FIXED_RANGE') : null}
+          </Spin>
+        )}
       </Modal>
 
       {/* 按全部需求排班弹窗 */}
       <Modal
-        title="按全部需求排班"
+        title={recommendStep === 1 ? '按全部需求排班' : '排班顺序预览'}
         open={fullAllocModalOpen}
-        onOk={runFullAllocateRecommendation}
+        onOk={recommendStep === 1
+          ? () => handleGoToPreview('FULL_DEMAND')
+          : () => handleConfirmWithOrder('FULL_DEMAND')}
         onCancel={() => {
+          if (recommendStep === 2) {
+            setRecommendStep(1);
+            return;
+          }
           setFullAllocModalOpen(false);
           setFullIncludeSaturdays(false);
           setFullIncludeSundays(false);
           setSelectedDemandIds(new Set());
           setFixedStaffIds(new Set());
           setExcludedStaffIds(new Set());
+          setPreviewData(null);
+          setAdjustedOrder([]);
         }}
-        okText="开始排班" cancelText="取消"
-        okButtonProps={{ disabled: selectedDemandIds.size === 0 }}
-        width={520}
+        okText={recommendStep === 1 ? '下一步' : '确认排班'}
+        cancelText={recommendStep === 1 ? '取消' : '上一步'}
+        okButtonProps={{
+          disabled: recommendStep === 1
+            ? selectedDemandIds.size === 0
+            : previewLoading,
+        }}
+        width={recommendStep === 1 ? 520 : 680}
+        footer={recommendStep === 1 ? undefined : (_, { OkBtn, CancelBtn }) => (
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <CancelBtn />
+            <OkBtn />
+          </div>
+        )}
       >
-        <Space direction="vertical" style={{ width: '100%', marginBottom: 12 }}>
-          <Select
-            mode="multiple"
-            aria-label="固定人员"
-            placeholder="固定人员"
-            value={Array.from(fixedStaffIds)}
-            onChange={(ids: number[]) => {
-              setFixedStaffIds(new Set(ids));
-              setExcludedStaffIds(previous => new Set(
-                Array.from(previous).filter(id => !ids.includes(id)),
-              ));
-            }}
-            options={staffs.map(staff => ({ value: staff.id, label: staff.name }))}
-            style={{ width: '100%' }}
-          />
-          <Select
-            mode="multiple"
-            aria-label="排除人员"
-            placeholder="排除人员"
-            value={Array.from(excludedStaffIds)}
-            onChange={(ids: number[]) => {
-              setExcludedStaffIds(new Set(ids));
-              setFixedStaffIds(previous => new Set(
-                Array.from(previous).filter(id => !ids.includes(id)),
-              ));
-            }}
-            options={staffs.map(staff => ({ value: staff.id, label: staff.name }))}
-            style={{ width: '100%' }}
-          />
-        </Space>
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontWeight: 500, marginBottom: 8 }}>周末排班设置</div>
-          <Space direction="vertical">
-            <Checkbox checked={fullIncludeSaturdays}
-              onChange={(e) => setFullIncludeSaturdays(e.target.checked)}>全部需求包含周六</Checkbox>
-            <Checkbox checked={fullIncludeSundays}
-              onChange={(e) => setFullIncludeSundays(e.target.checked)}>全部需求包含周日</Checkbox>
-          </Space>
-        </div>
-        <Divider style={{ margin: '12px 0' }} />
-        <div style={{ fontWeight: 500, marginBottom: 8 }}>选择待排期需求（{selectedDemandIds.size} 个已选）</div>
-        {renderDemandSelectionList()}
-        <div style={{ marginTop: 16, color: '#666', fontSize: 13 }}>
-          将持续分配（最长90天）直到满足全部需求人力。若排班日期超出需求完成期限，将弹出预警提示。已发布排班不受影响，新排班为草稿需手动发布。
-        </div>
+        {recommendStep === 1 ? (
+          <>
+            <Space direction="vertical" style={{ width: '100%', marginBottom: 12 }}>
+              <Select
+                mode="multiple"
+                aria-label="固定人员"
+                placeholder="固定人员"
+                value={Array.from(fixedStaffIds)}
+                onChange={(ids: number[]) => {
+                  setFixedStaffIds(new Set(ids));
+                  setExcludedStaffIds(previous => new Set(
+                    Array.from(previous).filter(id => !ids.includes(id)),
+                  ));
+                }}
+                options={staffs.map(staff => ({ value: staff.id, label: staff.name }))}
+                style={{ width: '100%' }}
+              />
+              <Select
+                mode="multiple"
+                aria-label="排除人员"
+                placeholder="排除人员"
+                value={Array.from(excludedStaffIds)}
+                onChange={(ids: number[]) => {
+                  setExcludedStaffIds(new Set(ids));
+                  setFixedStaffIds(previous => new Set(
+                    Array.from(previous).filter(id => !ids.includes(id)),
+                  ));
+                }}
+                options={staffs.map(staff => ({ value: staff.id, label: staff.name }))}
+                style={{ width: '100%' }}
+              />
+            </Space>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontWeight: 500, marginBottom: 8 }}>周末排班设置</div>
+              <Space direction="vertical">
+                <Checkbox checked={fullIncludeSaturdays}
+                  onChange={(e) => setFullIncludeSaturdays(e.target.checked)}>全部需求包含周六</Checkbox>
+                <Checkbox checked={fullIncludeSundays}
+                  onChange={(e) => setFullIncludeSundays(e.target.checked)}>全部需求包含周日</Checkbox>
+              </Space>
+            </div>
+            <Divider style={{ margin: '12px 0' }} />
+            <div style={{ fontWeight: 500, marginBottom: 8 }}>选择待排期需求（{selectedDemandIds.size} 个已选）</div>
+            {renderDemandSelectionList()}
+            <div style={{ marginTop: 16, color: '#666', fontSize: 13 }}>
+              将持续分配（最长90天）直到满足全部需求人力。若排班日期超出需求完成期限，将弹出预警提示。已发布排班不受影响，新排班为草稿需手动发布。
+            </div>
+          </>
+        ) : (
+          <Spin spinning={previewLoading}>
+            {previewData ? renderSortablePreview('FULL_DEMAND') : null}
+          </Spin>
+        )}
       </Modal>
 
       {/* 风险详情弹窗 */}
