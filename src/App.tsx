@@ -31,6 +31,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { UserRoleProvider, useUserRole } from './context/UserRoleContext';
 import UserRoleSelector from './components/UserRoleSelector';
 import { api } from './services/api';
+import FeedbackFloatingButton from './components/FeedbackFloatingButton';
 
 const { Header, Sider, Content } = Layout;
 
@@ -317,6 +318,7 @@ const AppContent: React.FC = () => {
           {renderContent()}
         </Content>
       </Layout>
+      <FeedbackFloatingButton />
     </Layout>
   );
 };
