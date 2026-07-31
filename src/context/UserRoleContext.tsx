@@ -70,6 +70,7 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
       'aiRecommendSchedule',
       'manageDailyAvailability',
       'personalCenter',
+      'manageFeedback',
     ],
     testManager: [
       'viewDashboard',

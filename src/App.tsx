@@ -13,6 +13,7 @@ import {
   AuditOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  MessageOutlined,
 } from '@ant-design/icons';
 import Dashboard from './pages/Dashboard';
 import Home from './pages/Home';
@@ -32,6 +33,7 @@ import { UserRoleProvider, useUserRole } from './context/UserRoleContext';
 import UserRoleSelector from './components/UserRoleSelector';
 import { api } from './services/api';
 import FeedbackFloatingButton from './components/FeedbackFloatingButton';
+import FeedbackManagement from './pages/FeedbackManagement';
 
 const { Header, Sider, Content } = Layout;
 
@@ -149,6 +151,12 @@ const AppContent: React.FC = () => {
       permissions: ['viewBaseConfig'],
     },
     {
+      key: 'feedback-mgmt',
+      icon: <MessageOutlined />,
+      label: '反馈管理',
+      permissions: ['manageFeedback'],
+    },
+    {
       key: 'personal',
       icon: <UserOutlined />,
       label: '个人中心',
@@ -201,6 +209,8 @@ const AppContent: React.FC = () => {
         return <PersonalCenter />;
       case 'approvals':
         return <ApprovalCenter pendingRegCount={pendingRegCount} pendingDemandCount={pendingDemandCount} pendingRevisionCount={pendingRevisionCount} />;
+      case 'feedback-mgmt':
+        return <FeedbackManagement />;
       default:
         return <Home onNavigate={setSelectedKey} />;
     }
