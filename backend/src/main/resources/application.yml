@@ -46,3 +46,8 @@ logging:
   level:
     com.testscheduling: INFO
     org.hibernate.SQL: DEBUG
+
+feishu:
+  webhook:
+    url: ${FEISHU_WEBHOOK_URL:}
+    enabled: ${FEISHU_WEBHOOK_ENABLED:false}
