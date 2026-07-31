@@ -150,6 +150,7 @@ const StaffManagement: React.FC = () => {
   const [editingStaffRoles, setEditingStaffRoles] = useState<string[]>([]);
   const [form] = Form.useForm();
   const [searchText, setSearchText] = useState('');
+  const [filterTestTypes, setFilterTestTypes] = useState<string[]>([]);
   const [fieldConfigs, setFieldConfigs] = useState<FieldConfig[]>([]);
   const [importModalVisible, setImportModalVisible] = useState(false);
   const [importStep, setImportStep] = useState<1 | 2>(1);
@@ -797,10 +798,17 @@ const StaffManagement: React.FC = () => {
     }
   };
 
-  const filteredStaffs = staffs.filter(staff =>
-    staff.name.toLowerCase().includes(searchText.toLowerCase()) ||
-    staff.empNo.toLowerCase().includes(searchText.toLowerCase())
-  );
+  const testTypeOptions = useMemo(() => {
+    return getSelectOptions('testType').map(t => ({ label: t, value: t }));
+  }, [fieldConfigs]);
+
+  const filteredStaffs = staffs.filter(staff => {
+    const matchSearch = staff.name.toLowerCase().includes(searchText.toLowerCase()) ||
+      staff.empNo.toLowerCase().includes(searchText.toLowerCase());
+    const matchTestType = filterTestTypes.length === 0 ||
+      (staff.testType && filterTestTypes.includes(staff.testType));
+    return matchSearch && matchTestType;
+  });
 
   const exportStaffs = () => {
     const workbook = XLSX.utils.book_new();
@@ -983,6 +991,16 @@ const StaffManagement: React.FC = () => {
               </Button>
             </Popconfirm>
           )}
+          <Select
+            mode="multiple"
+            placeholder="测试类型筛选"
+            style={{ minWidth: 200 }}
+            value={filterTestTypes}
+            onChange={setFilterTestTypes}
+            allowClear
+            maxTagCount={1}
+            options={testTypeOptions}
+          />
           <Input.Search
             placeholder="搜索姓名或工号"
             onSearch={setSearchText}
