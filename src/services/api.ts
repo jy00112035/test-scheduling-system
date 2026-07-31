@@ -13,6 +13,11 @@ import type {
   TestDemand,
   RevisionRequest,
   RevisionDiffResponse,
+  Feedback,
+  FeedbackCreateRequest,
+  FeedbackUpdateRequest,
+  FeedbackQueryParams,
+  PageResult,
 } from '../types';
 
 export type {
@@ -546,6 +551,46 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify(request),
     });
+  }
+
+  // ===== Feedback =====
+
+  async createFeedback(request: FeedbackCreateRequest): Promise<Feedback> {
+    return this.request<Feedback>('/feedback', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async getFeedbackList(params: FeedbackQueryParams = {}): Promise<PageResult<Feedback>> {
+    const query = new URLSearchParams();
+    if (params.type) query.set('type', params.type);
+    if (params.status) query.set('status', params.status);
+    if (params.submitterId) query.set('submitterId', params.submitterId);
+    if (params.page !== undefined) query.set('page', String(params.page));
+    if (params.size !== undefined) query.set('size', String(params.size));
+    const qs = query.toString();
+    return this.request<PageResult<Feedback>>(`/feedback${qs ? '?' + qs : ''}`);
+  }
+
+  async getMyFeedback(page = 0, size = 20): Promise<PageResult<Feedback>> {
+    return this.request<PageResult<Feedback>>(`/feedback/mine?page=${page}&size=${size}`);
+  }
+
+  async updateFeedbackStatus(id: number, request: FeedbackUpdateRequest): Promise<Feedback> {
+    return this.request<Feedback>(`/feedback/${id}/status`, {
+      method: 'PUT',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async exportFeedbackList(params: FeedbackQueryParams = {}): Promise<Feedback[]> {
+    const query = new URLSearchParams();
+    if (params.type) query.set('type', params.type);
+    if (params.status) query.set('status', params.status);
+    if (params.submitterId) query.set('submitterId', params.submitterId);
+    const qs = query.toString();
+    return this.request<Feedback[]>(`/feedback/export/excel${qs ? '?' + qs : ''}`);
   }
 }
 

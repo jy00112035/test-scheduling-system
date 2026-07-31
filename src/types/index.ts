@@ -430,3 +430,48 @@ export const DailyStatusColors: Record<DailyAvailabilityStatus, string> = {
   ON_LEAVE: '#ff4d4f',
   COMPENSATORY_LEAVE: '#722ed1',
 };
+
+// ===== Feedback System =====
+
+export type FeedbackType = 'BUG' | 'FEATURE';
+export type FeedbackStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+
+export interface Feedback {
+  id: number;
+  type: FeedbackType;
+  title: string;
+  description: string;
+  submitterId: string;
+  submitterName: string;
+  status: FeedbackStatus;
+  adminNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FeedbackCreateRequest {
+  type: FeedbackType;
+  title: string;
+  description: string;
+}
+
+export interface FeedbackUpdateRequest {
+  status: FeedbackStatus;
+  adminNote?: string;
+}
+
+export interface FeedbackQueryParams {
+  type?: FeedbackType;
+  status?: FeedbackStatus;
+  submitterId?: string;
+  page?: number;
+  size?: number;
+}
+
+export interface PageResult<T> {
+  content: T[];
+  totalElements: number;
+  totalPages: number;
+  number: number;
+  size: number;
+}
