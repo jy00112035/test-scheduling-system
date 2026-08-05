@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -548,10 +549,11 @@ class ScheduleRecommendationServiceTest {
 
     @Test
     void distributeStrategySpreadsWorkAcrossStaff() {
-        // Same setup as concentrate test, but with DISTRIBUTE (default)
-        // Two staff, one day, demand needs 2.0 person-days
-        // DISTRIBUTE should split: staffA gets 100%, staffB gets 100%
-        TestDemand demand = demand();
+        // Two staff, 2-day demand needing 2.0 person-days
+        // DISTRIBUTE (default) should spread across both people:
+        //   staffA at 100% on one day, staffB at 100% on the other day
+        // Unlike CONCENTRATE which would fill staffA at 100% on both days
+        TestDemand demand = demand(LocalDate.of(2026, 7, 22), LocalDate.of(2026, 7, 23));
         DemandManpowerDetail detail = detail(demand.getId(), "功能测试 Distribute", "2.0");
         TestStaff staffA = staff("人员A Distribute", "功能测试 Distribute");
         TestStaff staffB = staff("人员B Distribute", "功能测试 Distribute");
@@ -561,7 +563,19 @@ class ScheduleRecommendationServiceTest {
         ScheduleRecommendationResponse result = service.recommend(req);
 
         assertEquals(2, result.generatedSchedules().size());
-        // Both staff should be used (one per schedule)
+        // Both schedules should be at 100%
+        assertEquals(100, result.generatedSchedules().get(0).getPercentage());
+        assertEquals(100, result.generatedSchedules().get(1).getPercentage());
+        // Both staff members must be used (different staffIds) -- this is the key
+        // difference from CONCENTRATE which would use the same staff on both days
+        Long firstStaffId = result.generatedSchedules().get(0).getStaffId();
+        Long secondStaffId = result.generatedSchedules().get(1).getStaffId();
+        assertTrue(firstStaffId.equals(staffA.getId()) || firstStaffId.equals(staffB.getId()),
+                "First schedule should be for staffA or staffB");
+        assertTrue(secondStaffId.equals(staffA.getId()) || secondStaffId.equals(staffB.getId()),
+                "Second schedule should be for staffA or staffB");
+        assertNotEquals(firstStaffId, secondStaffId,
+                "DISTRIBUTE should spread across different staff, not concentrate on one");
         assertTrue(result.fulfillment().get(0).fullySatisfied());
     }
 
