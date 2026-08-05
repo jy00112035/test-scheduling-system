@@ -6,6 +6,7 @@ import java.util.Map;
 
 public class ScheduleRecommendationRequest {
     public enum Mode { FIXED_RANGE, FULL_DEMAND }
+    public enum AllocationStrategy { CONCENTRATE, DISTRIBUTE }
 
     private Mode mode;
     private List<Long> demandIds;
@@ -17,6 +18,7 @@ public class ScheduleRecommendationRequest {
     private Boolean replaceExistingDrafts = false;
     private Map<Long, String> demandOfficePreferences;
     private List<Long> demandOrder;
+    private AllocationStrategy allocationStrategy = AllocationStrategy.DISTRIBUTE;
 
     public Mode getMode() { return mode; }
     public void setMode(Mode mode) { this.mode = mode; }
@@ -38,6 +40,8 @@ public class ScheduleRecommendationRequest {
     public void setDemandOfficePreferences(Map<Long, String> demandOfficePreferences) { this.demandOfficePreferences = demandOfficePreferences; }
     public List<Long> getDemandOrder() { return demandOrder; }
     public void setDemandOrder(List<Long> demandOrder) { this.demandOrder = demandOrder; }
+    public AllocationStrategy getAllocationStrategy() { return allocationStrategy; }
+    public void setAllocationStrategy(AllocationStrategy allocationStrategy) { this.allocationStrategy = allocationStrategy; }
 
     public record DateRange(LocalDate startDate, LocalDate endDate) { }
 }
