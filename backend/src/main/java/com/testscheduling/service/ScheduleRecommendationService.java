@@ -358,9 +358,13 @@ public class ScheduleRecommendationService {
             for (DemandSpecialModule special : demandSpecials) {
                 DemandManpowerDetail detail = demandDetails.stream().filter(d ->
                         Objects.equals(d.getTestType(), module(special, modules).getTestType())).findFirst().orElseThrow();
-                GapDraft gap = allocate(demand, detail, special,
-                        remainingSpecial(special, existing, generated), fixed, staff, familiar, users,
-                        allByStaff, statusByDate, generated, request);
+                GapDraft gap = request.getAllocationStrategy() == ScheduleRecommendationRequest.AllocationStrategy.CONCENTRATE
+                        ? allocatePersonFirst(demand, detail, special,
+                                remainingSpecial(special, existing, generated), fixed, staff, familiar, users,
+                                allByStaff, statusByDate, generated, request)
+                        : allocate(demand, detail, special,
+                                remainingSpecial(special, existing, generated), fixed, staff, familiar, users,
+                                allByStaff, statusByDate, generated, request);
                 if (gap != null) specialGapsByDemand.computeIfAbsent(demand.getId(), ignored -> new ArrayList<>()).add(gap);
             }
         }
@@ -374,8 +378,11 @@ public class ScheduleRecommendationService {
                         .map(DemandSpecialModule::getManpowerDemand).reduce(BigDecimal.ZERO, BigDecimal::add);
                 BigDecimal remaining = value(detail.getManpowerDemand()).subtract(specialTotal)
                         .subtract(allocated(detail.getId(), null, existing, generated));
-                GapDraft gap = allocate(demand, detail, null, remaining, fixed, staff, familiar,
-                        users, allByStaff, statusByDate, generated, request);
+                GapDraft gap = request.getAllocationStrategy() == ScheduleRecommendationRequest.AllocationStrategy.CONCENTRATE
+                        ? allocatePersonFirst(demand, detail, null, remaining, fixed, staff, familiar,
+                                users, allByStaff, statusByDate, generated, request)
+                        : allocate(demand, detail, null, remaining, fixed, staff, familiar,
+                                users, allByStaff, statusByDate, generated, request);
                 if (gap != null) generalGapsByDemand.computeIfAbsent(demand.getId(), ignored -> new ArrayList<>()).add(gap);
             }
         }
@@ -457,6 +464,54 @@ public class ScheduleRecommendationService {
         return new GapDraft(detail == null ? null : detail.getId(), special == null ? null : special.getId(), remaining, code);
     }
 
+    /**
+     * Person-first allocation: iterate candidates (outer) then dates (inner).
+     * Prefers staff with highest existing load, filling each to capacity before moving on.
+     */
+    private GapDraft allocatePersonFirst(TestDemand demand, DemandManpowerDetail detail,
+            DemandSpecialModule special, BigDecimal remaining, Set<Long> fixed, List<TestStaff> staff,
+            Set<TestStaffModuleId> familiar, Map<String, User> users, Map<Long, List<Schedule>> allByStaff,
+            Map<String, StaffDailyStatus> statuses, List<Schedule> generated,
+            ScheduleRecommendationRequest request) {
+        if (remaining.signum() <= 0) return null;
+        List<LocalDate> allocationDates = dates(demand, request);
+        if (allocationDates.isEmpty()) {
+            return new GapDraft(detail == null ? null : detail.getId(), special == null ? null : special.getId(),
+                    remaining, "INSUFFICIENT_CAPACITY");
+        }
+        String preferredLocation = request.getDemandOfficePreferences() != null
+                ? request.getDemandOfficePreferences().get(demand.getId()) : null;
+        boolean sawQualified = false;
+        boolean sawDevice = false;
+        List<TestStaff> candidates = staff.stream().filter(candidate ->
+                        special == null ? Objects.equals(candidate.getTestType(), detail.getTestType())
+                                : familiar.contains(new TestStaffModuleId(candidate.getId(), special.getModuleId())))
+                .filter(candidate -> confidentiallyEligible(demand, candidate, users))
+                .sorted(candidateComparatorConcentrate(fixed, allocationDates, allByStaff, statuses, preferredLocation))
+                .toList();
+        sawQualified |= !candidates.isEmpty();
+        for (TestStaff candidate : candidates) {
+            if (remaining.compareTo(STEP) < 0) break;
+            for (LocalDate date : allocationDates) {
+                if (remaining.compareTo(STEP) < 0) break;
+                if (available(candidate, date, allByStaff, statuses) < STEP_PERCENT) continue;
+                if (deviceFull(demand, date, candidate, generated, allByStaff)) { sawDevice = true; continue; }
+                int allocation = Math.min(100, Math.min(available(candidate, date, allByStaff, statuses),
+                        remaining.multiply(BigDecimal.valueOf(100)).setScale(0, RoundingMode.FLOOR).intValue()));
+                allocation = allocation - allocation % STEP_PERCENT;
+                if (allocation < STEP_PERCENT) continue;
+                Schedule schedule = draft(demand, detail, special, candidate, date, allocation);
+                generated.add(schedule);
+                allByStaff.computeIfAbsent(candidate.getId(), ignored -> new ArrayList<>()).add(schedule);
+                remaining = remaining.subtract(BigDecimal.valueOf(allocation)
+                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.UNNECESSARY));
+            }
+        }
+        if (remaining.signum() <= 0) return null;
+        String code = sawDevice ? "DEVICE_LIMIT_REACHED" : sawQualified ? "INSUFFICIENT_CAPACITY" : "NO_QUALIFIED_STAFF";
+        return new GapDraft(detail == null ? null : detail.getId(), special == null ? null : special.getId(), remaining, code);
+    }
+
     /** Fixed staff IDs affect priority only after all eligibility filters pass.
      *  Office location preference: staff with same office location get priority. */
     private Comparator<TestStaff> candidateComparator(Set<Long> fixed, List<LocalDate> dates,
@@ -471,6 +526,18 @@ public class ScheduleRecommendationService {
                 .thenComparing((left, right) -> Integer.compare(
                         available(right, date, schedules, statuses), available(left, date, schedules, statuses)))
                 .thenComparing((left, right) -> Integer.compare(load(left, dates, schedules), load(right, dates, schedules)))
+                .thenComparing(TestStaff::getId, Comparator.nullsLast(Comparator.naturalOrder()));
+    }
+
+    /** Concentrate strategy: prefer staff with highest existing load to fill them first. */
+    private Comparator<TestStaff> candidateComparatorConcentrate(Set<Long> fixed,
+            List<LocalDate> dates, Map<Long, List<Schedule>> schedules,
+            Map<String, StaffDailyStatus> statuses, String preferredLocation) {
+        return Comparator.comparing((TestStaff staff) -> !fixed.contains(staff.getId()))
+                .thenComparing((TestStaff staff) -> preferredLocation != null
+                        && !Objects.equals(staff.getOfficeLocation(), preferredLocation))
+                .thenComparing((left, right) -> Integer.compare(
+                        load(right, dates, schedules), load(left, dates, schedules)))
                 .thenComparing(TestStaff::getId, Comparator.nullsLast(Comparator.naturalOrder()));
     }
 
