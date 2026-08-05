@@ -54,7 +54,6 @@ const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
     totalSchedules: number;
   }>({ pastSchedules: [], totalSchedules: 0 });
 
-  const DEFAULT_TEST_TYPES = ['功能测试', '性能测试', '接口测试', '安全测试', '兼容性测试'];
   const nextTempId = useRef(-1);
 
   const handleAddTestType = () => {
@@ -197,8 +196,8 @@ const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
     }
   };
 
-  const existingTypes = manpowerDetails.map(d => d.testType).filter(Boolean);
-  const testTypeOptions = [...new Set([...DEFAULT_TEST_TYPES, ...existingTypes])];
+  const submittedTypes = manpowerDetails.filter(d => !(d as any).isNew).map(d => d.testType).filter(Boolean);
+  const testTypeOptions = getSelectOptions('testType').filter(opt => !submittedTypes.includes(opt));
 
   const columns = [
     {
