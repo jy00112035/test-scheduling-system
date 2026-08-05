@@ -31,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -564,16 +565,16 @@ class ScheduleRecommendationServiceTest {
         TestStaff wrongRole = staff("错误角色人员 Task7", "角色过滤 Task7");
         userWithRoles(wrongRole.getEmpNo(), "测试组长");
 
-        // Scenario 4: no User association → excluded
-        staff("无用户人员 Task7", "角色过滤 Task7");
+        // Scenario 4: no User association → excluded (delete auto-created User)
+        TestStaff noUser = staff("无用户人员 Task7", "角色过滤 Task7");
+        userRepository.findByUsername(noUser.getEmpNo()).ifPresent(userRepository::delete);
 
-        // Scenario 5: User with no roles → excluded
+        // Scenario 5: User with no roles → excluded (update auto-created User to have no roles)
         TestStaff noRoles = staff("无角色人员 Task7", "角色过滤 Task7");
-        User noRoleUser = new User();
-        noRoleUser.setUsername(noRoles.getEmpNo());
-        noRoleUser.setPassword("encoded");
-        noRoleUser.setConfidentialClearance(false);
-        userRepository.save(noRoleUser);
+        userRepository.findByUsername(noRoles.getEmpNo()).ifPresent(u -> {
+            u.setRoles(new ArrayList<>(List.of()));
+            userRepository.save(u);
+        });
 
         ScheduleRecommendationResponse result = service.recommend(request(demand.getId()));
 
@@ -685,23 +686,39 @@ class ScheduleRecommendationServiceTest {
         staff.setTestType(testType);
         staff.setStatus(TestStaff.StaffStatus.active);
         staff.setCurrentCoefficient(BigDecimal.ONE);
-        return staffRepository.save(staff);
+        TestStaff saved = staffRepository.save(staff);
+        // Create matching User with test executor role for role-based filtering
+        User u = new User();
+        u.setUsername(saved.getEmpNo());
+        u.setPassword("encoded");
+        u.setRoles(new ArrayList<>(List.of("测试执行人员")));
+        userRepository.save(u);
+        return saved;
     }
 
     private User user(String username, boolean clearance) {
-        User user = new User();
-        user.setUsername(username);
-        user.setPassword("encoded");
+        User user = userRepository.findByUsername(username)
+                .orElseGet(() -> {
+                    User u = new User();
+                    u.setUsername(username);
+                    u.setPassword("encoded");
+                    return u;
+                });
         user.setConfidentialClearance(clearance);
+        user.setRoles(new ArrayList<>(List.of("测试执行人员")));
         return userRepository.save(user);
     }
 
     private User userWithRoles(String username, String... roles) {
-        User user = new User();
-        user.setUsername(username);
-        user.setPassword("encoded");
-        user.setConfidentialClearance(false);
-        user.setRoles(List.of(roles));
+        User user = userRepository.findByUsername(username)
+                .orElseGet(() -> {
+                    User u = new User();
+                    u.setUsername(username);
+                    u.setPassword("encoded");
+                    u.setConfidentialClearance(false);
+                    return u;
+                });
+        user.setRoles(new ArrayList<>(List.of(roles)));
         return userRepository.save(user);
     }
 
