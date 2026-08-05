@@ -638,6 +638,7 @@ const TestDemandList: React.FC = () => {
         onCancel={() => setShowLeaveConfirm(false)}
         closable
         maskClosable
+        zIndex={1050}
         footer={
           <Space>
             <Button danger onClick={handleLeaveWithoutSaving}>
