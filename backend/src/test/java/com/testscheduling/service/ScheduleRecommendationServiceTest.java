@@ -500,6 +500,71 @@ class ScheduleRecommendationServiceTest {
         assertEquals(0, highResult.generatedSchedules().size());
     }
 
+    @Test
+    void concentrateStrategyFillsOnePersonBeforeMovingToNext() {
+        // Two staff in same testType, demand needs 2.0 person-days (2 days × 100%)
+        // Concentrate should fill staff A to 100% on both days, not split between A and B
+        TestDemand demand = demand(LocalDate.of(2026, 7, 22), LocalDate.of(2026, 7, 23));
+        DemandManpowerDetail detail = detail(demand.getId(), "功能测试 Concentrate", "2.0");
+        TestStaff staffA = staff("人员A Concentrate", "功能测试 Concentrate");
+        TestStaff staffB = staff("人员B Concentrate", "功能测试 Concentrate");
+
+        ScheduleRecommendationRequest req = request(demand.getId());
+        req.setAllocationStrategy(ScheduleRecommendationRequest.AllocationStrategy.CONCENTRATE);
+        ScheduleRecommendationResponse result = service.recommend(req);
+
+        assertEquals(2, result.generatedSchedules().size());
+        // Both schedules should be for the same staff member (staffA, lower ID = first in sorted order)
+        Long firstStaffId = result.generatedSchedules().get(0).getStaffId();
+        assertEquals(firstStaffId, result.generatedSchedules().get(1).getStaffId());
+        assertEquals(100, result.generatedSchedules().get(0).getPercentage());
+        assertEquals(100, result.generatedSchedules().get(1).getPercentage());
+        assertTrue(result.fulfillment().get(0).fullySatisfied());
+    }
+
+    @Test
+    void concentrateStrategyCombinesMultipleDemandsToFillOnePerson() {
+        // Two demands, each needing 1.0 person-day, same testType
+        // One day only, so only 100% capacity per person
+        // Concentrate should fill staffA with 100% from demandA, then demandB goes to staffB
+        TestDemand demandA = demand();
+        DemandManpowerDetail detailA = detail(demandA.getId(), "功能测试 MultiDemand", "1.0");
+        TestDemand demandB = demand();
+        DemandManpowerDetail detailB = detail(demandB.getId(), "功能测试 MultiDemand", "1.0");
+        TestStaff staffA = staff("人员A MultiDemand", "功能测试 MultiDemand");
+        TestStaff staffB = staff("人员B MultiDemand", "功能测试 MultiDemand");
+
+        ScheduleRecommendationRequest req = request(demandA.getId(), demandB.getId());
+        req.setAllocationStrategy(ScheduleRecommendationRequest.AllocationStrategy.CONCENTRATE);
+        ScheduleRecommendationResponse result = service.recommend(req);
+
+        assertEquals(2, result.generatedSchedules().size());
+        // staffA gets first demand (100%), staffB gets second demand
+        assertEquals(staffA.getId(), result.generatedSchedules().get(0).getStaffId());
+        assertEquals(staffB.getId(), result.generatedSchedules().get(1).getStaffId());
+        assertTrue(result.fulfillment().get(0).fullySatisfied());
+        assertTrue(result.fulfillment().get(1).fullySatisfied());
+    }
+
+    @Test
+    void distributeStrategySpreadsWorkAcrossStaff() {
+        // Same setup as concentrate test, but with DISTRIBUTE (default)
+        // Two staff, one day, demand needs 2.0 person-days
+        // DISTRIBUTE should split: staffA gets 100%, staffB gets 100%
+        TestDemand demand = demand();
+        DemandManpowerDetail detail = detail(demand.getId(), "功能测试 Distribute", "2.0");
+        TestStaff staffA = staff("人员A Distribute", "功能测试 Distribute");
+        TestStaff staffB = staff("人员B Distribute", "功能测试 Distribute");
+
+        ScheduleRecommendationRequest req = request(demand.getId());
+        // Default is DISTRIBUTE, no need to set explicitly
+        ScheduleRecommendationResponse result = service.recommend(req);
+
+        assertEquals(2, result.generatedSchedules().size());
+        // Both staff should be used (one per schedule)
+        assertTrue(result.fulfillment().get(0).fullySatisfied());
+    }
+
     private void dailyStatus(TestStaff staff, Double percentage) {
         StaffDailyStatus status = new StaffDailyStatus();
         status.setStaffId(staff.getId());
