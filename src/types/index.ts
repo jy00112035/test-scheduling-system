@@ -179,6 +179,7 @@ export interface ScheduleRecommendationRequest {
   replaceExistingDrafts?: boolean;
   demandOfficePreferences?: Record<number, string>;
   demandOrder?: number[];
+  allocationStrategy?: 'CONCENTRATE' | 'DISTRIBUTE';
 }
 
 export interface ScheduleRecommendationResponse {

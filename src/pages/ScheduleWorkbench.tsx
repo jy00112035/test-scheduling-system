@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Button, Tag, Space, Modal, message, InputNumber, Descriptions, Divider,
-  DatePicker, Checkbox, Card, Select, Alert, Spin,
+  DatePicker, Checkbox, Card, Select, Alert, Spin, Radio,
 } from 'antd';
 import {
   CheckOutlined, ExclamationCircleOutlined,
@@ -131,6 +131,7 @@ const ScheduleWorkbench: React.FC = () => {
   const [dateRecModalOpen, setDateRecModalOpen] = useState(false);
   const [fixedDateRange, setFixedDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
   const [fullAllocModalOpen, setFullAllocModalOpen] = useState(false);
+  const [allocationStrategy, setAllocationStrategy] = useState<'CONCENTRATE' | 'DISTRIBUTE'>('DISTRIBUTE');
   const [fixedIncludeSaturdays, setFixedIncludeSaturdays] = useState(false);
   const [fixedIncludeSundays, setFixedIncludeSundays] = useState(false);
   const [fullIncludeSaturdays, setFullIncludeSaturdays] = useState(false);
@@ -488,6 +489,7 @@ const ScheduleWorkbench: React.FC = () => {
       const result = await api.previewScheduleDraft({
         mode,
         demandIds,
+        allocationStrategy,
         ...(mode === 'FIXED_RANGE' ? {
           dateRange: {
             startDate: fixedDateRange![0].format('YYYY-MM-DD'),
@@ -542,6 +544,7 @@ const ScheduleWorkbench: React.FC = () => {
       const result = await api.recommendScheduleDraft({
         mode,
         demandIds,
+        allocationStrategy,
         ...(mode === 'FIXED_RANGE' ? {
           dateRange: {
             startDate: fixedDateRange![0].format('YYYY-MM-DD'),
@@ -1886,6 +1889,7 @@ const ScheduleWorkbench: React.FC = () => {
           setExcludedStaffIds(new Set());
           setPreviewData(null);
           setAdjustedOrder([]);
+          setAllocationStrategy('DISTRIBUTE');
         }}
         okText={recommendStep === 1 ? '下一步' : '确认排班'}
         cancelText={recommendStep === 1 ? '取消' : '上一步'}
@@ -1934,6 +1938,19 @@ const ScheduleWorkbench: React.FC = () => {
                 style={{ width: '100%' }}
               />
             </Space>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontWeight: 500, marginBottom: 8 }}>分配策略</div>
+              <Radio.Group
+                value={allocationStrategy}
+                onChange={(e) => setAllocationStrategy(e.target.value)}
+              >
+                <Space direction="vertical">
+                  <Radio value="CONCENTRATE">集中优先 — 优先保证一人任务 100%</Radio>
+                  <Radio value="DISTRIBUTE">均匀分配 — 将工作量分散给所有可用人员</Radio>
+                </Space>
+              </Radio.Group>
+            </div>
+            <Divider style={{ margin: '12px 0' }} />
             <div style={{ marginBottom: 12 }}>
               <div style={{ fontWeight: 500, marginBottom: 8 }}>选择连续排班日期范围</div>
               <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
@@ -2002,6 +2019,7 @@ const ScheduleWorkbench: React.FC = () => {
           setExcludedStaffIds(new Set());
           setPreviewData(null);
           setAdjustedOrder([]);
+          setAllocationStrategy('DISTRIBUTE');
         }}
         okText={recommendStep === 1 ? '下一步' : '确认排班'}
         cancelText={recommendStep === 1 ? '取消' : '上一步'}
@@ -2050,6 +2068,19 @@ const ScheduleWorkbench: React.FC = () => {
                 style={{ width: '100%' }}
               />
             </Space>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontWeight: 500, marginBottom: 8 }}>分配策略</div>
+              <Radio.Group
+                value={allocationStrategy}
+                onChange={(e) => setAllocationStrategy(e.target.value)}
+              >
+                <Space direction="vertical">
+                  <Radio value="CONCENTRATE">集中优先 — 优先保证一人任务 100%</Radio>
+                  <Radio value="DISTRIBUTE">均匀分配 — 将工作量分散给所有可用人员</Radio>
+                </Space>
+              </Radio.Group>
+            </div>
+            <Divider style={{ margin: '12px 0' }} />
             <div style={{ marginBottom: 12 }}>
               <div style={{ fontWeight: 500, marginBottom: 8 }}>周末排班设置</div>
               <Space direction="vertical">
