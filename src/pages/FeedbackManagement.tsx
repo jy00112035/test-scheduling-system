@@ -6,6 +6,7 @@ import { DownloadOutlined, SearchOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import dayjs from 'dayjs';
 import { api } from '../services/api';
+import { useUserRole } from '../context/UserRoleContext';
 import type { Feedback, FeedbackStatus, FeedbackType, FeedbackQueryParams } from '../types';
 
 const { TextArea } = Input;
@@ -36,6 +37,8 @@ const TYPE_COLORS: Record<FeedbackType, string> = {
 };
 
 const FeedbackManagement: React.FC = () => {
+  const { hasPermission } = useUserRole();
+  const isAdmin = hasPermission('manageFeedback');
   const [data, setData] = useState<Feedback[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -59,14 +62,19 @@ const FeedbackManagement: React.FC = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const params: FeedbackQueryParams = {
-        type: filterType,
-        status: filterStatus,
-        submitterId: filterSubmitter || undefined,
-        page,
-        size: pageSize,
-      };
-      const result = await api.getFeedbackList(params);
+      let result;
+      if (isAdmin) {
+        const params: FeedbackQueryParams = {
+          type: filterType,
+          status: filterStatus,
+          submitterId: filterSubmitter || undefined,
+          page,
+          size: pageSize,
+        };
+        result = await api.getFeedbackList(params);
+      } else {
+        result = await api.getMyFeedback(page, pageSize);
+      }
       setData(result.content);
       setTotal(result.totalElements);
     } catch (error: unknown) {
@@ -74,7 +82,7 @@ const FeedbackManagement: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [filterType, filterStatus, filterSubmitter, page, pageSize]);
+  }, [isAdmin, filterType, filterStatus, filterSubmitter, page, pageSize]);
 
   useEffect(() => {
     fetchData();
@@ -203,9 +211,11 @@ const FeedbackManagement: React.FC = () => {
           <Button size="small" onClick={() => handleViewDetail(record)}>
             详情
           </Button>
-          <Button size="small" type="primary" onClick={() => handleOpenStatusModal(record)}>
-            处理
-          </Button>
+          {isAdmin && (
+            <Button size="small" type="primary" onClick={() => handleOpenStatusModal(record)}>
+              处理
+            </Button>
+          )}
         </Space>
       ),
     },
@@ -215,39 +225,41 @@ const FeedbackManagement: React.FC = () => {
     <div style={{ padding: 24 }}>
       <h2 style={{ marginBottom: 16 }}>反馈管理</h2>
 
-      {/* Filters */}
-      <Space style={{ marginBottom: 16 }} wrap>
-        <Select
-          placeholder="类型筛选"
-          style={{ width: 140 }}
-          allowClear
-          value={filterType}
-          onChange={(v) => { setFilterType(v); setPage(0); }}
-          options={[
-            { label: 'Bug', value: 'BUG' },
-            { label: '功能需求', value: 'FEATURE' },
-          ]}
-        />
-        <Select
-          placeholder="状态筛选"
-          style={{ width: 140 }}
-          allowClear
-          value={filterStatus}
-          onChange={(v) => { setFilterStatus(v); setPage(0); }}
-          options={Object.entries(STATUS_LABELS).map(([value, label]) => ({ label, value }))}
-        />
-        <Input
-          placeholder="提交人搜索"
-          style={{ width: 160 }}
-          value={filterSubmitter}
-          onChange={(e) => setFilterSubmitter(e.target.value)}
-          onPressEnter={handleSearch}
-          suffix={<SearchOutlined />}
-        />
-        <Button onClick={handleSearch}>搜索</Button>
-        <Button onClick={handleResetFilters}>重置</Button>
-        <Button icon={<DownloadOutlined />} onClick={handleExport}>导出 Excel</Button>
-      </Space>
+      {/* Filters - admin only */}
+      {isAdmin && (
+        <Space style={{ marginBottom: 16 }} wrap>
+          <Select
+            placeholder="类型筛选"
+            style={{ width: 140 }}
+            allowClear
+            value={filterType}
+            onChange={(v) => { setFilterType(v); setPage(0); }}
+            options={[
+              { label: 'Bug', value: 'BUG' },
+              { label: '功能需求', value: 'FEATURE' },
+            ]}
+          />
+          <Select
+            placeholder="状态筛选"
+            style={{ width: 140 }}
+            allowClear
+            value={filterStatus}
+            onChange={(v) => { setFilterStatus(v); setPage(0); }}
+            options={Object.entries(STATUS_LABELS).map(([value, label]) => ({ label, value }))}
+          />
+          <Input
+            placeholder="提交人搜索"
+            style={{ width: 160 }}
+            value={filterSubmitter}
+            onChange={(e) => setFilterSubmitter(e.target.value)}
+            onPressEnter={handleSearch}
+            suffix={<SearchOutlined />}
+          />
+          <Button onClick={handleSearch}>搜索</Button>
+          <Button onClick={handleResetFilters}>重置</Button>
+          <Button icon={<DownloadOutlined />} onClick={handleExport}>导出 Excel</Button>
+        </Space>
+      )}
 
       {/* Table */}
       <Table

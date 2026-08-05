@@ -120,7 +120,8 @@ public class TestDemandService {
         }
         return roles.stream().noneMatch(role ->
             "admin".equals(role) || "projectManager".equals(role)
-                || "resourceManager".equals(role) || "fieldAdmin".equals(role));
+                || "resourceManager".equals(role) || "fieldAdmin".equals(role)
+                || "testManager".equals(role));
     }
 
     @Transactional(readOnly = true)
@@ -462,6 +463,14 @@ public class TestDemandService {
         RevisionDiffResponse.DemandSnapshot originalSnapshot = new RevisionDiffResponse.DemandSnapshot();
         originalSnapshot.setStartDate(demand.getStartDate());
         originalSnapshot.setEndDate(demand.getEndDate());
+        originalSnapshot.setProduct(demand.getProduct());
+        originalSnapshot.setVersion(demand.getVersion());
+        originalSnapshot.setVersionType(demand.getVersionType());
+        originalSnapshot.setVersionPhase(demand.getVersionPhase());
+        originalSnapshot.setPriority(demand.getPriority());
+        originalSnapshot.setConfidential(demand.getConfidential());
+        originalSnapshot.setDescription(demand.getDescription());
+        originalSnapshot.setTestDeviceCount(demand.getTestDeviceCount());
         originalSnapshot.setManpowerDemand(demand.getManpowerDemand());
         originalSnapshot.setManpowerDetails(new ArrayList<>(demand.getManpowerDetails()));
         originalSnapshot.setSpecialModuleDemands(new ArrayList<>(demand.getSpecialModuleDemands()));
@@ -475,6 +484,14 @@ public class TestDemandService {
         demand.setStartDate(request.getStartDate());
         demand.setEndDate(request.getEndDate());
         demand.setManpowerDemand(computeTotalManpower(requestedDetails));
+        if (request.getProduct() != null) demand.setProduct(request.getProduct());
+        if (request.getVersion() != null) demand.setVersion(request.getVersion());
+        if (request.getVersionType() != null) demand.setVersionType(request.getVersionType());
+        if (request.getVersionPhase() != null) demand.setVersionPhase(request.getVersionPhase());
+        if (request.getPriority() != null) demand.setPriority(request.getPriority());
+        if (request.getConfidential() != null) demand.setConfidential(request.getConfidential());
+        if (request.getDescription() != null) demand.setDescription(request.getDescription());
+        if (request.getTestDeviceCount() != null) demand.setTestDeviceCount(request.getTestDeviceCount());
 
         // 6. 更新人力详情和专项模块
         replaceDetails(id, requestedDetails);
@@ -792,6 +809,10 @@ public class TestDemandService {
         List<DemandManpowerDetail> details = detailRepository.findByDemandId(demand.getId());
         List<DemandSpecialModule> specials = specialModuleService.findByDemandId(demand.getId());
         applyEnrichment(demand, details, specials, fulfillmentService.calculate(demand));
+        if (demand.getSubmittedBy() != null) {
+            testStaffRepository.findByEmpNo(demand.getSubmittedBy())
+                .ifPresent(staff -> demand.setSubmittedByName(staff.getName()));
+        }
         return demand;
     }
 
@@ -810,11 +831,31 @@ public class TestDemandService {
             specialModuleService.findByDemandIds(demandIds);
         Map<Long, DemandFulfillmentResponse> fulfillmentByDemand = fulfillmentService.calculateBatch(
             demands, detailsByDemand, specialsByDemand);
-        demands.forEach(demand -> applyEnrichment(
-            demand,
-            detailsByDemand.getOrDefault(demand.getId(), List.of()),
-            specialsByDemand.getOrDefault(demand.getId(), List.of()),
-            fulfillmentByDemand.get(demand.getId())));
+
+        // 批量查询提交人姓名
+        List<String> empNos = demands.stream()
+            .map(TestDemand::getSubmittedBy)
+            .filter(Objects::nonNull)
+            .distinct()
+            .toList();
+        Map<String, String> empNameMap = empNos.isEmpty()
+            ? Map.of()
+            : testStaffRepository.findByEmpNoIn(empNos).stream()
+                .collect(Collectors.toMap(
+                    com.testscheduling.entity.TestStaff::getEmpNo,
+                    com.testscheduling.entity.TestStaff::getName,
+                    (a, b) -> a));
+
+        demands.forEach(demand -> {
+            applyEnrichment(
+                demand,
+                detailsByDemand.getOrDefault(demand.getId(), List.of()),
+                specialsByDemand.getOrDefault(demand.getId(), List.of()),
+                fulfillmentByDemand.get(demand.getId()));
+            if (demand.getSubmittedBy() != null) {
+                demand.setSubmittedByName(empNameMap.getOrDefault(demand.getSubmittedBy(), demand.getSubmittedBy()));
+            }
+        });
         return demands;
     }
 

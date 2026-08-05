@@ -70,6 +70,7 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
       'aiRecommendSchedule',
       'manageDailyAvailability',
       'personalCenter',
+      'viewFeedback',
       'manageFeedback',
     ],
     testManager: [
@@ -84,6 +85,7 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
       'viewReports',
       'adjustTestCycle',
       'personalCenter',
+      'viewFeedback',
     ],
     resourceManager: [
       'viewDashboard',
@@ -100,6 +102,7 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
       'manageStaff',
       'approveRegistration',  // 资源经理可审批所有测试执行人员
       'personalCenter',
+      'viewFeedback',
     ],
     projectManager: [
       'viewDashboard',
@@ -117,10 +120,12 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
       'approveRegistration',
       'adjustTestCycle',
       'personalCenter',
+      'viewFeedback',
     ],
     testExecutor: [
       'viewTaskKanban',
       'personalCenter',
+      'viewFeedback',
     ],
     fieldAdmin: [
       'viewDashboard',
@@ -141,6 +146,7 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
       'manageBaseFields',
       'viewBaseConfig',
       'manageDailyAvailability',
+      'viewFeedback',
     ],
     testLead: [
       'viewDashboard',
@@ -155,6 +161,7 @@ export const UserRoleProvider: React.FC<UserRoleProviderProps> = ({ children }) 
       'manageStaff',
       'approveRegistration',  // 新增：测试组长可以审批测试执行人员
       'personalCenter',
+      'viewFeedback',
     ],
   };
 

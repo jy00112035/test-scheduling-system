@@ -21,6 +21,7 @@ export interface TestDemand {
   description: string;
   status: 'submitted' | 'pending' | 'scheduled' | 'completed' | 'rejected' | 'revision_pending';
   submittedBy: string;
+  submittedByName?: string;
   createdAt: string;
   confidential?: boolean;
   priority?: string;
@@ -35,6 +36,14 @@ export interface TestDemand {
 export interface RevisionRequest {
   startDate?: string;
   endDate?: string;
+  product?: string;
+  version?: string;
+  versionType?: string;
+  versionPhase?: string;
+  priority?: string;
+  confidential?: boolean;
+  description?: string;
+  testDeviceCount?: number;
   manpowerDetails?: DemandManpowerDetail[];
   specialModuleDemands?: DemandSpecialModule[];
 }

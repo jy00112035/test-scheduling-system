@@ -41,6 +41,7 @@ const TestDemandList: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('all');
   const [productFilter, setProductFilter] = useState<string>('all');
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
+  const [refreshKey, setRefreshKey] = useState(0);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [editingDemand, setEditingDemand] = useState<TestDemand | null>(null);
   const [loading, setLoading] = useState(false);
@@ -62,18 +63,13 @@ const TestDemandList: React.FC = () => {
     message: string;
   } | null>(null);
 
-  useEffect(() => {
-    fetchDemands();
-    fetchStatusCounts();
-  }, []);
-
-  const fetchDemands = async (status?: string, product?: string, search?: string) => {
+  const fetchDemands = useCallback(async () => {
     setLoading(true);
     try {
       const data = await api.getDemands({
-        status: status || (activeTab !== 'all' ? activeTab : undefined),
-        product: product || (productFilter !== 'all' ? productFilter : undefined),
-        search: search || (searchText || undefined),
+        status: activeTab !== 'all' ? activeTab : undefined,
+        product: productFilter !== 'all' ? productFilter : undefined,
+        search: searchText || undefined,
       });
       setDemands(data);
     } catch (error: any) {
@@ -81,7 +77,7 @@ const TestDemandList: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab, productFilter, searchText]);
 
   const fetchStatusCounts = async () => {
     try {
@@ -92,22 +88,27 @@ const TestDemandList: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    fetchStatusCounts();
+  }, []);
+
+  useEffect(() => {
+    fetchDemands();
+  }, [activeTab, productFilter, searchText, fetchDemands, refreshKey]);
+
   const handleTabChange = (key: string) => {
     setActiveTab(key);
     setPagination(prev => ({ ...prev, current: 1 }));
-    fetchDemands(key === 'all' ? undefined : key, productFilter !== 'all' ? productFilter : undefined, searchText || undefined);
   };
 
   const handleSearch = (value: string) => {
     setSearchText(value);
     setPagination(prev => ({ ...prev, current: 1 }));
-    fetchDemands(activeTab !== 'all' ? activeTab : undefined, productFilter !== 'all' ? productFilter : undefined, value || undefined);
   };
 
   const handleProductChange = (value: string) => {
     setProductFilter(value);
     setPagination(prev => ({ ...prev, current: 1 }));
-    fetchDemands(activeTab !== 'all' ? activeTab : undefined, value !== 'all' ? value : undefined, searchText || undefined);
   };
 
   const getStatusColor = (status: string): TagProps['color'] => {
@@ -146,15 +147,6 @@ const TestDemandList: React.FC = () => {
       default:
         return status;
     }
-  };
-
-  const getVersionTypeColor = (type: string) => {
-    const colorMap: Record<string, string> = {
-      '维护': '#1890ff',
-      '在研': '#52c41a',
-      '升级': '#faad14',
-    };
-    return colorMap[type] || '#1890ff';
   };
 
   const handleDelete = async (id: string) => {
@@ -216,8 +208,8 @@ const TestDemandList: React.FC = () => {
     setShowSubmitModal(false);
     setEditingDemand(null);
     setFormDirty(false);
-    fetchDemands();
     fetchStatusCounts();
+    setRefreshKey(k => k + 1);
     message.success('操作成功！');
   };
 
@@ -229,8 +221,8 @@ const TestDemandList: React.FC = () => {
   const handleRevisionSuccess = () => {
     setShowRevisionModal(false);
     setRevisingDemand(null);
-    fetchDemands();
     fetchStatusCounts();
+    setRefreshKey(k => k + 1);
     message.success('需求变更已提交审批');
   };
 
@@ -281,18 +273,19 @@ const TestDemandList: React.FC = () => {
 
       const rows = filtered.map((d: TestDemand) => ({
         '产品': d.product,
-        '版本号': d.version || '',
-        '版本类型': d.versionType || '',
         '版本阶段': d.versionPhase || '',
         '优先级': d.priority || '',
         '保密项目': d.confidential ? '是' : '否',
         '测试周期开始': dayjs(d.startDate).format('YYYY-MM-DD'),
         '测试周期结束': dayjs(d.endDate).format('YYYY-MM-DD'),
         '人力需求(人/天)': d.manpowerDemand,
+        '技术一组(人/天)': d.manpowerSummary?.find(s => s.testType === '技术一组')?.totalManpower ?? '',
+        '技术二组(人/天)': d.manpowerSummary?.find(s => s.testType === '技术二组')?.totalManpower ?? '',
+        '技术三组(人/天)': d.manpowerSummary?.find(s => s.testType === '技术三组')?.totalManpower ?? '',
+        '功能集组(人/天)': d.manpowerSummary?.find(s => s.testType === '功能集组')?.totalManpower ?? '',
         '样机数量': d.testDeviceCount ?? '',
         '状态': d.status,
-        '提交人': d.submittedBy || '',
-        '提交时间': dayjs(d.createdAt).format('YYYY-MM-DD'),
+        '提交人': d.submittedByName || d.submittedBy || '',
         '备注': d.description || '',
       }));
 
@@ -301,10 +294,10 @@ const TestDemandList: React.FC = () => {
       XLSX.utils.book_append_sheet(workbook, worksheet, '测试需求');
 
       const colWidths = [
-        { wch: 20 }, { wch: 12 }, { wch: 10 }, { wch: 10 },
-        { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 14 },
-        { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
-        { wch: 14 }, { wch: 30 },
+        { wch: 20 }, { wch: 10 }, { wch: 8 }, { wch: 8 },
+        { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
+        { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 10 },
+        { wch: 10 }, { wch: 10 }, { wch: 30 },
       ];
       worksheet['!cols'] = colWidths;
 
@@ -325,27 +318,6 @@ const TestDemandList: React.FC = () => {
       key: 'product',
       width: 150,
       fixed: 'left' as const,
-    },
-    {
-      title: '版本号',
-      dataIndex: 'version',
-      key: 'version',
-      width: 100,
-      render: (text: string) => text || '-',
-    },
-    {
-      title: '版本类型',
-      dataIndex: 'versionType',
-      key: 'versionType',
-      width: 100,
-      render: (type: string) => (
-        <span style={{
-          color: getVersionTypeColor(type),
-          fontWeight: 500,
-        }}>
-          {type}
-        </span>
-      ),
     },
     {
       title: '版本阶段',
@@ -390,6 +362,46 @@ const TestDemandList: React.FC = () => {
       render: (value: number) => `${value} 人/天`,
     },
     {
+      title: '技术一组',
+      key: 'group_tech1',
+      width: 90,
+      align: 'right' as const,
+      render: (_: any, record: TestDemand) => {
+        const summary = record.manpowerSummary?.find(s => s.testType === '技术一组');
+        return summary ? `${summary.totalManpower} 人/天` : '-';
+      },
+    },
+    {
+      title: '技术二组',
+      key: 'group_tech2',
+      width: 90,
+      align: 'right' as const,
+      render: (_: any, record: TestDemand) => {
+        const summary = record.manpowerSummary?.find(s => s.testType === '技术二组');
+        return summary ? `${summary.totalManpower} 人/天` : '-';
+      },
+    },
+    {
+      title: '技术三组',
+      key: 'group_tech3',
+      width: 90,
+      align: 'right' as const,
+      render: (_: any, record: TestDemand) => {
+        const summary = record.manpowerSummary?.find(s => s.testType === '技术三组');
+        return summary ? `${summary.totalManpower} 人/天` : '-';
+      },
+    },
+    {
+      title: '功能集组',
+      key: 'group_func',
+      width: 90,
+      align: 'right' as const,
+      render: (_: any, record: TestDemand) => {
+        const summary = record.manpowerSummary?.find(s => s.testType === '功能集组');
+        return summary ? `${summary.totalManpower} 人/天` : '-';
+      },
+    },
+    {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
@@ -402,16 +414,10 @@ const TestDemandList: React.FC = () => {
     },
     {
       title: '提交人',
-      dataIndex: 'submittedBy',
-      key: 'submittedBy',
+      dataIndex: 'submittedByName',
+      key: 'submittedByName',
       width: 100,
-    },
-    {
-      title: '提交时间',
-      dataIndex: 'createdAt',
-      key: 'createdAt',
-      width: 110,
-      render: (date: string) => dayjs(date).format('YYYY-MM-DD'),
+      render: (text: string, record: TestDemand) => text || record.submittedBy || '-',
     },
     {
       title: '操作',

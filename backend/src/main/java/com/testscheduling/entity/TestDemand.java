@@ -69,6 +69,9 @@ public class TestDemand {
     @Transient
     private Boolean requiresHistoricalClassification;
 
+    @Transient
+    private String submittedByName;
+
     @Column(columnDefinition = "TEXT", name = "revision_original_snapshot")
     private String revisionOriginalSnapshot;
 

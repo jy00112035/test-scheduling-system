@@ -16,6 +16,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
+import com.testscheduling.repository.TestStaffRepository;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -28,13 +30,19 @@ public class FeedbackService {
     @Autowired
     private FeishuWebhookService feishuWebhookService;
 
+    @Autowired
+    private TestStaffRepository testStaffRepository;
+
     public FeedbackResponse create(String username, List<String> roles, FeedbackCreateRequest request) {
         Feedback feedback = new Feedback();
         feedback.setType(request.getType());
         feedback.setTitle(request.getTitle());
         feedback.setDescription(request.getDescription());
         feedback.setSubmitterId(username);
-        feedback.setSubmitterName(username);
+        feedback.setSubmitterName(
+            testStaffRepository.findByEmpNo(username)
+                .map(staff -> staff.getName())
+                .orElse(username));
         feedback.setStatus("PENDING");
 
         Feedback saved = feedbackRepository.save(feedback);

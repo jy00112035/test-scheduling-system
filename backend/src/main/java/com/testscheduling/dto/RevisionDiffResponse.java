@@ -30,6 +30,14 @@ public class RevisionDiffResponse {
     public static class DemandSnapshot {
         private LocalDateTime startDate;
         private LocalDateTime endDate;
+        private String product;
+        private String version;
+        private String versionType;
+        private String versionPhase;
+        private String priority;
+        private Boolean confidential;
+        private String description;
+        private Integer testDeviceCount;
         private BigDecimal manpowerDemand;
         private List<DemandManpowerDetail> manpowerDetails;
         private List<DemandSpecialModule> specialModuleDemands;

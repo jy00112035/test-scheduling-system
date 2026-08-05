@@ -3,6 +3,9 @@ import {
   Form,
   DatePicker,
   InputNumber,
+  Input,
+  Select,
+  Switch,
   Button,
   Space,
   message,
@@ -14,9 +17,20 @@ import {
 } from 'antd';
 import dayjs from 'dayjs';
 import { TestDemand, DemandManpowerDetail, RevisionRequest } from '../types';
+
+interface FieldConfig {
+  id: number;
+  fieldName: string;
+  fieldType: 'select' | 'input' | 'textArea';
+  options: string;
+  description: string;
+  required: boolean;
+  sortOrder: number;
+}
 import { api } from '../services/api';
 
 const { RangePicker } = DatePicker;
+const { TextArea } = Input;
 
 interface DemandRevisionFormProps {
   demand: TestDemand;
@@ -32,10 +46,19 @@ const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [manpowerDetails, setManpowerDetails] = useState<DemandManpowerDetail[]>([]);
+  const [fieldConfigs, setFieldConfigs] = useState<FieldConfig[]>([]);
   const [scheduleInfo, setScheduleInfo] = useState<{
     pastSchedules: Array<{ testType: string; usedManpower: number }>;
     totalSchedules: number;
   }>({ pastSchedules: [], totalSchedules: 0 });
+
+  const getSelectOptions = (fieldName: string) => {
+    const config = fieldConfigs.find(c => c.fieldName === fieldName);
+    if (config && config.options) {
+      return config.options.split(',').filter(o => o.trim());
+    }
+    return [];
+  };
 
   const loadDemandDetails = useCallback(async () => {
     try {
@@ -74,6 +97,14 @@ const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
       // 设置表单初始值
       form.setFieldsValue({
         dateRange: [dayjs(demandDetail.startDate), dayjs(demandDetail.endDate)],
+        product: demandDetail.product,
+        version: demandDetail.version,
+        versionType: demandDetail.versionType,
+        versionPhase: demandDetail.versionPhase,
+        priority: demandDetail.priority,
+        confidential: demandDetail.confidential ?? false,
+        description: demandDetail.description,
+        testDeviceCount: demandDetail.testDeviceCount,
       });
     } catch (error: any) {
       message.error(error.message || '获取需求详情失败');
@@ -82,6 +113,7 @@ const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
 
   useEffect(() => {
     loadDemandDetails();
+    api.getFieldConfigs().then(setFieldConfigs).catch(() => {});
   }, [loadDemandDetails]);
 
   const getUsedManpower = (testType: string): number => {
@@ -103,6 +135,14 @@ const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
       const request: RevisionRequest = {
         startDate: startDate.format('YYYY-MM-DDTHH:mm:ss'),
         endDate: endDate.format('YYYY-MM-DDTHH:mm:ss'),
+        product: values.product,
+        version: values.version,
+        versionType: values.versionType,
+        versionPhase: values.versionPhase,
+        priority: values.priority,
+        confidential: values.confidential,
+        description: values.description,
+        testDeviceCount: values.testDeviceCount,
         manpowerDetails: updatedDetails,
       };
 
@@ -172,7 +212,7 @@ const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
         message="需求变更说明"
         description={
           <ul style={{ margin: 0, paddingLeft: 20 }}>
-            <li>只能修改测试周期和人力需求配额</li>
+            <li>可修改产品信息、测试周期、人力需求等所有字段</li>
             <li>已排班的人力（无论过去未来）系统自动保护，不能修改</li>
             <li>缩短周期时，周期外的未来排班将自动删除</li>
             <li>减少人力时，超额的未来排班将自动删除（按时间从后往前）</li>
@@ -185,14 +225,50 @@ const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
       />
 
       <Descriptions column={2} bordered size="small" style={{ marginBottom: 16 }}>
-        <Descriptions.Item label="产品">{demand.product}</Descriptions.Item>
-        <Descriptions.Item label="版本">{demand.version || '-'}</Descriptions.Item>
-        <Descriptions.Item label="版本类型">{demand.versionType}</Descriptions.Item>
         <Descriptions.Item label="当前状态">
           <Tag color="blue">{demand.status === 'pending' ? '待排期' : '已排期'}</Tag>
         </Descriptions.Item>
         <Descriptions.Item label="已排班数量">{scheduleInfo.totalSchedules} 条</Descriptions.Item>
       </Descriptions>
+
+      <Card title="基本信息" style={{ marginBottom: 16 }}>
+        <Form.Item name="product" label="产品" rules={[{ required: true, message: '请输入产品名称' }]}>
+          <Input />
+        </Form.Item>
+        <Form.Item name="version" label="版本号">
+          <Input />
+        </Form.Item>
+        <Form.Item name="versionType" label="版本类型" rules={[{ required: true, message: '请选择版本类型' }]}>
+          <Select placeholder="请选择版本类型">
+            {getSelectOptions('versionType').map(opt => (
+              <Select.Option key={opt} value={opt}>{opt}</Select.Option>
+            ))}
+          </Select>
+        </Form.Item>
+        <Form.Item name="versionPhase" label="版本阶段">
+          <Select placeholder="请选择版本阶段" allowClear>
+            {getSelectOptions('versionPhase').map(opt => (
+              <Select.Option key={opt} value={opt}>{opt}</Select.Option>
+            ))}
+          </Select>
+        </Form.Item>
+        <Form.Item name="priority" label="优先级">
+          <Select placeholder="请选择优先级" allowClear>
+            {getSelectOptions('priority').map(opt => (
+              <Select.Option key={opt} value={opt}>{opt}</Select.Option>
+            ))}
+          </Select>
+        </Form.Item>
+        <Form.Item name="confidential" label="保密项目" valuePropName="checked">
+          <Switch />
+        </Form.Item>
+        <Form.Item name="testDeviceCount" label="样机数量">
+          <InputNumber min={0} style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item name="description" label="备注">
+          <TextArea rows={3} />
+        </Form.Item>
+      </Card>
 
       <Card title="测试周期" style={{ marginBottom: 16 }}>
         <Form.Item

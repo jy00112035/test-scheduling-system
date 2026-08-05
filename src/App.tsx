@@ -154,7 +154,7 @@ const AppContent: React.FC = () => {
       key: 'feedback-mgmt',
       icon: <MessageOutlined />,
       label: '反馈管理',
-      permissions: ['manageFeedback'],
+      permissions: ['viewFeedback'],
     },
     {
       key: 'personal',
