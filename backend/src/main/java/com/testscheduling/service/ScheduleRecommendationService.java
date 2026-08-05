@@ -193,6 +193,16 @@ public class ScheduleRecommendationService {
                 .sorted(Comparator.comparing(TestStaff::getId, Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
 
+        // 加载 User 用于角色过滤
+        {
+            List<String> roleFilterUsernames = staff.stream().map(TestStaff::getEmpNo)
+                    .filter(Objects::nonNull).distinct().sorted().toList();
+            Map<String, User> roleFilterUsers = fetchChunks(roleFilterUsernames, userRepository::findByUsernameIn)
+                    .stream().collect(Collectors.toMap(User::getUsername, Function.identity()));
+            // 仅保留角色为"测试执行人员"的人员
+            staff = filterByTestExecutorRole(staff, roleFilterUsers);
+        }
+
         // Calculate total capacity by test type
         Map<String, BigDecimal> poolByType = new HashMap<>();
         Map<String, Integer> headcountByType = new HashMap<>();
@@ -325,14 +335,18 @@ public class ScheduleRecommendationService {
                 .sorted(Comparator.comparing(TestStaff::getId, Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
         Map<Long, TestStaff> staffById = staff.stream().collect(Collectors.toMap(TestStaff::getId, Function.identity()));
-        List<Long> lockedStaffIds = new ArrayList<>(staffById.keySet());
-        Set<TestStaffModuleId> familiar = fetchChunks(lockedStaffIds,
-                staffModuleRepository::findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc)
-                .stream().map(TestStaffModule::getId).collect(Collectors.toSet());
+        List<Long> lockedStaffIds;
         List<String> usernames = staff.stream().map(TestStaff::getEmpNo)
                 .filter(Objects::nonNull).distinct().sorted().toList();
         Map<String, User> users = fetchChunks(usernames, userRepository::findByUsernameIn).stream()
                 .collect(Collectors.toMap(User::getUsername, Function.identity()));
+        // 仅保留角色为"测试执行人员"的人员（多角色排除）
+        staff = filterByTestExecutorRole(staff, users);
+        staffById = staff.stream().collect(Collectors.toMap(TestStaff::getId, Function.identity()));
+        lockedStaffIds = new ArrayList<>(staffById.keySet());
+        Set<TestStaffModuleId> familiar = fetchChunks(lockedStaffIds,
+                staffModuleRepository::findByIdStaffIdInOrderByIdStaffIdAscIdModuleIdAsc)
+                .stream().map(TestStaffModule::getId).collect(Collectors.toSet());
         DateBounds bounds = bounds(request, demands);
         Map<Long, List<Schedule>> allByStaff = new HashMap<>();
         if (bounds.start != null) {
@@ -825,4 +839,13 @@ public class ScheduleRecommendationService {
     private BusinessException error(String code, String message) { return new BusinessException(code, message); }
     private record DateBounds(LocalDate start, LocalDate end) { }
     private record GapDraft(Long detailId, Long specialId, BigDecimal shortage, String code) { }
+
+    private List<TestStaff> filterByTestExecutorRole(List<TestStaff> staff, Map<String, User> users) {
+        return staff.stream().filter(s -> {
+            User user = users.get(s.getEmpNo());
+            if (user == null || user.getRoles() == null) return false;
+            List<String> roles = user.getRoles();
+            return roles.size() == 1 && "测试执行人员".equals(roles.get(0));
+        }).toList();
+    }
 }
