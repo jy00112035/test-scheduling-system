@@ -359,7 +359,7 @@ const TestDemandList: React.FC = () => {
       key: 'manpowerDemand',
       width: 100,
       align: 'right' as const,
-      render: (value: number) => `${value} 人/天`,
+      render: (value: number) => value ?? '-',
     },
     {
       title: '技术一组',
@@ -368,7 +368,7 @@ const TestDemandList: React.FC = () => {
       align: 'right' as const,
       render: (_: any, record: TestDemand) => {
         const summary = record.manpowerSummary?.find(s => s.testType === '技术一组');
-        return summary ? `${summary.totalManpower} 人/天` : '-';
+        return summary ? summary.totalManpower : '-';
       },
     },
     {
@@ -378,7 +378,7 @@ const TestDemandList: React.FC = () => {
       align: 'right' as const,
       render: (_: any, record: TestDemand) => {
         const summary = record.manpowerSummary?.find(s => s.testType === '技术二组');
-        return summary ? `${summary.totalManpower} 人/天` : '-';
+        return summary ? summary.totalManpower : '-';
       },
     },
     {
@@ -388,7 +388,7 @@ const TestDemandList: React.FC = () => {
       align: 'right' as const,
       render: (_: any, record: TestDemand) => {
         const summary = record.manpowerSummary?.find(s => s.testType === '技术三组');
-        return summary ? `${summary.totalManpower} 人/天` : '-';
+        return summary ? summary.totalManpower : '-';
       },
     },
     {
@@ -398,7 +398,7 @@ const TestDemandList: React.FC = () => {
       align: 'right' as const,
       render: (_: any, record: TestDemand) => {
         const summary = record.manpowerSummary?.find(s => s.testType === '功能集组');
-        return summary ? `${summary.totalManpower} 人/天` : '-';
+        return summary ? summary.totalManpower : '-';
       },
     },
     {
