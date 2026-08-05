@@ -98,6 +98,7 @@ const TestDemandList: React.FC = () => {
 
   const handleTabChange = (key: string) => {
     setActiveTab(key);
+    setProductFilter('all');
     setPagination(prev => ({ ...prev, current: 1 }));
   };
 
