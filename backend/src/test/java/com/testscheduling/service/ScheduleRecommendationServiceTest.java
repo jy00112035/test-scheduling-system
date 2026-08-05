@@ -548,6 +548,43 @@ class ScheduleRecommendationServiceTest {
     }
 
     @Test
+    void filtersStaffByExactTestExecutorRole() {
+        TestDemand demand = demand();
+        detail(demand.getId(), "角色过滤 Task7", "3.0");
+
+        // Scenario 1: exact "测试执行人员" role → included
+        TestStaff exactRole = staff("精确角色人员 Task7", "角色过滤 Task7");
+        userWithRoles(exactRole.getEmpNo(), "测试执行人员");
+
+        // Scenario 2: "测试执行人员" + "测试组长" → excluded (multi-role)
+        TestStaff multiRole = staff("多角色人员 Task7", "角色过滤 Task7");
+        userWithRoles(multiRole.getEmpNo(), "测试执行人员", "测试组长");
+
+        // Scenario 3: "测试组长" only → excluded (wrong single role)
+        TestStaff wrongRole = staff("错误角色人员 Task7", "角色过滤 Task7");
+        userWithRoles(wrongRole.getEmpNo(), "测试组长");
+
+        // Scenario 4: no User association → excluded
+        staff("无用户人员 Task7", "角色过滤 Task7");
+
+        // Scenario 5: User with no roles → excluded
+        TestStaff noRoles = staff("无角色人员 Task7", "角色过滤 Task7");
+        User noRoleUser = new User();
+        noRoleUser.setUsername(noRoles.getEmpNo());
+        noRoleUser.setPassword("encoded");
+        noRoleUser.setConfidentialClearance(false);
+        userRepository.save(noRoleUser);
+
+        ScheduleRecommendationResponse result = service.recommend(request(demand.getId()));
+
+        // Only exactRole should be allocated; others are filtered out by role
+        assertEquals(1, result.generatedSchedules().size());
+        assertEquals(exactRole.getId(), result.generatedSchedules().get(0).getStaffId());
+        // Demand is 3.0 person-days but only 1 qualified staff (100% = 1.0 person-day)
+        assertEquals("INSUFFICIENT_CAPACITY", result.fulfillment().get(0).generalGaps().get(0).reasonCode());
+    }
+
+    @Test
     void distributeStrategySpreadsWorkAcrossStaff() {
         // Two staff, 2-day demand needing 2.0 person-days
         // DISTRIBUTE (default) should spread across both people:
@@ -656,6 +693,15 @@ class ScheduleRecommendationServiceTest {
         user.setUsername(username);
         user.setPassword("encoded");
         user.setConfidentialClearance(clearance);
+        return userRepository.save(user);
+    }
+
+    private User userWithRoles(String username, String... roles) {
+        User user = new User();
+        user.setUsername(username);
+        user.setPassword("encoded");
+        user.setConfidentialClearance(false);
+        user.setRoles(List.of(roles));
         return userRepository.save(user);
     }
 
