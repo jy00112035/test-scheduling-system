@@ -845,7 +845,7 @@ public class ScheduleRecommendationService {
             User user = users.get(s.getEmpNo());
             if (user == null || user.getRoles() == null) return false;
             List<String> roles = user.getRoles();
-            return roles.size() == 1 && "测试执行人员".equals(roles.get(0));
+            return roles.size() == 1 && "testExecutor".equals(roles.get(0));
         }).toList();
     }
 }

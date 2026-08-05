@@ -553,17 +553,17 @@ class ScheduleRecommendationServiceTest {
         TestDemand demand = demand();
         detail(demand.getId(), "角色过滤 Task7", "3.0");
 
-        // Scenario 1: exact "测试执行人员" role → included
+        // Scenario 1: exact "testExecutor" role → included
         TestStaff exactRole = staff("精确角色人员 Task7", "角色过滤 Task7");
-        userWithRoles(exactRole.getEmpNo(), "测试执行人员");
+        userWithRoles(exactRole.getEmpNo(), "testExecutor");
 
-        // Scenario 2: "测试执行人员" + "测试组长" → excluded (multi-role)
+        // Scenario 2: "testExecutor" + "testLead" → excluded (multi-role)
         TestStaff multiRole = staff("多角色人员 Task7", "角色过滤 Task7");
-        userWithRoles(multiRole.getEmpNo(), "测试执行人员", "测试组长");
+        userWithRoles(multiRole.getEmpNo(), "testExecutor", "testLead");
 
-        // Scenario 3: "测试组长" only → excluded (wrong single role)
+        // Scenario 3: "testLead" only → excluded (wrong single role)
         TestStaff wrongRole = staff("错误角色人员 Task7", "角色过滤 Task7");
-        userWithRoles(wrongRole.getEmpNo(), "测试组长");
+        userWithRoles(wrongRole.getEmpNo(), "testLead");
 
         // Scenario 4: no User association → excluded (delete auto-created User)
         TestStaff noUser = staff("无用户人员 Task7", "角色过滤 Task7");
@@ -691,7 +691,7 @@ class ScheduleRecommendationServiceTest {
         User u = new User();
         u.setUsername(saved.getEmpNo());
         u.setPassword("encoded");
-        u.setRoles(new ArrayList<>(List.of("测试执行人员")));
+        u.setRoles(new ArrayList<>(List.of("testExecutor")));
         userRepository.save(u);
         return saved;
     }
@@ -705,7 +705,7 @@ class ScheduleRecommendationServiceTest {
                     return u;
                 });
         user.setConfidentialClearance(clearance);
-        user.setRoles(new ArrayList<>(List.of("测试执行人员")));
+        user.setRoles(new ArrayList<>(List.of("testExecutor")));
         return userRepository.save(user);
     }
 
