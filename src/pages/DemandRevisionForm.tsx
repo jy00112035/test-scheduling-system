@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Form,
   DatePicker,
@@ -14,7 +14,9 @@ import {
   Descriptions,
   Table,
   Tag,
+  Popconfirm,
 } from 'antd';
+import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { TestDemand, DemandManpowerDetail, RevisionRequest } from '../types';
 
@@ -51,6 +53,30 @@ const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
     pastSchedules: Array<{ testType: string; usedManpower: number }>;
     totalSchedules: number;
   }>({ pastSchedules: [], totalSchedules: 0 });
+
+  const DEFAULT_TEST_TYPES = ['功能测试', '性能测试', '接口测试', '安全测试', '兼容性测试'];
+  const nextTempId = useRef(-1);
+
+  const handleAddTestType = () => {
+    const newDetail = {
+      id: nextTempId.current--,
+      demandId: Number(demand.id),
+      testType: '',
+      manpowerDemand: 0,
+      isNew: true,
+    } as any;
+    setManpowerDetails(prev => [...prev, newDetail]);
+  };
+
+  const handleDeleteTestType = (id: number) => {
+    setManpowerDetails(prev => prev.filter(d => d.id !== id));
+  };
+
+  const handleTestTypeChange = (id: number, value: string) => {
+    setManpowerDetails(prev =>
+      prev.map(d => (d.id === id ? { ...d, testType: value } : d))
+    );
+  };
 
   const getSelectOptions = (fieldName: string) => {
     const config = fieldConfigs.find(c => c.fieldName === fieldName);
@@ -126,11 +152,27 @@ const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
     try {
       const [startDate, endDate] = values.dateRange;
 
-      // 构建人力详情列表
-      const updatedDetails: DemandManpowerDetail[] = manpowerDetails.map(detail => ({
-        ...detail,
-        manpowerDemand: values[`manpower_${detail.id}`] ?? detail.manpowerDemand,
-      }));
+      // 校验新增行
+      const newRows = manpowerDetails.filter(d => (d as any).isNew);
+      for (const row of newRows) {
+        if (!row.testType) {
+          message.warning('请选择或输入测试类型');
+          return;
+        }
+        const val = values[`manpower_${row.id}`];
+        if (val == null || val <= 0) {
+          message.warning(`请为「${row.testType}」输入人力配额`);
+          return;
+        }
+      }
+
+      // 构建人力详情列表（过滤掉空行）
+      const updatedDetails: DemandManpowerDetail[] = manpowerDetails
+        .filter(d => !((d as any).isNew) || d.testType)
+        .map(detail => ({
+          ...detail,
+          manpowerDemand: values[`manpower_${detail.id}`] ?? detail.manpowerDemand,
+        }));
 
       const request: RevisionRequest = {
         startDate: startDate.format('YYYY-MM-DDTHH:mm:ss'),
@@ -155,22 +197,44 @@ const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
     }
   };
 
+  const existingTypes = manpowerDetails.map(d => d.testType).filter(Boolean);
+  const testTypeOptions = [...new Set([...DEFAULT_TEST_TYPES, ...existingTypes])];
+
   const columns = [
     {
       title: '测试类型',
       dataIndex: 'testType',
       key: 'testType',
+      render: (value: string, record: DemandManpowerDetail) => {
+        if ((record as any).isNew) {
+          return (
+            <Select
+              showSearch
+              mode="tags"
+              maxCount={1}
+              placeholder="选择或输入测试类型"
+              value={value ? [value] : []}
+              onChange={(vals: string[]) => handleTestTypeChange(record.id!, vals[vals.length - 1] || '')}
+              style={{ width: '100%' }}
+              options={testTypeOptions.map(t => ({ label: t, value: t }))}
+            />
+          );
+        }
+        return value;
+      },
     },
     {
       title: '当前配额（人天）',
       dataIndex: 'manpowerDemand',
       key: 'manpowerDemand',
-      render: (value: number) => `${value} 人天`,
+      render: (value: number, record: DemandManpowerDetail) =>
+        (record as any).isNew ? '-' : `${value} 人天`,
     },
     {
       title: '已使用（过去排班）',
       key: 'usedManpower',
       render: (_: any, record: DemandManpowerDetail) => {
+        if ((record as any).isNew) return '-';
         const used = getUsedManpower(record.testType);
         return `${used.toFixed(1)} 人天`;
       },
@@ -203,6 +267,17 @@ const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
           />
         </Form.Item>
       ),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 60,
+      render: (_: any, record: DemandManpowerDetail) =>
+        (record as any).isNew ? (
+          <Popconfirm title="确认删除？" onConfirm={() => handleDeleteTestType(record.id!)}>
+            <Button type="link" danger icon={<DeleteOutlined />} size="small" />
+          </Popconfirm>
+        ) : null,
     },
   ];
 
@@ -283,7 +358,15 @@ const DemandRevisionForm: React.FC<DemandRevisionFormProps> = ({
         </Form.Item>
       </Card>
 
-      <Card title="人力需求配额" style={{ marginBottom: 16 }}>
+      <Card
+        title="人力需求配额"
+        style={{ marginBottom: 16 }}
+        extra={
+          <Button type="dashed" icon={<PlusOutlined />} onClick={handleAddTestType}>
+            新增测试类型
+          </Button>
+        }
+      >
         <Table
           columns={columns}
           dataSource={manpowerDetails}
