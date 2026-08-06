@@ -527,29 +527,38 @@ public class ScheduleRecommendationService {
     }
 
     /** Fixed staff IDs affect priority only after all eligibility filters pass.
-     *  Office location preference: staff with same office location get priority. */
+     *  Office location preference: staff with same office location get priority.
+     *  Per-date availability: staff with partial assignments today (less remaining)
+     *  are filled first before completely idle staff; staff already at full capacity
+     *  today are deprioritized to avoid wasted comparisons. */
     private Comparator<TestStaff> candidateComparator(Set<Long> fixed, List<LocalDate> dates,
             LocalDate date, Map<Long, List<Schedule>> schedules, Map<String, StaffDailyStatus> statuses,
             String preferredLocation) {
         return Comparator.comparing((TestStaff staff) -> !fixed.contains(staff.getId()))
                 .thenComparing((TestStaff staff) -> preferredLocation != null
                         && !Objects.equals(staff.getOfficeLocation(), preferredLocation))
+                .thenComparing((TestStaff staff) ->
+                        available(staff, date, schedules, statuses) < STEP_PERCENT ? 1 : 0)
+                .thenComparing((left, right) -> Integer.compare(
+                        available(left, date, schedules, statuses), available(right, date, schedules, statuses)))
                 .thenComparing((left, right) -> Integer.compare(
                         periodRemaining(right, dates, schedules, statuses),
                         periodRemaining(left, dates, schedules, statuses)))
-                .thenComparing((left, right) -> Integer.compare(
-                        available(right, date, schedules, statuses), available(left, date, schedules, statuses)))
                 .thenComparing((left, right) -> Integer.compare(load(left, dates, schedules), load(right, dates, schedules)))
                 .thenComparing(TestStaff::getId, Comparator.nullsLast(Comparator.naturalOrder()));
     }
 
-    /** Concentrate strategy: prefer staff with highest existing load to fill them first. */
+    /** Concentrate strategy: prefer staff with highest existing load and least remaining
+     *  period capacity to fill partially-booked staff first. */
     private Comparator<TestStaff> candidateComparatorConcentrate(Set<Long> fixed,
             List<LocalDate> dates, Map<Long, List<Schedule>> schedules,
             Map<String, StaffDailyStatus> statuses, String preferredLocation) {
         return Comparator.comparing((TestStaff staff) -> !fixed.contains(staff.getId()))
                 .thenComparing((TestStaff staff) -> preferredLocation != null
                         && !Objects.equals(staff.getOfficeLocation(), preferredLocation))
+                .thenComparing((left, right) -> Integer.compare(
+                        periodRemaining(left, dates, schedules, statuses),
+                        periodRemaining(right, dates, schedules, statuses)))
                 .thenComparing((left, right) -> Integer.compare(
                         load(right, dates, schedules), load(left, dates, schedules)))
                 .thenComparing(TestStaff::getId, Comparator.nullsLast(Comparator.naturalOrder()));
