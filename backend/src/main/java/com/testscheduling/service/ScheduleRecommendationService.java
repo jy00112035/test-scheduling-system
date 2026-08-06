@@ -461,7 +461,25 @@ public class ScheduleRecommendationService {
                     if (deviceFull(demand, date, candidate, generated, allByStaff)) { sawDevice = true; continue; }
                     chosen = candidate; break;
                 }
-                if (chosen == null) break;
+                if (chosen == null) {
+                    // --- 诊断日志：记录 break 原因 ---
+                    long skipAvail = 0, skipDevice = 0, passThrough = 0;
+                    for (TestStaff candidate : candidates) {
+                        if (available(candidate, date, allByStaff, statuses) < STEP_PERCENT)
+                            skipAvail++;
+                        else if (deviceFull(demand, date, candidate, generated, allByStaff))
+                            skipDevice++;
+                        else
+                            passThrough++;
+                    }
+                    System.out.printf("[ALLOCATE-DIAG] demand=%d(%s) detail=%d date=%s remaining=%s candidates=%d skipAvail=%d skipDevice=%d pass=%d%n",
+                            demand.getId(), demand.getProduct(),
+                            detail != null ? detail.getId() : -1,
+                            date, remaining.toPlainString(),
+                            candidates.size(), skipAvail, skipDevice, passThrough);
+                    // --- 诊断日志结束 ---
+                    break;
+                }
                 int allocation = Math.min(100, Math.min(available(chosen, date, allByStaff, statuses),
                         remaining.multiply(BigDecimal.valueOf(100)).setScale(0, RoundingMode.FLOOR).intValue()));
                 allocation = allocation - allocation % STEP_PERCENT;
